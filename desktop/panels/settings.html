@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' fonts.googleapis.com fonts.gstatic.com">
+  <title>AQRTI Settings</title>
+  <link rel="stylesheet" href="panel-common.css">
+</head>
+<body>
+
+<div class="titlebar">
+  <span class="titlebar-title">⚙ Settings Center</span>
+  <button class="titlebar-close" onclick="window.close()">✕</button>
+</div>
+
+<div class="content">
+
+  <!-- Directories -->
+  <div class="card">
+    <div class="card-title">Storage Locations</div>
+
+    <div class="row">
+      <label>Data Directory</label>
+      <input type="text" id="dataDir" placeholder="Default: %APPDATA%\AQRTI\data">
+      <button class="btn btn-ghost" onclick="browse('dataDir')">Browse</button>
+    </div>
+    <div class="row">
+      <label>Backup Directory</label>
+      <input type="text" id="backupDir" placeholder="Default: data/backups">
+      <button class="btn btn-ghost" onclick="browse('backupDir')">Browse</button>
+    </div>
+    <div class="row">
+      <label>Model Storage</label>
+      <input type="text" id="modelDir" placeholder="Default: data/models">
+      <button class="btn btn-ghost" onclick="browse('modelDir')">Browse</button>
+    </div>
+    <div class="row">
+      <label>Vault Location</label>
+      <input type="text" id="vaultDir" placeholder="Default: data/vault">
+      <button class="btn btn-ghost" onclick="browse('vaultDir')">Browse</button>
+    </div>
+  </div>
+
+  <!-- Data Retention -->
+  <div class="card">
+    <div class="card-title">Data Retention</div>
+
+    <div class="row">
+      <label>Keep news articles (days)</label>
+      <input type="number" id="retainNewsdays" min="7" max="365" style="max-width:100px">
+    </div>
+    <div class="row">
+      <label>Keep predictions (days)</label>
+      <input type="number" id="retainPredictionDays" min="30" max="1825" style="max-width:100px">
+    </div>
+    <div class="row">
+      <label>Keep log files (days)</label>
+      <input type="number" id="retainLogDays" min="1" max="90" style="max-width:100px">
+    </div>
+    <div class="row">
+      <label>Keep backup count</label>
+      <input type="number" id="retainBackupCount" min="1" max="50" style="max-width:100px">
+    </div>
+  </div>
+
+  <!-- Notifications -->
+  <div class="card">
+    <div class="card-title">Notifications</div>
+
+    <div class="row">
+      <label>Market Regime Changes</label>
+      <label class="toggle">
+        <input type="checkbox" id="notifyRegimeChange">
+        <div class="toggle-track"><div class="toggle-thumb"></div></div>
+      </label>
+    </div>
+    <div class="row">
+      <label>Daily Brief Available</label>
+      <label class="toggle">
+        <input type="checkbox" id="notifyDailyBrief">
+        <div class="toggle-track"><div class="toggle-thumb"></div></div>
+      </label>
+    </div>
+    <div class="row">
+      <label>Critical Failures</label>
+      <label class="toggle">
+        <input type="checkbox" id="notifyCriticalFailure">
+        <div class="toggle-track"><div class="toggle-thumb"></div></div>
+      </label>
+    </div>
+    <div class="row">
+      <label>Data Source Failures</label>
+      <label class="toggle">
+        <input type="checkbox" id="notifyDataSourceFailure">
+        <div class="toggle-track"><div class="toggle-thumb"></div></div>
+      </label>
+    </div>
+    <div class="row">
+      <label>Research Findings</label>
+      <label class="toggle">
+        <input type="checkbox" id="notifyResearchFindings">
+        <div class="toggle-track"><div class="toggle-thumb"></div></div>
+      </label>
+    </div>
+    <div class="row">
+      <label>Prediction Reports</label>
+      <label class="toggle">
+        <input type="checkbox" id="notifyPredictionReport">
+        <div class="toggle-track"><div class="toggle-thumb"></div></div>
+      </label>
+    </div>
+  </div>
+
+  <!-- Updates -->
+  <div class="card">
+    <div class="card-title">Updates</div>
+    <div class="row">
+      <label>Auto-check for updates</label>
+      <label class="toggle">
+        <input type="checkbox" id="autoUpdate">
+        <div class="toggle-track"><div class="toggle-thumb"></div></div>
+      </label>
+    </div>
+    <div class="row">
+      <label>Update channel</label>
+      <select id="updateChannel" style="max-width:140px">
+        <option value="stable">Stable</option>
+        <option value="beta">Beta</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Backend -->
+  <div class="card">
+    <div class="card-title">Backend</div>
+    <div class="row">
+      <label>API Port</label>
+      <input type="number" id="backendPort" min="1024" max="65535" style="max-width:100px">
+    </div>
+    <div class="row">
+      <label>Log Level</label>
+      <select id="logLevel" style="max-width:140px">
+        <option value="DEBUG">DEBUG</option>
+        <option value="INFO">INFO</option>
+        <option value="WARNING">WARNING</option>
+        <option value="ERROR">ERROR</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Action row -->
+  <div style="display:flex;gap:10px;justify-content:flex-end">
+    <button class="btn btn-danger" onclick="resetSettings()">Reset Defaults</button>
+    <button class="btn btn-ghost" onclick="window.close()">Cancel</button>
+    <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+const api = window.aqrti;
+
+async function load() {
+  const s = await api.settings.getAll();
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else el.value = val ?? '';
+  };
+
+  const keys = [
+    'dataDir','backupDir','modelDir','vaultDir',
+    'retainNewsdays','retainPredictionDays','retainLogDays','retainBackupCount',
+    'notifyRegimeChange','notifyDailyBrief','notifyCriticalFailure',
+    'notifyDataSourceFailure','notifyResearchFindings','notifyPredictionReport',
+    'autoUpdate','updateChannel','backendPort','logLevel',
+  ];
+  keys.forEach((k) => set(k, s[k]));
+}
+
+async function saveSettings() {
+  const get = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return undefined;
+    if (el.type === 'checkbox') return el.checked;
+    if (el.type === 'number') return Number(el.value);
+    return el.value || null;
+  };
+
+  const pairs = [
+    'dataDir','backupDir','modelDir','vaultDir',
+    'retainNewsdays','retainPredictionDays','retainLogDays','retainBackupCount',
+    'notifyRegimeChange','notifyDailyBrief','notifyCriticalFailure',
+    'notifyDataSourceFailure','notifyResearchFindings','notifyPredictionReport',
+    'autoUpdate','updateChannel','backendPort','logLevel',
+  ];
+
+  for (const k of pairs) {
+    await api.settings.set(k, get(k));
+  }
+
+  toast('Settings saved');
+}
+
+async function resetSettings() {
+  await api.settings.reset();
+  await load();
+  toast('Settings reset to defaults');
+}
+
+async function browse(settingKey) {
+  const result = await api.app.showOpenDialog({ properties: ['openDirectory'] });
+  if (!result.canceled && result.filePaths.length) {
+    document.getElementById(settingKey).value = result.filePaths[0];
+  }
+}
+
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show' + (isError ? ' error' : '');
+  setTimeout(() => { el.className = ''; }, 2500);
+}
+
+load();
+</script>
+</body>
+</html>

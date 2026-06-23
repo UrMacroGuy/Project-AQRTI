@@ -1,0 +1,135 @@
+"""Risk Center API — /api/v1/risk"""
+
+from __future__ import annotations
+
+from datetime import date, timedelta
+from typing import Optional
+
+import numpy as np
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from aqrti.database.engine import get_db_dependency
+from aqrti.database.models import DailyPrice, PortfolioSnapshot, Trade
+from aqrti.data.market_data import STOCK_META
+from aqrti.config.settings import get_settings
+
+router = APIRouter()
+
+
+def _compute_var(returns: list[float], capital: float, confidence: float = 0.95) -> float:
+    """Historical VaR at given confidence level."""
+    if not returns:
+        return 0.0
+    arr = np.array(returns)
+    percentile = np.percentile(arr, (1 - confidence) * 100)
+    return round(percentile / 100 * capital, 2)
+
+
+def _compute_sharpe(returns: list[float], risk_free: float = 0.065) -> float:
+    """Annualised Sharpe from daily returns (%)."""
+    if len(returns) < 5:
+        return 0.0
+    arr = np.array(returns) / 100
+    daily_rf = risk_free / 252
+    excess = arr - daily_rf
+    if excess.std() == 0:
+        return 0.0
+    return round(float(excess.mean() / excess.std() * (252 ** 0.5)), 2)
+
+
+@router.get("")
+def get_risk(db: Session = Depends(get_db_dependency)):
+    settings = get_settings()
+    capital  = settings.paper_capital
+
+    # Latest portfolio snapshot
+    snap = db.query(PortfolioSnapshot).order_by(PortfolioSnapshot.date.desc()).first()
+    total_value  = snap.total_value if snap else capital
+    drawdown     = snap.drawdown   if snap else 0.0
+
+    # Open positions → sector exposure
+    open_trades  = db.query(Trade).filter(Trade.is_open == True).all()
+    total_deploy = sum(t.position_size for t in open_trades)
+    exposure_pct = total_deploy / total_value * 100 if total_value else 0.0
+
+    sector_exposure: dict[str, float] = {}
+    for t in open_trades:
+        sector = STOCK_META.get(t.symbol, {}).get("sector", "Other")
+        sector_exposure[sector] = sector_exposure.get(sector, 0) + (t.position_size or 0)
+
+    sector_list = [
+        {
+            "sector": sector,
+            "weight": round(amt / total_value * 100, 1),
+            "limit":  settings.max_sector_pct,
+        }
+        for sector, amt in sorted(sector_exposure.items(), key=lambda x: -x[1])
+    ]
+    # Add cash
+    cash_pct = max(0.0, round(100 - exposure_pct, 1))
+    sector_list.append({"sector": "Cash", "weight": cash_pct, "limit": None})
+
+    # Portfolio returns for VaR + Sharpe
+    cutoff = date.today() - timedelta(days=30)
+    snaps_30 = (
+        db.query(PortfolioSnapshot)
+        .filter(PortfolioSnapshot.date >= cutoff)
+        .order_by(PortfolioSnapshot.date.asc())
+        .all()
+    )
+    portfolio_returns = [s.daily_pnl_pct for s in snaps_30 if s.daily_pnl_pct is not None]
+
+    var_daily = _compute_var(portfolio_returns, total_value) if portfolio_returns else 0.0
+    sharpe    = _compute_sharpe(portfolio_returns)
+
+    # Max drawdown history
+    dd_history = [
+        {"date": str(s.date), "drawdown": s.drawdown or 0.0}
+        for s in snaps_30
+    ]
+
+    # Position risk table
+    positions = []
+    for t in open_trades:
+        price_rows = (
+            db.query(DailyPrice.daily_return)
+            .filter(DailyPrice.symbol == t.symbol, DailyPrice.date >= cutoff)
+            .order_by(DailyPrice.date.asc())
+            .all()
+        )
+        sym_returns = [r[0] for r in price_rows if r[0] is not None]
+        sym_vol     = float(np.std(sym_returns) * (252 ** 0.5)) if len(sym_returns) >= 5 else 0.0
+        sym_var     = _compute_var(sym_returns, t.position_size or 0)
+        risk_level  = "Low" if sym_vol < 20 else "Medium" if sym_vol < 30 else "High"
+
+        positions.append({
+            "symbol":     t.symbol,
+            "weight":     f"{t.position_pct:.1f}%" if t.position_pct else "—",
+            "var":        sym_var,
+            "volatility": round(sym_vol, 1),
+            "riskLevel":  risk_level,
+        })
+
+    # Circuit breaker status
+    daily_dd = min(portfolio_returns[-1], 0) if portfolio_returns else 0
+    circuit_breakers = {
+        "daily":   {"triggered": daily_dd < -3.0,  "limit": -3.0,  "current": daily_dd},
+        "weekly":  {"triggered": drawdown < -6.0,   "limit": -6.0,  "current": drawdown},
+        "monthly": {"triggered": drawdown < -12.0,  "limit": -12.0, "current": drawdown},
+    }
+    any_triggered = any(v["triggered"] for v in circuit_breakers.values())
+
+    return {
+        "exposure":        round(exposure_pct, 1),
+        "varDaily":        var_daily,
+        "varPct":          round(var_daily / total_value * 100, 2) if total_value else 0,
+        "maxDrawdown30d":  round(drawdown, 2) if drawdown else 0.0,
+        "sharpe":          sharpe,
+        "profitFactor":    None,
+        "sectorExposure":  sector_list,
+        "drawdownHistory": dd_history,
+        "positions":       positions,
+        "circuitBreakers": circuit_breakers,
+        "circuitStatus":   "TRIGGERED" if any_triggered else "CLEAR",
+    }

@@ -1,0 +1,102 @@
+{
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\.vscode\\launch.json": {
+    "mtime": 1782116413.4038332,
+    "ast_hash": "4d531e15d6601c3671bc2fae6e5625d5",
+    "semantic_hash": "4d531e15d6601c3671bc2fae6e5625d5"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\.vscode\\settings.json": {
+    "mtime": 1782114768.4897783,
+    "ast_hash": "91a04bd302c648e9ed6f3d6742914c5d",
+    "semantic_hash": "91a04bd302c648e9ed6f3d6742914c5d"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\ui\\app.js": {
+    "mtime": 1782116328.2881446,
+    "ast_hash": "e35e7047fffafe1457aa108ed30d5569",
+    "semantic_hash": "e35e7047fffafe1457aa108ed30d5569"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\AUTONOMOUS_AGENT_SYSTEM.md": {
+    "mtime": 1782113359.7044735,
+    "ast_hash": "761b9f70035a21e1045ce440be8cc9cc",
+    "semantic_hash": "761b9f70035a21e1045ce440be8cc9cc"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\BACKTESTING_FRAMEWORK.md": {
+    "mtime": 1782113416.0225232,
+    "ast_hash": "a8588a2848b0bb27a3211d1bc1c5d841",
+    "semantic_hash": "a8588a2848b0bb27a3211d1bc1c5d841"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\DASHBOARD_ARCHITECTURE.md": {
+    "mtime": 1782113481.4885886,
+    "ast_hash": "01d1cfb22f2d120ec25f8d80bad6f6cd",
+    "semantic_hash": "01d1cfb22f2d120ec25f8d80bad6f6cd"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\DATA_ARCHITECTURE.md": {
+    "mtime": 1782112532.126422,
+    "ast_hash": "fe8cd9615e35e70af22807b9de543837",
+    "semantic_hash": "fe8cd9615e35e70af22807b9de543837"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\EXECUTION_ENGINE.md": {
+    "mtime": 1782113622.8567228,
+    "ast_hash": "755aacdf5beb2069ab763a8d9f5fdf6f",
+    "semantic_hash": "755aacdf5beb2069ab763a8d9f5fdf6f"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\LEARNING_ENGINE.md": {
+    "mtime": 1782113740.8501647,
+    "ast_hash": "14b488dc3a68d0cf74196a6e98d12a0e",
+    "semantic_hash": "14b488dc3a68d0cf74196a6e98d12a0e"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\MASTER_IMPLEMENTATION_ROADMAP.md": {
+    "mtime": 1782113780.1475685,
+    "ast_hash": "a69d22a31b23b4f2ff86645c06457aac",
+    "semantic_hash": "a69d22a31b23b4f2ff86645c06457aac"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\MODEL_ARCHITECTURE.md": {
+    "mtime": 1782113885.6134517,
+    "ast_hash": "6f72ebd256915a23ee4980d1046adf81",
+    "semantic_hash": "6f72ebd256915a23ee4980d1046adf81"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\MODEL_TRAINING_PIPELINE.md": {
+    "mtime": 1782113952.1060696,
+    "ast_hash": "4b3fc4678912c26c90d6e4806fff1fa1",
+    "semantic_hash": "4b3fc4678912c26c90d6e4806fff1fa1"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\NEWS_INTELLIGENCE_ENGINE.md": {
+    "mtime": 1782114370.6091332,
+    "ast_hash": "fe469f54605b4df49395bbe2c6d8071b",
+    "semantic_hash": "fe469f54605b4df49395bbe2c6d8071b"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\PAPER_TRADING_ENGINE.md": {
+    "mtime": 1782114021.1596127,
+    "ast_hash": "78db931e26e2e46a5c19a5f34549719f",
+    "semantic_hash": "78db931e26e2e46a5c19a5f34549719f"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\PATTERN_MATCHING_ENGINE.md": {
+    "mtime": 1782114082.7227397,
+    "ast_hash": "196619b705758aee1a46906751e25af0",
+    "semantic_hash": "196619b705758aee1a46906751e25af0"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\PORTFOLIO_OPTIMIZATION_ENGINE.md": {
+    "mtime": 1782114258.3528523,
+    "ast_hash": "8d2c63396aa8a86f437661c0ecfbb924",
+    "semantic_hash": "8d2c63396aa8a86f437661c0ecfbb924"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\RISK_ENGINE.md": {
+    "mtime": 1782114420.922935,
+    "ast_hash": "7e9a08a8a3dd9968449b4593aac08c83",
+    "semantic_hash": "7e9a08a8a3dd9968449b4593aac08c83"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\SENTIMENT_ENGINE.md": {
+    "mtime": 1782114461.9099252,
+    "ast_hash": "6d4736f6429fc518960b4decb32e0309",
+    "semantic_hash": "6d4736f6429fc518960b4decb32e0309"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\STRATEGY_DISCOVERY_ENGINE.md": {
+    "mtime": 1782114534.2849607,
+    "ast_hash": "a10cd3c8cb493caf190277682aab5de9",
+    "semantic_hash": "a10cd3c8cb493caf190277682aab5de9"
+  },
+  "C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\ui\\index.html": {
+    "mtime": 1782116653.4016001,
+    "ast_hash": "acc67c5fa92f4d5f67175494a1eb285d",
+    "semantic_hash": "acc67c5fa92f4d5f67175494a1eb285d"
+  }
+}

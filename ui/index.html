@@ -1,0 +1,2111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AQRTI — Intelligence Terminal</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════
+       DESKTOP TITLEBAR (only visible in Electron)
+  ═══════════════════════════════════════════════════ -->
+  <div id="aqrti-titlebar" style="display:none">
+    <div id="aqrti-titlebar-drag">
+      <span id="aqrti-titlebar-title">AQRTI Intelligence Terminal</span>
+    </div>
+    <div id="aqrti-titlebar-controls">
+      <button id="tb-settings" title="Settings">⚙</button>
+      <button id="tb-min"      title="Minimize">─</button>
+      <button id="tb-max"      title="Maximize/Restore">□</button>
+      <button id="tb-close"    title="Close to Tray">✕</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       SIDEBAR NAVIGATION
+  ═══════════════════════════════════════════════════ -->
+  <aside class="sidebar" id="sidebar">
+
+    <div class="sidebar-header">
+      <div class="logo">
+        <span class="logo-mark">AQ</span><span class="logo-sub">RTI</span>
+      </div>
+      <div class="logo-tagline">Intelligence Terminal</div>
+      <div class="system-status">
+        <span class="status-dot active"></span>
+        <span class="status-text" id="sys-status-label">SYSTEM LIVE</span>
+      </div>
+    </div>
+
+    <nav class="nav-menu">
+      <div class="nav-group-label">COMMAND CENTER</div>
+      <ul>
+        <li class="nav-item active" data-page="overview">
+          <span class="nav-icon">◈</span>
+          <span class="nav-label">Overview</span>
+          <span class="nav-badge" id="badge-overview">12</span>
+        </li>
+        <li class="nav-item" data-page="market">
+          <span class="nav-icon">◎</span>
+          <span class="nav-label">Market Intelligence</span>
+        </li>
+        <li class="nav-item" data-page="opportunity">
+          <span class="nav-icon">◆</span>
+          <span class="nav-label">Opportunity Rankings</span>
+          <span class="nav-badge accent" id="badge-opp">7</span>
+        </li>
+      </ul>
+
+      <div class="nav-group-label">INTELLIGENCE</div>
+      <ul>
+        <li class="nav-item" data-page="news">
+          <span class="nav-icon">◉</span>
+          <span class="nav-label">News Intelligence</span>
+          <span class="nav-badge alert" id="badge-news">3</span>
+        </li>
+        <li class="nav-item" data-page="sentiment">
+          <span class="nav-icon">◐</span>
+          <span class="nav-label">Sentiment Center</span>
+        </li>
+      </ul>
+
+      <div class="nav-group-label">RESEARCH</div>
+      <ul>
+        <li class="nav-item" data-page="strategy">
+          <span class="nav-icon">▣</span>
+          <span class="nav-label">Strategy Research</span>
+          <span class="nav-badge" id="badge-strat">42</span>
+        </li>
+        <li class="nav-item" data-page="model">
+          <span class="nav-icon">▦</span>
+          <span class="nav-label">Model Center</span>
+        </li>
+        <li class="nav-item" data-page="learning">
+          <span class="nav-icon">▷</span>
+          <span class="nav-label">Learning Center</span>
+        </li>
+        <li class="nav-item" data-page="agents">
+          <span class="nav-icon">◎</span>
+          <span class="nav-label">Research Ops</span>
+          <span class="nav-badge alert" id="badge-agents">7</span>
+        </li>
+        <li class="nav-item" data-page="vault">
+          <span class="nav-icon">▩</span>
+          <span class="nav-label">Intelligence Vault</span>
+        </li>
+      </ul>
+
+      <div class="nav-group-label">INTELLIGENCE LAB</div>
+      <ul>
+        <li class="nav-item" data-page="intelligence-lab">
+          <span class="nav-icon">⬟</span>
+          <span class="nav-label">Historical Intelligence</span>
+          <span class="nav-badge accent" id="badge-intel">8.5</span>
+        </li>
+        <li class="nav-item" data-page="data-intelligence">
+          <span class="nav-icon">◫</span>
+          <span class="nav-label">Data Intelligence</span>
+          <span class="nav-badge accent" id="badge-data">8</span>
+        </li>
+      </ul>
+
+      <div class="nav-group-label">CONTROL</div>
+      <ul>
+        <li class="nav-item" data-page="paper">
+          <span class="nav-icon">◈</span>
+          <span class="nav-label">Paper Portfolio</span>
+        </li>
+        <li class="nav-item" data-page="risk">
+          <span class="nav-icon">⬡</span>
+          <span class="nav-label">Risk Center</span>
+          <span class="nav-badge alert" id="badge-risk">2</span>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="market-clock">
+        <div class="clock-label">NSE</div>
+        <div class="clock-time" id="market-clock">15:29:43</div>
+        <div class="clock-status" id="market-open-status">MARKET CLOSED</div>
+      </div>
+      <div class="version-tag">v0.8.5 — Phase 8.5</div>
+    </div>
+
+  </aside>
+
+  <!-- ═══════════════════════════════════════════════════
+       TOPBAR
+  ═══════════════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="page-breadcrumb" id="page-breadcrumb">Overview</span>
+      <span class="topbar-separator">›</span>
+      <span class="topbar-subtitle" id="topbar-subtitle">Command Center</span>
+    </div>
+    <div class="topbar-center">
+      <div class="index-ticker" id="nifty-ticker">
+        <span class="ticker-name">NIFTY 50</span>
+        <span class="ticker-value" id="nifty-value">—</span>
+        <span class="ticker-change" id="nifty-change">—</span>
+      </div>
+      <div class="index-ticker" id="banknifty-ticker">
+        <span class="ticker-name">BANKNIFTY</span>
+        <span class="ticker-value" id="banknifty-value">—</span>
+        <span class="ticker-change" id="banknifty-change">—</span>
+      </div>
+      <div class="index-ticker">
+        <span class="ticker-name">VIX</span>
+        <span class="ticker-value">13.24</span>
+        <span class="ticker-change negative">−0.31</span>
+      </div>
+      <div class="index-ticker">
+        <span class="ticker-name">USDINR</span>
+        <span class="ticker-value">83.42</span>
+        <span class="ticker-change negative">−0.08%</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="regime-badge" id="regime-pill">
+        <span class="regime-dot"></span>
+        <span id="regime-label">BULL MARKET</span>
+      </div>
+      <div class="topbar-date" id="topbar-date">22 Jun 2026</div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════
+       MAIN CONTENT AREA
+  ═══════════════════════════════════════════════════ -->
+  <main class="main-content">
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: OVERVIEW
+    ──────────────────────────────────────────────── -->
+    <section class="page active" id="page-overview">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Portfolio Value</div>
+          <div class="kpi-value" id="kpi-portfolio">₹1,04,328</div>
+          <div class="kpi-sub positive">Paper Trading Capital</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Daily P&amp;L</div>
+          <div class="kpi-value positive" id="kpi-daily-pnl">+₹1,284</div>
+          <div class="kpi-sub positive" id="kpi-daily-pct">+1.25%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Open Positions</div>
+          <div class="kpi-value" id="kpi-positions">12</div>
+          <div class="kpi-sub">₹67,420 Deployed</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Active Predictions</div>
+          <div class="kpi-value" id="kpi-predictions">48</div>
+          <div class="kpi-sub">Avg Conf: 79.2%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Win Rate (30d)</div>
+          <div class="kpi-value positive" id="kpi-winrate">63.4%</div>
+          <div class="kpi-sub">142 Trades</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Knowledge Score</div>
+          <div class="kpi-value accent" id="kpi-knowledge">67 / 100</div>
+          <div class="kpi-sub">+4 this week</div>
+        </div>
+      </div>
+
+      <!-- Two-col layout: chart + top predictions -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Equity Curve — Paper Portfolio</span>
+            <span class="panel-tag">Last 30 Days</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="equityCurveChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Top Predictions Today</span>
+            <span class="panel-tag">Ranked by Confidence</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="top-predictions-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Direction</th>
+                  <th>Conf</th>
+                  <th>Exp Ret</th>
+                  <th>Risk</th>
+                </tr>
+              </thead>
+              <tbody id="top-predictions-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Paper Portfolio Panel — live positions + performance strip -->
+      <div class="two-col" id="paper-portfolio-strip">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Paper Portfolio — Positions</span>
+            <span class="panel-tag" id="pp-position-count">0 Open</span>
+            <button class="panel-action-btn" style="margin-left:auto" onclick="hydratePaperPortfolioStrip()">⟳</button>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="pp-positions-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Entry</th>
+                  <th>Current</th>
+                  <th>Weight</th>
+                  <th>Unrealized P&amp;L</th>
+                  <th>Conf</th>
+                </tr>
+              </thead>
+              <tbody id="pp-positions-body">
+                <tr><td colspan="6" style="color:var(--text-muted);text-align:center">No open positions</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Performance Metrics</span>
+            <span class="panel-tag" id="pp-perf-date">—</span>
+          </div>
+          <div class="panel-body">
+            <div class="kpi-row" style="gap:0.5rem;flex-wrap:wrap">
+              <div class="kpi-card" style="flex:1;min-width:80px">
+                <div class="kpi-label">Total Return</div>
+                <div class="kpi-value" id="pp-total-return">—</div>
+              </div>
+              <div class="kpi-card" style="flex:1;min-width:80px">
+                <div class="kpi-label">Sharpe</div>
+                <div class="kpi-value" id="pp-sharpe">—</div>
+              </div>
+              <div class="kpi-card" style="flex:1;min-width:80px">
+                <div class="kpi-label">Sortino</div>
+                <div class="kpi-value" id="pp-sortino">—</div>
+              </div>
+              <div class="kpi-card" style="flex:1;min-width:80px">
+                <div class="kpi-label">Max DD</div>
+                <div class="kpi-value" id="pp-max-dd">—</div>
+              </div>
+              <div class="kpi-card" style="flex:1;min-width:80px">
+                <div class="kpi-label">Win Rate</div>
+                <div class="kpi-value" id="pp-win-rate">—</div>
+              </div>
+              <div class="kpi-card" style="flex:1;min-width:80px">
+                <div class="kpi-label">Profit Factor</div>
+                <div class="kpi-value" id="pp-profit-factor">—</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Three-col: market regime, system health, agent status -->
+      <div class="three-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Market Regime</span>
+          </div>
+          <div class="panel-body">
+            <div class="regime-display" id="overview-regime-display">
+              <div class="regime-name">BULL MARKET</div>
+              <div class="regime-confidence">Confidence: 88%</div>
+              <div class="regime-desc">Strong upward trend across broad market. Momentum strategies favored. Sector rotation into IT and FMCG.</div>
+              <div class="regime-indicators">
+                <div class="regime-ind positive">Breadth: 72% Advancing</div>
+                <div class="regime-ind positive">Trend: Intact</div>
+                <div class="regime-ind neutral">Volatility: Low</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">System Health</span>
+          </div>
+          <div class="panel-body" id="system-health-body">
+            <div class="health-item">
+              <span class="health-label">Data Pipeline</span>
+              <span class="health-status ok">LIVE</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">News Agent</span>
+              <span class="health-status ok">LIVE</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Sentiment Agent</span>
+              <span class="health-status ok">LIVE</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Prediction Engine</span>
+              <span class="health-status warn">SHADOW</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Strategy Engine</span>
+              <span class="health-status ok">LIVE</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Risk Engine</span>
+              <span class="health-status ok">LIVE</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Learning Engine</span>
+              <span class="health-status ok">LIVE</span>
+            </div>
+            <div class="health-item">
+              <span class="health-label">Paper Trading</span>
+              <span class="health-status ok">ACTIVE</span>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Today's Alerts</span>
+          </div>
+          <div class="panel-body" id="alerts-body">
+            <div class="alert-item critical">
+              <div class="alert-icon">▲</div>
+              <div class="alert-content">
+                <div class="alert-title">HDFCBANK Earnings Tomorrow</div>
+                <div class="alert-sub">High impact event. Impact Score: 87</div>
+              </div>
+            </div>
+            <div class="alert-item warning">
+              <div class="alert-icon">◎</div>
+              <div class="alert-content">
+                <div class="alert-title">IT Sector Sentiment Declining</div>
+                <div class="alert-sub">Velocity: −4.2 over 48hrs</div>
+              </div>
+            </div>
+            <div class="alert-item info">
+              <div class="alert-icon">◆</div>
+              <div class="alert-content">
+                <div class="alert-title">RELIANCE Bulk Deal Detected</div>
+                <div class="alert-sub">Institutional activity signal confirmed</div>
+              </div>
+            </div>
+            <div class="alert-item info">
+              <div class="alert-icon">▷</div>
+              <div class="alert-content">
+                <div class="alert-title">Strategy AQRTI_MOM_014 Promoted</div>
+                <div class="alert-sub">Shadow → Paper Trading. Alpha Score: 78</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: MARKET INTELLIGENCE
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-market">
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">NIFTY 50</div>
+          <div class="kpi-value positive">24,162.20</div>
+          <div class="kpi-sub positive">+203.1 (+0.84%)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">BANKNIFTY</div>
+          <div class="kpi-value positive">51,847.30</div>
+          <div class="kpi-sub positive">+573.6 (+1.12%)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Market Breadth</div>
+          <div class="kpi-value positive">72%</div>
+          <div class="kpi-sub">Advancing Issues</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">VIX</div>
+          <div class="kpi-value">13.24</div>
+          <div class="kpi-sub negative">−0.31 (Fear Low)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Crude Oil</div>
+          <div class="kpi-value">$78.40</div>
+          <div class="kpi-sub negative">−0.8%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">10Y Bond Yield</div>
+          <div class="kpi-value">7.04%</div>
+          <div class="kpi-sub neutral">+0.02</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Sector Strength Rankings</span>
+            <span class="panel-tag">RSI + RS + Momentum Score</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="sectorStrengthChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Top Movers — NSE 500</span>
+            <span class="panel-tag">Today</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="top-movers-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Sector</th>
+                  <th>Price</th>
+                  <th>Change</th>
+                  <th>Volume</th>
+                </tr>
+              </thead>
+              <tbody id="top-movers-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Sector Detail</span>
+            <span class="panel-tag">Score 0–100</span>
+          </div>
+          <div class="panel-body" id="sector-detail-body"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Derivatives Signals</span>
+            <span class="panel-tag">NIFTY Options</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <thead>
+                <tr><th>Signal</th><th>Value</th><th>Interpretation</th></tr>
+              </thead>
+              <tbody id="deriv-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: OPPORTUNITY RANKINGS
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-opportunity">
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Strong Signals</div>
+          <div class="kpi-value accent">7</div>
+          <div class="kpi-sub">Confidence ≥ 80%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Avg Confidence</div>
+          <div class="kpi-value">76.8%</div>
+          <div class="kpi-sub">Top 20 Signals</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Best Exp Return</div>
+          <div class="kpi-value positive">+4.1%</div>
+          <div class="kpi-sub">RELIANCE (10d)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Avg Expected Risk</div>
+          <div class="kpi-value">Low–Med</div>
+          <div class="kpi-sub">Regime Adjusted</div>
+        </div>
+      </div>
+
+      <div class="panel full-width">
+        <div class="panel-header">
+          <span class="panel-title">Ranked Opportunities — NSE Universe</span>
+          <div class="filter-row">
+            <select class="filter-select" id="opp-conf-filter">
+              <option value="all">All Confidence</option>
+              <option value="strong">Strong (80+)</option>
+              <option value="good">Good (70–79)</option>
+            </select>
+            <select class="filter-select" id="opp-dir-filter">
+              <option value="all">All Directions</option>
+              <option value="bullish">Bullish</option>
+              <option value="bearish">Bearish</option>
+            </select>
+          </div>
+        </div>
+        <div class="panel-body">
+          <table class="data-table" id="opportunity-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Symbol</th>
+                <th>Sector</th>
+                <th>Direction</th>
+                <th>Confidence</th>
+                <th>Exp Return</th>
+                <th>Risk</th>
+                <th>Strategy</th>
+                <th>Sentiment</th>
+                <th>Pos Size</th>
+              </tr>
+            </thead>
+            <tbody id="opportunity-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Confidence Distribution</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="confDistChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Strategy Breakdown</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="stratBreakdownChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: NEWS INTELLIGENCE
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-news">
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Articles Today</div>
+          <div class="kpi-value">184</div>
+          <div class="kpi-sub">Collected &amp; Processed</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">High Impact Events</div>
+          <div class="kpi-value alert-text">3</div>
+          <div class="kpi-sub">Impact Score ≥ 80</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Avg Sentiment</div>
+          <div class="kpi-value positive">+0.48</div>
+          <div class="kpi-sub">Positive Bias Today</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Entities Tracked</div>
+          <div class="kpi-value">67</div>
+          <div class="kpi-sub">Companies Mentioned</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Breaking &amp; High Impact Events</span>
+            <span class="panel-tag">Impact ≥ 70</span>
+          </div>
+          <div class="panel-body" id="news-high-impact"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">News Sentiment Trend</span>
+            <span class="panel-tag">24hr Hourly</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="newsSentimentTrendChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel full-width">
+        <div class="panel-header">
+          <span class="panel-title">All Processed News</span>
+          <span class="panel-tag">Ranked by Importance Score</span>
+        </div>
+        <div class="panel-body" id="news-feed"></div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: SENTIMENT CENTER
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-sentiment">
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Market Sentiment</div>
+          <div class="kpi-value positive">Optimistic</div>
+          <div class="kpi-sub">Score: 71 / 100</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Fear &amp; Greed</div>
+          <div class="kpi-value">63</div>
+          <div class="kpi-sub">Greed Zone</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Strongest Positive</div>
+          <div class="kpi-value positive">RELIANCE</div>
+          <div class="kpi-sub">Score: 84</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Weakest Sentiment</div>
+          <div class="kpi-value negative">WIPRO</div>
+          <div class="kpi-sub">Score: 34</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Company Sentiment Scores</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="companySentimentChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Sector Sentiment</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="sectorSentimentChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Sentiment Velocity — Top Movers</span>
+            <span class="panel-tag">48hr Change</span>
+          </div>
+          <div class="panel-body" id="sentiment-velocity-body"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Narrative Shifts</span>
+            <span class="panel-tag">Detected this week</span>
+          </div>
+          <div class="panel-body" id="narrative-shifts-body"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: STRATEGY RESEARCH CENTER
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-strategy">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Total Strategies</div>
+          <div class="kpi-value accent" id="src-kpi-total">—</div>
+          <div class="kpi-sub" id="src-kpi-active-sub">— Active</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Avg Fitness</div>
+          <div class="kpi-value" id="src-kpi-avg-fitness">—</div>
+          <div class="kpi-sub">Population Health</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Best Fitness</div>
+          <div class="kpi-value positive" id="src-kpi-best-fitness">—</div>
+          <div class="kpi-sub" id="src-kpi-best-name">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Generation</div>
+          <div class="kpi-value" id="src-kpi-generation">—</div>
+          <div class="kpi-sub">Latest Evolution</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Graveyard</div>
+          <div class="kpi-value" id="src-kpi-graveyard">—</div>
+          <div class="kpi-sub">Retired Strategies</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Promoted</div>
+          <div class="kpi-value accent" id="src-kpi-promoted">—</div>
+          <div class="kpi-sub">Awaiting Activation</div>
+        </div>
+      </div>
+
+      <!-- Leaderboard + Family Chart -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Strategy Leaderboard</span>
+            <span class="panel-tag">Top 15 by Fitness</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>Family</th>
+                  <th>Status</th>
+                  <th>Fitness</th>
+                  <th>Sharpe</th>
+                  <th>Win%</th>
+                  <th>Trades</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="src-leaderboard-body">
+                <tr><td colspan="9" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Population by Family</span>
+            <span class="panel-tag">Alive Strategies</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="srcFamilyChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Evolution Timeline + Fitness Distribution -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Evolution Operations</span>
+            <span class="panel-tag">90-Day Performance</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="srcEvoChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Regime Affinity</span>
+            <span class="panel-tag">Avg Sharpe by Regime</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="srcRegimeChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Graveyard + Resurrection Candidates -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Strategy Graveyard</span>
+            <span class="panel-tag">Last 20 Retired</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Family</th>
+                  <th>Fitness</th>
+                  <th>Reason</th>
+                  <th>Regime at Death</th>
+                  <th>Lifespan</th>
+                </tr>
+              </thead>
+              <tbody id="src-graveyard-body">
+                <tr><td colspan="6" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Resurrection Candidates</span>
+            <span class="panel-tag">Graveyard → Regime Changed</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Family</th>
+                  <th>Fitness</th>
+                  <th>Died In</th>
+                  <th>Current Regime</th>
+                </tr>
+              </thead>
+              <tbody id="src-resurrection-body">
+                <tr><td colspan="5" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Research Reports -->
+      <div class="panel full-width">
+        <div class="panel-header">
+          <span class="panel-title">Research Insights</span>
+          <span class="panel-tag">Latest Auto-Generated Reports</span>
+          <button class="panel-action-btn" id="src-run-research-btn" onclick="triggerStrategyResearch()">Run Research</button>
+        </div>
+        <div class="panel-body">
+          <div id="src-research-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:0.75rem;">
+            <div style="color:var(--text-muted);font-size:0.8rem">Loading research reports…</div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: MODEL CENTER
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-model">
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Ensemble Accuracy (30d)</div>
+          <div class="kpi-value positive">61.8%</div>
+          <div class="kpi-sub">Target: 55–60%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Best Model</div>
+          <div class="kpi-value accent">LightGBM</div>
+          <div class="kpi-sub">68.2% Direction</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Calibration Error</div>
+          <div class="kpi-value">0.034</div>
+          <div class="kpi-sub">ECE — Target: &lt; 0.05</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Models in Production</div>
+          <div class="kpi-value">5</div>
+          <div class="kpi-sub">Ensemble Active</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Last Retrain</div>
+          <div class="kpi-value">Today</div>
+          <div class="kpi-sub">06:30 AM IST</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Features Used</div>
+          <div class="kpi-value">312</div>
+          <div class="kpi-sub">Out of 300+ Target</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Model Performance — 30 Day Accuracy</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="modelAccChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Confidence Calibration Curve</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="calibrationChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel full-width">
+        <div class="panel-header">
+          <span class="panel-title">Model Registry</span>
+        </div>
+        <div class="panel-body">
+          <table class="data-table" id="model-registry-table">
+            <thead>
+              <tr>
+                <th>Model ID</th>
+                <th>Type</th>
+                <th>Target</th>
+                <th>Accuracy</th>
+                <th>Calibration</th>
+                <th>Weight</th>
+                <th>Status</th>
+                <th>Last Trained</th>
+                <th>Features</th>
+              </tr>
+            </thead>
+            <tbody id="model-registry-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: LEARNING CENTER
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-learning">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Intelligence Score</div>
+          <div class="kpi-value accent" id="lc-kpi-score">—</div>
+          <div class="kpi-sub" id="lc-kpi-delta">— vs yesterday</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Total Failures (30d)</div>
+          <div class="kpi-value" id="lc-kpi-failures">—</div>
+          <div class="kpi-sub" id="lc-kpi-resolved">— resolved</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Lessons Generated (30d)</div>
+          <div class="kpi-value positive" id="lc-kpi-lessons">—</div>
+          <div class="kpi-sub" id="lc-kpi-applied">— applied</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Conf Calibration (ECE)</div>
+          <div class="kpi-value" id="lc-kpi-ece">—</div>
+          <div class="kpi-sub" id="lc-kpi-ece-sub">30d window</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Critical Failures</div>
+          <div class="kpi-value negative" id="lc-kpi-critical">—</div>
+          <div class="kpi-sub">Needs Immediate Review</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Features Healthy</div>
+          <div class="kpi-value" id="lc-kpi-features-healthy">—</div>
+          <div class="kpi-sub" id="lc-kpi-features-sub">of ranked features</div>
+        </div>
+      </div>
+
+      <!-- Intelligence Score Components + Growth Timeline -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Intelligence Score Growth</span>
+            <span class="panel-tag">90 Days</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="knowledgeGrowthChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Score Components</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="scoreComponentsChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Failure Dashboard -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Failure Dashboard</span>
+            <span class="panel-tag">Last 30 Days</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="failureCatChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Failure Timeline</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="failureTimelineChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent Failures Table -->
+      <div class="panel" style="margin-bottom:1.5rem;">
+        <div class="panel-header">
+          <span class="panel-title">Recent Failures</span>
+          <span class="panel-tag">Last 30 Days — Click to Resolve</span>
+        </div>
+        <div class="panel-body">
+          <table class="data-table compact" id="failure-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Symbol</th><th>Category</th>
+                <th>Severity</th><th>Root Cause</th><th>Resolved</th>
+              </tr>
+            </thead>
+            <tbody id="failure-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Calibration Curve + Model Drift -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Confidence Calibration Curve</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="calibrationChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Model Drift Tracker</span>
+          </div>
+          <div class="panel-body" id="drift-body"></div>
+        </div>
+      </div>
+
+      <!-- Feature Intelligence + Lessons Learned -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Feature Intelligence — Top 10</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="feature-intel-table">
+              <thead>
+                <tr>
+                  <th>Rank</th><th>Feature</th><th>Score</th>
+                  <th>IC (30d)</th><th>Decay</th><th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="feature-intel-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Lessons Learned</span>
+            <span class="panel-tag">Last 30 Days</span>
+          </div>
+          <div class="panel-body" id="lessons-body"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: RISK CENTER
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-risk">
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Portfolio Exposure</div>
+          <div class="kpi-value">64.8%</div>
+          <div class="kpi-sub">Limit: 80%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Daily VaR (95%)</div>
+          <div class="kpi-value negative">−₹2,840</div>
+          <div class="kpi-sub">−2.72% of Capital</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Max Drawdown (30d)</div>
+          <div class="kpi-value negative">−4.3%</div>
+          <div class="kpi-sub">Within Limits</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Sharpe Ratio (30d)</div>
+          <div class="kpi-value positive">1.84</div>
+          <div class="kpi-sub">Target: &gt; 1.0</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Largest Position</div>
+          <div class="kpi-value">RELIANCE</div>
+          <div class="kpi-sub">5.0% — At Limit</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Circuit Breakers</div>
+          <div class="kpi-value positive">CLEAR</div>
+          <div class="kpi-sub">All Systems Normal</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Sector Exposure Breakdown</span>
+            <span class="panel-tag">Max 25% per Sector</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="sectorExposureChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Drawdown History</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="drawdownChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Position Risk Table</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="risk-position-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Weight</th>
+                  <th>VaR</th>
+                  <th>Volatility</th>
+                  <th>Risk Level</th>
+                </tr>
+              </thead>
+              <tbody id="risk-position-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Risk Alerts</span>
+          </div>
+          <div class="panel-body" id="risk-alerts-body"></div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: PAPER PORTFOLIO
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-paper">
+
+      <!-- Action Bar -->
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+        <button class="panel-action-btn" style="background:var(--accent);color:#000;font-weight:700;padding:6px 16px" onclick="triggerPaperCycle()">▶ Run Paper Trade Cycle</button>
+        <button class="panel-action-btn" style="padding:6px 14px" onclick="hydratePaperPortfolio()">⟳ Refresh</button>
+        <span id="pp-cycle-status" style="font-size:0.75rem;color:var(--text-muted)"></span>
+      </div>
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Portfolio Value</div>
+          <div class="kpi-value" id="pp-kpi-value">₹1,00,000</div>
+          <div class="kpi-sub" id="pp-kpi-return">+0.00%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Cash Reserve</div>
+          <div class="kpi-value" id="pp-kpi-cash">₹1,00,000</div>
+          <div class="kpi-sub" id="pp-kpi-cash-pct">100.0% of Portfolio</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Open Positions</div>
+          <div class="kpi-value" id="pp-kpi-positions">0</div>
+          <div class="kpi-sub" id="pp-kpi-invested">₹0 Deployed</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Sharpe Ratio</div>
+          <div class="kpi-value" id="pp-kpi-sharpe">—</div>
+          <div class="kpi-sub">Risk-Adjusted Return</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Win Rate</div>
+          <div class="kpi-value" id="pp-kpi-winrate">—</div>
+          <div class="kpi-sub" id="pp-kpi-trades">0 Closed Trades</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Max Drawdown</div>
+          <div class="kpi-value negative" id="pp-kpi-maxdd">0.00%</div>
+          <div class="kpi-sub">All-Time Peak Loss</div>
+        </div>
+      </div>
+
+      <!-- Equity Curve + Allocation -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Equity Curve</span>
+            <span class="panel-tag">Paper Portfolio NAV</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="ppEquityCurveChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Portfolio Allocation</span>
+            <span class="panel-tag">Target Weights</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="ppAllocationChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Positions + Performance Metrics -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Open Positions</span>
+            <span class="panel-tag" id="pp-open-count">0 positions</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Entry</th>
+                  <th>Current</th>
+                  <th>Weight</th>
+                  <th>Unreal. P&amp;L</th>
+                  <th>Dir</th>
+                  <th>Conf</th>
+                </tr>
+              </thead>
+              <tbody id="pp-full-positions-body">
+                <tr><td colspan="7" style="color:var(--text-muted);text-align:center">No open positions — run POST /admin/paper-trade</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Performance Analytics</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="pp-analytics-table">
+              <tbody id="pp-analytics-body">
+                <tr><td style="color:var(--text-muted)">Total Return</td><td id="pp-an-total-ret">—</td></tr>
+                <tr><td style="color:var(--text-muted)">CAGR</td><td id="pp-an-cagr">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Sharpe Ratio</td><td id="pp-an-sharpe">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Sortino Ratio</td><td id="pp-an-sortino">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Max Drawdown</td><td id="pp-an-maxdd" class="negative">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Volatility (Ann)</td><td id="pp-an-vol">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Win Rate</td><td id="pp-an-winrate">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Profit Factor</td><td id="pp-an-pf">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Expectancy</td><td id="pp-an-expectancy">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Avg Win</td><td id="pp-an-avgwin" class="positive">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Avg Loss</td><td id="pp-an-avgloss" class="negative">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Avg Holding Days</td><td id="pp-an-hold">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Avg Exposure</td><td id="pp-an-expo">—</td></tr>
+                <tr><td style="color:var(--text-muted)">Turnover</td><td id="pp-an-turnover">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trade History -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Trade History</span>
+          <span class="panel-tag">Closed Trades</span>
+        </div>
+        <div class="panel-body">
+          <table class="data-table compact">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Days</th>
+                <th>Capital</th>
+                <th>P&amp;L</th>
+                <th>Return</th>
+                <th>Pred Ret</th>
+                <th>Exit Reason</th>
+              </tr>
+            </thead>
+            <tbody id="pp-trades-body">
+              <tr><td colspan="9" style="color:var(--text-muted);text-align:center">No closed trades yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: RESEARCH OPERATIONS CENTER (Phase 7)
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-agents">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Active Agents</div>
+          <div class="kpi-value accent" id="roc-kpi-agents">7</div>
+          <div class="kpi-sub" id="roc-kpi-agent-status">All Systems Nominal</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Today's Findings</div>
+          <div class="kpi-value" id="roc-kpi-findings">—</div>
+          <div class="kpi-sub" id="roc-kpi-critical">— Critical</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Tasks Completed</div>
+          <div class="kpi-value positive" id="roc-kpi-tasks">—</div>
+          <div class="kpi-sub">Today</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Unread Messages</div>
+          <div class="kpi-value" id="roc-kpi-messages">—</div>
+          <div class="kpi-sub">Agent Inbox</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Daily Brief</div>
+          <div class="kpi-value accent" id="roc-kpi-brief-status">—</div>
+          <div class="kpi-sub" id="roc-kpi-brief-date">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Pipeline Status</div>
+          <div class="kpi-value positive" id="roc-kpi-pipeline">READY</div>
+          <div class="kpi-sub">Last run: <span id="roc-kpi-last-run">—</span></div>
+        </div>
+      </div>
+
+      <!-- Daily Brief + Agent Health Grid -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Daily Intelligence Brief</span>
+            <span class="panel-tag" id="roc-brief-date-tag">—</span>
+            <button class="panel-action-btn" onclick="generateBrief()">Generate</button>
+          </div>
+          <div class="panel-body" id="roc-brief-body" style="font-size:0.78rem;line-height:1.7">
+            <div style="color:var(--text-muted)">Loading today's brief…</div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Agent Health</span>
+            <span class="panel-tag">7 Research Agents</span>
+            <button class="panel-action-btn" onclick="runAgentPipeline()">Run Pipeline</button>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>Last Run</th>
+                  <th>Runs</th>
+                  <th>Errors</th>
+                </tr>
+              </thead>
+              <tbody id="roc-agent-table-body">
+                <tr><td colspan="6" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Research Findings + Task Queue -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Research Findings</span>
+            <span class="panel-tag">Last 7 Days</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Agent</th>
+                  <th>Urgency</th>
+                  <th>Finding</th>
+                  <th>Implication</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody id="roc-findings-body">
+                <tr><td colspan="5" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Agent Messages</span>
+            <span class="panel-tag">Last 48h</span>
+          </div>
+          <div class="panel-body" id="roc-messages-body" style="font-size:0.76rem">
+            <div style="color:var(--text-muted)">Loading messages…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Items + Agent Performance -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Action Items</span>
+            <span class="panel-tag">Require Human Review</span>
+          </div>
+          <div class="panel-body" id="roc-actions-body">
+            <div style="color:var(--text-muted);font-size:0.8rem">Loading action items…</div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Agent Performance</span>
+            <span class="panel-tag">30-Day Stats</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="rocAgentPerfChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: HISTORICAL INTELLIGENCE VAULT (Phase 7.5)
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-vault">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">MARKET SNAPSHOTS</div>
+          <div class="kpi-value" id="vault-kpi-snapshots">—</div>
+          <div class="kpi-sub" id="vault-kpi-oldest">oldest: —</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">PREDICTION RECORDS</div>
+          <div class="kpi-value" id="vault-kpi-predictions">—</div>
+          <div class="kpi-sub">all predictions archived</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">STRATEGY RECORDS</div>
+          <div class="kpi-value" id="vault-kpi-strategies">—</div>
+          <div class="kpi-sub">ever-existed strategies</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">RESEARCH ARCHIVE</div>
+          <div class="kpi-value" id="vault-kpi-research">—</div>
+          <div class="kpi-sub">briefs + findings + reports</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">KNOWLEDGE RECORDS</div>
+          <div class="kpi-value" id="vault-kpi-knowledge">—</div>
+          <div class="kpi-sub">daily score snapshots</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">PORTFOLIO ARCHIVE</div>
+          <div class="kpi-value" id="vault-kpi-portfolio">—</div>
+          <div class="kpi-sub">daily portfolio state</div>
+        </div>
+      </div>
+
+      <!-- Actions Row -->
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+        <button class="panel-action-btn" onclick="triggerVaultArchive()">▶ ARCHIVE TODAY</button>
+        <button class="panel-action-btn" onclick="runVaultBackup()">▣ BACKUP DB</button>
+        <button class="panel-action-btn" onclick="loadVaultReplay()">◷ REPLAY DATE</button>
+        <input type="date" id="vault-replay-date" style="background:var(--bg-raised);border:1px solid var(--border-faint);color:var(--text-primary);font-family:var(--font-mono);font-size:0.72rem;padding:4px 8px;border-radius:4px" />
+        <span style="font-size:0.65rem;color:var(--text-muted);margin-left:auto">Export:&nbsp;</span>
+        <a href="http://localhost:8000/api/v1/vault-export/snapshots.csv?days=30" target="_blank" style="color:var(--accent);font-size:0.65rem;font-family:var(--font-mono)">snapshots.csv</a>
+        <a href="http://localhost:8000/api/v1/vault-export/predictions.csv?days=30" target="_blank" style="color:var(--accent);font-size:0.65rem;font-family:var(--font-mono)">predictions.csv</a>
+        <a href="http://localhost:8000/api/v1/vault-export/portfolio.csv?days=90" target="_blank" style="color:var(--accent);font-size:0.65rem;font-family:var(--font-mono)">portfolio.csv</a>
+      </div>
+
+      <!-- Two-column layout: Snapshot timeline + Replay panel -->
+      <div class="grid-2" style="margin-bottom:16px">
+
+        <!-- Market Snapshot Timeline -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">MARKET SNAPSHOT TIMELINE</span>
+            <span class="panel-sub">30-day regime + Nifty close</span>
+          </div>
+          <div class="chart-container" style="height:200px">
+            <canvas id="vaultSnapshotChart"></canvas>
+          </div>
+          <table class="data-table" style="margin-top:10px">
+            <thead><tr>
+              <th>DATE</th><th>REGIME</th><th>NIFTY</th><th>RET 1D</th><th>SENTIMENT</th><th>KNOWLEDGE</th>
+            </tr></thead>
+            <tbody id="vault-snapshot-table"></tbody>
+          </table>
+        </div>
+
+        <!-- Replay Panel -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">HISTORICAL REPLAY</span>
+            <span class="panel-sub" id="vault-replay-label">Select a date above</span>
+          </div>
+          <div id="vault-replay-body" style="font-size:0.72rem;color:var(--text-muted)">
+            Pick a date and click REPLAY DATE to reconstruct AQRTI's state at that moment.
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Three-column: Knowledge arc + Portfolio arc + Research arc -->
+      <div class="grid-3" style="margin-bottom:16px">
+
+        <!-- Knowledge Score Archive -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">KNOWLEDGE SCORE HISTORY</span>
+          </div>
+          <div class="chart-container" style="height:160px">
+            <canvas id="vaultKnowledgeChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Portfolio Value Archive -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">PORTFOLIO VALUE HISTORY</span>
+          </div>
+          <div class="chart-container" style="height:160px">
+            <canvas id="vaultPortfolioChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Daily Briefs Archive -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">DAILY BRIEFS ARCHIVE</span>
+          </div>
+          <div id="vault-briefs-list" style="max-height:200px;overflow-y:auto">
+            <div style="color:var(--text-muted)">No briefs stored yet.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Backups + Research Archive -->
+      <div class="grid-2">
+
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">DATABASE BACKUPS</span>
+            <span class="panel-sub">timestamped SQLite copies</span>
+          </div>
+          <table class="data-table">
+            <thead><tr><th>TIMESTAMP</th><th>SIZE</th><th>SNAPSHOTS</th><th>PREDICTIONS</th></tr></thead>
+            <tbody id="vault-backups-table"></tbody>
+          </table>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">RESEARCH ARCHIVE</span>
+            <span class="panel-sub">last 30 days</span>
+          </div>
+          <table class="data-table">
+            <thead><tr><th>DATE</th><th>TYPE</th><th>AGENT</th><th>TITLE</th><th>URGENCY</th></tr></thead>
+            <tbody id="vault-research-table"></tbody>
+          </table>
+        </div>
+
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: HISTORICAL INTELLIGENCE LAB — Phase 8.5
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-intelligence-lab">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Regime Datasets</div>
+          <div class="kpi-value accent" id="il-kpi-regimes">10</div>
+          <div class="kpi-sub">Training Universes</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Meta Insights</div>
+          <div class="kpi-value" id="il-kpi-insights">—</div>
+          <div class="kpi-sub" id="il-kpi-insights-sub">High Severity: —</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Feature Proposals</div>
+          <div class="kpi-value" id="il-kpi-proposals">—</div>
+          <div class="kpi-sub" id="il-kpi-proposals-sub">Pending Approval</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Models Tracked</div>
+          <div class="kpi-value" id="il-kpi-models">—</div>
+          <div class="kpi-sub" id="il-kpi-models-sub">Reliability Scored</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Strategy Memory</div>
+          <div class="kpi-value" id="il-kpi-strategies">—</div>
+          <div class="kpi-sub" id="il-kpi-strategies-sub">Decayed: —</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Research Records</div>
+          <div class="kpi-value" id="il-kpi-research">—</div>
+          <div class="kpi-sub">Accumulated Memory</div>
+        </div>
+      </div>
+
+      <!-- Replay System + Regime Datasets -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Replay System</span>
+            <span class="panel-tag">Historical Reconstruction</span>
+          </div>
+          <div class="panel-body">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+              <select id="il-replay-scope" style="background:var(--bg-panel);color:var(--text-primary);border:1px solid var(--border);padding:4px 8px;border-radius:4px;font-family:inherit;font-size:0.75rem">
+                <option value="day">Single Day</option>
+                <option value="week">Week</option>
+                <option value="month">Month</option>
+                <option value="regime">Market Regime</option>
+                <option value="event">Event Window</option>
+              </select>
+              <input id="il-replay-date" type="date" style="background:var(--bg-panel);color:var(--text-primary);border:1px solid var(--border);padding:4px 8px;border-radius:4px;font-family:inherit;font-size:0.75rem" />
+              <button class="btn-sm" onclick="triggerReplay()">▶ Replay</button>
+            </div>
+            <div id="il-replay-result" style="color:var(--text-muted);font-size:0.78rem;min-height:60px">
+              Select a scope and date, then click Replay.
+            </div>
+            <div style="margin-top:12px">
+              <div style="color:var(--text-muted);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Recent Replays</div>
+              <div id="il-replay-history" style="font-size:0.76rem;color:var(--text-secondary)">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Regime Datasets</span>
+            <span class="panel-tag">Training Universes</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="il-regime-table">
+              <thead>
+                <tr>
+                  <th>Regime Label</th>
+                  <th>Samples</th>
+                  <th>Dates</th>
+                  <th>From</th>
+                  <th>To</th>
+                </tr>
+              </thead>
+              <tbody id="il-regime-body">
+                <tr><td colspan="5" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Meta Learning Insights -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Meta Learning Insights</span>
+          <span class="panel-tag">When AQRTI Is Wrong</span>
+          <button class="btn-sm" style="margin-left:auto" onclick="runMetaLearning()">⟳ Analyze</button>
+        </div>
+        <div class="panel-body">
+          <table class="data-table compact" id="il-meta-table">
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Title</th>
+                <th>Condition</th>
+                <th>Failure Rate</th>
+                <th>Samples</th>
+                <th>Severity</th>
+              </tr>
+            </thead>
+            <tbody id="il-meta-body">
+              <tr><td colspan="6" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Feature Proposals + Model Memory -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Feature Proposals</span>
+            <span class="panel-tag">Human Approval Required</span>
+            <button class="btn-sm" style="margin-left:auto" onclick="runFeatureDiscovery()">⟳ Discover</button>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="il-proposals-table">
+              <thead>
+                <tr>
+                  <th>Feature Name</th>
+                  <th>Category</th>
+                  <th>Expected Impact</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="il-proposals-body">
+                <tr><td colspan="5" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Model Memory</span>
+            <span class="panel-tag">Reliability Scores</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="il-model-memory-table">
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Task</th>
+                  <th>Reliability</th>
+                  <th>Drift</th>
+                  <th>Win Rate</th>
+                  <th>Verdict</th>
+                </tr>
+              </thead>
+              <tbody id="il-model-memory-body">
+                <tr><td colspan="6" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Strategy Memory -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Strategy Memory</span>
+          <span class="panel-tag">Lifecycle Intelligence</span>
+        </div>
+        <div class="panel-body">
+          <table class="data-table compact" id="il-strategy-memory-table">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Family</th>
+                <th>Status</th>
+                <th>Survival (days)</th>
+                <th>Final Fitness</th>
+                <th>Peak Fitness</th>
+                <th>Decay</th>
+                <th>Best Regime</th>
+                <th>Failure Reason</th>
+              </tr>
+            </thead>
+            <tbody id="il-strategy-memory-body">
+              <tr><td colspan="9" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Research Memory + Failure Patterns -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Research Memory</span>
+            <span class="panel-tag">Accumulated Knowledge</span>
+          </div>
+          <div class="panel-body" id="il-research-memory-body">
+            <div style="color:var(--text-muted);font-size:0.8rem">Loading research memory…</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Failure Pattern Analysis</span>
+            <span class="panel-tag">Recurring Failure Modes</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="il-failure-patterns-table">
+              <thead>
+                <tr>
+                  <th>Pattern Type</th>
+                  <th>Description</th>
+                  <th>Occurrences</th>
+                  <th>Failure Rate</th>
+                  <th>Last Seen</th>
+                  <th>Resolved</th>
+                </tr>
+              </thead>
+              <tbody id="il-failure-patterns-body">
+                <tr><td colspan="6" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Prediction Patterns + Intelligence Pipeline -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Prediction Patterns</span>
+            <span class="panel-tag">Recurring Success Conditions</span>
+          </div>
+          <div class="panel-body">
+            <table class="data-table compact" id="il-pred-patterns-table">
+              <thead>
+                <tr>
+                  <th>Pattern</th>
+                  <th>Condition</th>
+                  <th>Occurrences</th>
+                  <th>Success Rate</th>
+                </tr>
+              </thead>
+              <tbody id="il-pred-patterns-body">
+                <tr><td colspan="4" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Intelligence Pipeline</span>
+            <span class="panel-tag">Daily Process — Phase 8.5N</span>
+          </div>
+          <div class="panel-body">
+            <div style="font-size:0.76rem;color:var(--text-secondary);line-height:2">
+              <div>1. Update Historical Vault</div>
+              <div>2. Update Regime Datasets</div>
+              <div>3. Update AQRTI History Dataset</div>
+              <div>4. Update Meta Learning Dataset</div>
+              <div>5. Analyze Failures</div>
+              <div>6. Generate Feature Proposals</div>
+              <div>7. Update Model Memory</div>
+              <div>8. Update Strategy Memory</div>
+              <div>9. Update Research Memory</div>
+              <div>10. Train Meta Models</div>
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn-sm" onclick="runIntelligencePipeline()">▶ Run Full Pipeline</button>
+              <div id="il-pipeline-status" style="font-size:0.75rem;color:var(--text-muted);align-self:center"></div>
+            </div>
+            <div id="il-pipeline-result" style="margin-top:10px;font-size:0.74rem;color:var(--text-secondary)"></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: DATA INTELLIGENCE CENTER — Phase 8
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-data-intelligence">
+
+      <!-- KPI Row -->
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-label">Data Quality Score</div>
+          <div class="kpi-value accent" id="di-kpi-quality">—</div>
+          <div class="kpi-sub" id="di-kpi-quality-sub">Avg across 9 datasets</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Sources Online</div>
+          <div class="kpi-value" id="di-kpi-sources">—</div>
+          <div class="kpi-sub" id="di-kpi-sources-sub">of — monitored</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">FII Net (5D)</div>
+          <div class="kpi-value" id="di-kpi-fii">—</div>
+          <div class="kpi-sub" id="di-kpi-fii-sub">₹ Crore</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Market Breadth</div>
+          <div class="kpi-value" id="di-kpi-breadth">—</div>
+          <div class="kpi-sub" id="di-kpi-breadth-sub">A/D Ratio</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Leading Sectors</div>
+          <div class="kpi-value" id="di-kpi-sectors">—</div>
+          <div class="kpi-sub" id="di-kpi-sectors-sub">RRG Phase</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Earnings This Week</div>
+          <div class="kpi-value" id="di-kpi-earnings">—</div>
+          <div class="kpi-sub" id="di-kpi-earnings-sub">Scheduled</div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="action-bar" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+        <button class="btn btn-primary" onclick="runDataSupremacyPipeline()">Run Data Pipeline</button>
+        <button class="btn btn-secondary" onclick="scrapeCorpFilings()">Scrape Corp Filings</button>
+        <button class="btn btn-secondary" onclick="scrapeFiiDii()">Scrape FII/DII</button>
+        <button class="btn btn-secondary" onclick="computeBreadth()">Compute Breadth</button>
+        <button class="btn btn-secondary" onclick="computeSectorRotation()">Compute Sectors</button>
+        <button class="btn btn-secondary" onclick="runQualityChecks()">Run Quality Checks</button>
+      </div>
+
+      <div class="grid-2col">
+
+        <!-- FII/DII Flows -->
+        <div class="panel">
+          <div class="panel-header">
+            <span>FII / DII Net Flows (30D)</span>
+            <span id="di-fii-signal" class="badge">—</span>
+          </div>
+          <canvas id="di-fii-chart" height="160"></canvas>
+        </div>
+
+        <!-- Market Breadth Trend -->
+        <div class="panel">
+          <div class="panel-header">
+            <span>Market Breadth — A/D Ratio (30D)</span>
+            <span id="di-breadth-signal" class="badge">—</span>
+          </div>
+          <canvas id="di-breadth-chart" height="160"></canvas>
+        </div>
+
+      </div>
+
+      <!-- Sector Rotation RRG Table -->
+      <div class="panel" style="margin-top:20px">
+        <div class="panel-header">Sector Rotation — RRG Quadrants</div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="di-sector-table">
+            <thead>
+              <tr>
+                <th>Sector</th>
+                <th>Phase</th>
+                <th>RS Rank</th>
+                <th>Ret 20D %</th>
+                <th>Ret 60D %</th>
+                <th>RS vs Nifty 20D</th>
+                <th>Avg Sentiment</th>
+                <th>Top Stocks</th>
+              </tr>
+            </thead>
+            <tbody id="di-sector-tbody">
+              <tr><td colspan="8" style="text-align:center;color:var(--text-secondary)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="grid-2col" style="margin-top:20px">
+
+        <!-- Options Intelligence -->
+        <div class="panel">
+          <div class="panel-header">Options Intelligence — NIFTY</div>
+          <div class="kpi-row" style="gap:8px;flex-wrap:wrap">
+            <div class="kpi-card" style="flex:1;min-width:100px">
+              <div class="kpi-label">PCR OI</div>
+              <div class="kpi-value" id="di-opt-pcr">—</div>
+            </div>
+            <div class="kpi-card" style="flex:1;min-width:100px">
+              <div class="kpi-label">Max Pain</div>
+              <div class="kpi-value" id="di-opt-maxpain">—</div>
+            </div>
+            <div class="kpi-card" style="flex:1;min-width:100px">
+              <div class="kpi-label">ATM IV</div>
+              <div class="kpi-value" id="di-opt-iv">—</div>
+            </div>
+            <div class="kpi-card" style="flex:1;min-width:100px">
+              <div class="kpi-label">IV Skew</div>
+              <div class="kpi-value" id="di-opt-skew">—</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;font-size:0.74rem;color:var(--text-secondary)">
+            Highest Call OI: <span id="di-opt-call-strike">—</span> &nbsp;|&nbsp;
+            Highest Put OI: <span id="di-opt-put-strike">—</span>
+          </div>
+        </div>
+
+        <!-- Earnings Calendar -->
+        <div class="panel">
+          <div class="panel-header">Earnings Calendar (Next 14 Days)</div>
+          <div style="overflow-x:auto;max-height:200px;overflow-y:auto">
+            <table class="data-table" id="di-earnings-table">
+              <thead>
+                <tr><th>Date</th><th>Symbol</th><th>Company</th><th>Period</th><th>Status</th></tr>
+              </thead>
+              <tbody id="di-earnings-tbody">
+                <tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Corporate Filings -->
+      <div class="panel" style="margin-top:20px">
+        <div class="panel-header">Recent Corporate Filings (30D)</div>
+        <div style="overflow-x:auto;max-height:260px;overflow-y:auto">
+          <table class="data-table" id="di-corp-table">
+            <thead>
+              <tr>
+                <th>Date</th><th>Symbol</th><th>Type</th><th>Subject</th><th>Impact</th>
+              </tr>
+            </thead>
+            <tbody id="di-corp-tbody">
+              <tr><td colspan="5" style="text-align:center;color:var(--text-secondary)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Data Quality Dashboard -->
+      <div class="panel" style="margin-top:20px">
+        <div class="panel-header">Data Quality — Source Health</div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="di-quality-table">
+            <thead>
+              <tr>
+                <th>Source</th><th>Status</th><th>Grade</th><th>Quality Score</th>
+                <th>Records</th><th>Freshness (h)</th><th>Last Success</th>
+              </tr>
+            </thead>
+            <tbody id="di-quality-tbody">
+              <tr><td colspan="7" style="text-align:center;color:var(--text-secondary)">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="di-pipeline-result" style="margin-top:10px;font-size:0.74rem;color:var(--text-secondary)"></div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <script src="api.js"></script>
+  <sc
