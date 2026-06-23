@@ -1,4 +1,4 @@
-"""
+﻿"""
 Research Learning Engine — Phase 8.5H
 Extracts patterns and lessons from accumulated research to improve future predictions.
 """
@@ -9,6 +9,7 @@ import json
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import text
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
 from intelligence_training.research_dataset_builder import build_all_research_datasets
@@ -25,7 +26,7 @@ def extract_recurring_themes(datasets: Dict) -> List[Dict[str, Any]]:
         for rec in ds.records:
             title = rec.get("title", "") or ""
             summary = rec.get("summary", "") or ""
-            text = (title + " " + summary).lower()
+            content = (title + " " + summary).lower()
 
             themes = {
                 "regime_transition": ["regime", "transition", "shift"],
@@ -37,7 +38,7 @@ def extract_recurring_themes(datasets: Dict) -> List[Dict[str, Any]]:
                 "sentiment_reversal": ["sentiment", "reversal", "surprise"],
             }
             for theme, keywords in themes.items():
-                if any(k in text for k in keywords):
+                if any(k in content for k in keywords):
                     theme_counts[theme] = theme_counts.get(theme, 0) + 1
                     theme_examples.setdefault(theme, []).append(title[:80])
 
@@ -64,20 +65,17 @@ def build_research_memory_summary(db=None) -> Dict[str, Any]:
         themes = extract_recurring_themes(datasets)
 
         # Count lessons applied vs pending
-        lesson_rows = db.execute(
-            "SELECT applied, COUNT(*) as cnt FROM lessons_learned GROUP BY applied"
+        lesson_rows = db.execute(text("SELECT applied, COUNT(*) as cnt FROM lessons_learned GROUP BY applied")
         ).fetchall()
         lesson_stats = {str(r.applied): r.cnt for r in lesson_rows}
 
         # Count findings by urgency
-        finding_rows = db.execute(
-            "SELECT urgency, COUNT(*) as cnt FROM research_findings GROUP BY urgency"
+        finding_rows = db.execute(text("SELECT urgency, COUNT(*) as cnt FROM research_findings GROUP BY urgency")
         ).fetchall()
         finding_stats = {r.urgency: r.cnt for r in finding_rows}
 
         # Recent knowledge score trend
-        ks_rows = db.execute(
-            "SELECT date, overall_score FROM knowledge_scores ORDER BY date DESC LIMIT 30"
+        ks_rows = db.execute(text("SELECT date, overall_score FROM knowledge_scores ORDER BY date DESC LIMIT 30")
         ).fetchall()
         ks_trend = [{"date": str(r.date), "score": r.overall_score} for r in ks_rows]
 
@@ -93,8 +91,7 @@ def build_research_memory_summary(db=None) -> Dict[str, Any]:
 
         # Persist to research_memory table
         try:
-            db.execute(
-                """
+            db.execute(text("""
                 INSERT INTO research_memory
                     (memory_date, summary_json, themes_json, total_records, created_at)
                 VALUES (:d, :summary, :themes, :total, :now)
@@ -103,7 +100,7 @@ def build_research_memory_summary(db=None) -> Dict[str, Any]:
                     themes_json = excluded.themes_json,
                     total_records = excluded.total_records,
                     created_at = excluded.created_at
-                """,
+                """),
                 {
                     "d": date.today().isoformat(),
                     "summary": json.dumps(summary),

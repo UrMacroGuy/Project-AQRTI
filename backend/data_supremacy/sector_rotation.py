@@ -155,10 +155,11 @@ def _sector_returns(db: Session, symbols: list[str], target: date) -> dict:
 
 
 def _nifty_return(db: Session, target: date, n_days: int) -> float | None:
-    rows = db.query(DailyPrice).filter(
-        DailyPrice.symbol.in_(["^NSEI", "NIFTY50"]),
-        DailyPrice.date <= target,
-    ).order_by(DailyPrice.date.desc()).limit(n_days + 5).all()
+    from aqrti.database.models import IndexData
+    rows = db.query(IndexData).filter(
+        IndexData.index_name == "NIFTY50",
+        IndexData.date <= target,
+    ).order_by(IndexData.date.desc()).limit(n_days + 5).all()
     if len(rows) < 2:
         return None
     end_close   = rows[0].close

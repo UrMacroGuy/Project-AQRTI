@@ -4,16 +4,16 @@ Filters the prediction universe down to investable candidates, then
 applies regime-aware risk rules before handing to position_sizing.
 
 Risk rules:
-  - Min confidence threshold (from settings)
+  - Min confidence from best promoted/active strategy (falls back to settings)
   - Positive expected return required (AQRTI paper trades long-only)
-  - Min expected return threshold (>= 0.5%)
-  - Regime guard: reduce exposure in BEAR / VOLATILE regimes
+  - Regime guard: only trade in strategy's allowed_regimes; reduce exposure in BEAR/VOLATILE
   - Sector concentration check
   - Top-N cap (never hold more than MAX_HOLDINGS)
 """
 
 from __future__ import annotations
 
+import json
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -25,7 +25,7 @@ from aqrti.utils.logger import get_logger
 log = get_logger("risk_allocator")
 
 MAX_HOLDINGS           = 12
-MIN_EXPECTED_RETURN    = 0.5     # percent
+MIN_EXPECTED_RETURN    = 0.0     # percent — accept any positive expected return
 REGIME_EXPO_LIMITS     = {
     "BULL":     80.0,
     "RECOVERY": 70.0,
@@ -42,6 +42,39 @@ def _get_current_regime(db: Session) -> str:
         .first()
     )
     return row[0].upper() if row else "SIDEWAYS"
+
+
+def _get_best_strategy(db: Session) -> dict | None:
+    """Return the best promoted or active strategy's key parameters."""
+    try:
+        from aqrti.database.models import StrategyV2
+        row = (
+            db.query(StrategyV2)
+            .filter(StrategyV2.status.in_(["promoted", "active"]))
+            .order_by(StrategyV2.fitness_score.desc())
+            .first()
+        )
+        if not row:
+            return None
+        dsl = json.loads(row.dsl_json) if row.dsl_json else {}
+        raw_regimes = row.allowed_regimes
+        if isinstance(raw_regimes, str):
+            try:
+                raw_regimes = json.loads(raw_regimes)
+            except Exception:
+                raw_regimes = []
+        return {
+            "strategy_id":      row.strategy_id,
+            "name":             row.name,
+            "min_confidence":   dsl.get("min_confidence"),
+            "stop_loss_pct":    dsl.get("stop_loss_pct"),
+            "take_profit_pct":  dsl.get("take_profit_pct"),
+            "max_holding_days": dsl.get("max_holding_days"),
+            "allowed_regimes":  dsl.get("allowed_regimes") or raw_regimes or [],
+        }
+    except Exception as exc:
+        log.warning("Could not load best strategy: %s", exc)
+        return None
 
 
 def _get_volatility(db: Session, symbol: str) -> float:
@@ -84,30 +117,72 @@ def get_investable_candidates(
     regime   = _get_current_regime(db)
     max_expo = REGIME_EXPO_LIMITS.get(regime, 50.0)
 
+    # Load best promoted/active strategy to drive parameters
+    best_strategy = _get_best_strategy(db)
+    if best_strategy:
+        min_conf = best_strategy["min_confidence"] or settings.min_confidence
+        allowed_regimes = best_strategy["allowed_regimes"] or []
+        log.info(
+            "Using strategy '%s' (id=%s): min_confidence=%.1f, allowed_regimes=%s",
+            best_strategy["name"], best_strategy["strategy_id"],
+            min_conf, allowed_regimes,
+        )
+    else:
+        min_conf = settings.min_confidence
+        allowed_regimes = []
+        log.info("No promoted/active strategy found — using default min_confidence=%.1f", min_conf)
+
+    # Regime guard from strategy's allowed_regimes
+    if allowed_regimes and regime not in allowed_regimes:
+        log.warning(
+            "Current regime %s not in strategy's allowed_regimes %s — reducing exposure but still trading",
+            regime, allowed_regimes,
+        )
+        max_expo = min(max_expo, 30.0)
+        top_n    = min(top_n, 5)
+
     log.info("Regime: %s  max_exposure: %.0f%%", regime, max_expo)
 
     preds = (
         db.query(Prediction)
         .filter(
             Prediction.date      == today,
-            Prediction.confidence >= settings.min_confidence,
+            Prediction.confidence >= min_conf,
         )
         .order_by(Prediction.confidence.desc())
         .all()
     )
 
+    # Fall back to most recent available prediction date if none exist for today
+    if not preds:
+        latest_date_row = (
+            db.query(Prediction.date)
+            .order_by(Prediction.date.desc())
+            .first()
+        )
+        if latest_date_row:
+            log.info("No predictions for %s — using latest available: %s", today, latest_date_row[0])
+            preds = (
+                db.query(Prediction)
+                .filter(
+                    Prediction.date      == latest_date_row[0],
+                    Prediction.confidence >= min_conf,
+                )
+                .order_by(Prediction.confidence.desc())
+                .all()
+            )
+
     candidates = []
     for p in preds:
         exp_ret = p.expected_return or 0.0
-        # Accept any positive expected-return signal regardless of direction label.
-        # Direction label reflects model uncertainty, not a hard short/long filter.
-        if exp_ret < MIN_EXPECTED_RETURN:
+        # Only trade stocks with a positive expected return signal
+        if exp_ret <= 0.0:
             continue
 
         sector   = _get_sector(db, p.symbol)
         vol      = _get_volatility(db, p.symbol)
 
-        candidates.append({
+        cand = {
             "symbol":         p.symbol,
             "confidence":     p.confidence,
             "expectedReturn": exp_ret,
@@ -116,7 +191,14 @@ def get_investable_candidates(
             "sector":         sector,
             "volatility":     vol,
             "predictionId":   p.id,
-        })
+        }
+        if best_strategy:
+            cand["strategyId"]       = best_strategy["strategy_id"]
+            cand["strategyName"]     = best_strategy["name"]
+            cand["stopLossPct"]      = best_strategy["stop_loss_pct"]
+            cand["takeProfitPct"]    = best_strategy["take_profit_pct"]
+            cand["maxHoldingDays"]   = best_strategy["max_holding_days"]
+        candidates.append(cand)
 
     # Regime guard: in BEAR/VOLATILE we further cap at top-6
     if regime in ("BEAR", "VOLATILE"):

@@ -1,4 +1,4 @@
-"""
+﻿"""
 AQRTI Self-Learning Dataset Builder — Phase 8.5E
 Builds training datasets from AQRTI's own historical decisions:
 predictions, confidence, trades, outcomes, lessons, failures, research, pattern matches.
@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -53,15 +54,14 @@ def build_prediction_history_dataset(
         db = get_session_factory()()
     try:
         cutoff = date.today() - timedelta(days=days_back)
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT p.date, p.symbol, p.direction, p.confidence, p.expected_return,
                    p.actual_return, p.success, p.regime, p.model_version,
                    p.sentiment_score, p.risk_level
             FROM predictions p
             WHERE p.date >= :cutoff AND p.actual_return IS NOT NULL
             ORDER BY p.date
-            """,
+            """),
             {"cutoff": cutoff},
         ).fetchall()
 
@@ -91,8 +91,7 @@ def build_trade_history_dataset(
         db = get_session_factory()()
     try:
         cutoff = date.today() - timedelta(days=days_back)
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT symbol, entry_date, exit_date, entry_price, exit_price,
                    capital_deployed, gross_pnl, gross_pnl_pct, direction,
                    confidence, predicted_return, actual_return, exit_reason,
@@ -100,7 +99,7 @@ def build_trade_history_dataset(
             FROM paper_trades
             WHERE entry_date >= :cutoff AND is_open = 0
             ORDER BY entry_date
-            """,
+            """),
             {"cutoff": cutoff},
         ).fetchall()
 
@@ -130,15 +129,14 @@ def build_failure_history_dataset(
         db = get_session_factory()()
     try:
         cutoff = date.today() - timedelta(days=days_back)
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT failure_date, symbol, failure_category, failure_type, severity,
                    predicted_value, actual_value, confidence_at, regime_at,
                    root_cause, lesson
             FROM failure_records
             WHERE failure_date >= :cutoff
             ORDER BY failure_date
-            """,
+            """),
             {"cutoff": cutoff},
         ).fetchall()
 
@@ -168,8 +166,7 @@ def build_confidence_history_dataset(
         db = get_session_factory()()
     try:
         cutoff = date.today() - timedelta(days=days_back)
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT ch.prediction_date, ch.symbol, ch.confidence_score,
                    ch.confidence_category, ch.model_agreement,
                    ch.historical_accuracy, ch.regime_confidence,
@@ -179,7 +176,7 @@ def build_confidence_history_dataset(
             LEFT JOIN predictions p ON p.symbol = ch.symbol AND p.date = ch.prediction_date
             WHERE ch.prediction_date >= :cutoff AND p.actual_return IS NOT NULL
             ORDER BY ch.prediction_date
-            """,
+            """),
             {"cutoff": cutoff},
         ).fetchall()
 
@@ -207,13 +204,12 @@ def build_lesson_history_dataset(
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT lesson_date, category, title, description,
                    what_happened, why_it_happened, what_worked, what_failed,
                    recommendation, severity, symbol, regime
             FROM lessons_learned ORDER BY lesson_date
-            """
+            """)
         ).fetchall()
 
         records = [dict(r._mapping) for r in rows]
@@ -242,8 +238,7 @@ def build_pattern_history_dataset(
         db = get_session_factory()()
     try:
         cutoff = date.today() - timedelta(days=days_back)
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT po.symbol, po.prediction_date, po.pattern_confidence,
                    po.predicted_return, po.actual_return_5d, po.actual_return_10d,
                    po.was_correct, po.outperformed_nifty, po.similarity_score,
@@ -251,7 +246,7 @@ def build_pattern_history_dataset(
             FROM pattern_outcomes po
             WHERE po.prediction_date >= :cutoff
             ORDER BY po.prediction_date
-            """,
+            """),
             {"cutoff": cutoff},
         ).fetchall()
 
@@ -279,12 +274,11 @@ def build_research_history_dataset(
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT finding_date, agent_id, category, subcategory,
                    title, description, evidence, implication, urgency, symbol, regime
             FROM research_findings ORDER BY finding_date
-            """
+            """)
         ).fetchall()
 
         records = [dict(r._mapping) for r in rows]

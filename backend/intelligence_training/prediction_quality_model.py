@@ -1,4 +1,4 @@
-"""
+﻿"""
 Prediction Quality Model — Phase 8.5F
 Learns to predict when AQRTI's predictions will be wrong.
 Output: probability of failure for any given prediction context.
@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -61,15 +62,14 @@ class PredictionQualityModel:
             db = get_session_factory()()
         try:
             cutoff = date.today() - timedelta(days=days_back)
-            rows = db.execute(
-                """
+            rows = db.execute(text("""
                 SELECT p.success, ch.confidence_score as confidence,
                        ch.model_agreement, ch.historical_accuracy,
                        ch.regime_confidence, ch.signal_strength, ch.feature_completeness
                 FROM predictions p
                 JOIN confidence_history ch ON ch.symbol = p.symbol AND ch.prediction_date = p.date
                 WHERE p.date >= :cutoff AND p.success IS NOT NULL
-                """,
+                """),
                 {"cutoff": cutoff},
             ).fetchall()
             if not rows:

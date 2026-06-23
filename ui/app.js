@@ -447,16 +447,17 @@ updateClock();
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
 const pageSubtitles = {
-  overview:    'Command Center',
-  market:      'Market Intelligence',
-  opportunity: 'Opportunity Rankings',
-  news:        'News Intelligence',
-  sentiment:   'Sentiment Center',
-  strategy:    'Strategy Lab',
-  model:       'Model Center',
-  learning:    'Learning Center',
-  risk:        'Risk Center',
-  paper:       'Paper Portfolio',
+  overview:         'Command Center',
+  market:           'Market Intelligence',
+  'live-prices':    'Live Market Prices',
+  opportunity:      'Opportunity Rankings',
+  news:             'News Intelligence',
+  sentiment:        'Sentiment Center',
+  strategy:         'Strategy Lab',
+  model:            'Model Center',
+  learning:         'Learning Center',
+  risk:             'Risk Center',
+  paper:            'Paper Portfolio',
 };
 
 function activatePage(pageId) {
@@ -1504,14 +1505,14 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
 
 // ── News Intelligence — live hydration ───────────────────────
 async function hydrateNews() {
-  const data = await Api.news({ limit: 50 });
+  const data = await Api.news({ limit: 50, hours: 72 });
   if (!data || !Array.isArray(data)) return;
 
   // KPI cards
   const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
   _set('news-kpi-count', data.length);
-  const highImpact = data.filter(n => (n.impactScore ?? n.impact_score ?? 0) >= 80);
-  _set('news-kpi-high-impact', highImpact.length);
+  const highImpactItems = data.filter(n => (n.impactScore ?? n.impact_score ?? 0) >= 80);
+  _set('news-kpi-high-impact', highImpactItems.length);
   const sentScores = data.map(n => n.sentimentScore || 0).filter(s => s !== 0);
   if (sentScores.length) {
     const avg = sentScores.reduce((a, b) => a + b, 0) / sentScores.length;
@@ -2213,15 +2214,21 @@ async function hydratePaperPortfolio() {
     });
   }
 
-  // Allocation doughnut from live target weights
-  if (alloc && alloc.length) {
+  // Allocation doughnut — use open positions if target alloc is all cash
+  const allocData = (alloc && alloc.some(a => a.type === 'equity'))
+    ? alloc
+    : (pp && pp.positions && pp.positions.length)
+        ? [...pp.positions.map(p => ({ symbol: p.symbol, weightPct: p.weightPct, type: 'equity' })),
+           { symbol: 'CASH', weightPct: pp.portfolio ? pp.portfolio.cashPct : 0, type: 'cash' }]
+        : alloc;
+  if (allocData && allocData.length) {
     ChartRegistry.create('ppAllocationChart', {
       type: 'doughnut',
       data: {
-        labels: alloc.map(a => a.symbol),
+        labels: allocData.map(a => a.symbol),
         datasets: [{
-          data: alloc.map(a => a.weightPct),
-          backgroundColor: alloc.map((_, i) => [
+          data: allocData.map(a => a.weightPct),
+          backgroundColor: allocData.map((_, i) => [
             'rgba(0,212,170,0.7)','rgba(34,197,94,0.6)','rgba(59,130,246,0.6)',
             'rgba(245,158,11,0.6)','rgba(239,68,68,0.6)','rgba(147,51,234,0.6)',
             'rgba(236,72,153,0.6)','rgba(99,102,241,0.6)','rgba(251,146,60,0.6)',
@@ -2592,14 +2599,20 @@ async function hydrateStrategyResearch() {
 }
 
 async function activateStrategy(strategyId) {
-  if (!confirm(`Activate strategy ${strategyId}? This requires human approval and will mark it as ACTIVE.`)) return;
-  const result = await Api.activateStrategy(strategyId);
-  if (result && result.status === 'active') {
-    alert(`Strategy ${strategyId} activated.`);
-    _liveHydrated.delete('strategy');
-    hydrateStrategyResearch();
-  } else {
-    alert(`Error: ${JSON.stringify(result)}`);
+  if (!confirm(`Activate strategy ${strategyId}?\n\nThis marks it ACTIVE (requires "promoted" status).`)) return;
+  try {
+    const res = await fetch(`${API_CONFIG.BASE}/strategies/${strategyId}/activate`, { method: 'POST' });
+    const result = await res.json();
+    if (res.ok && result.status === 'active') {
+      alert(`Strategy ${strategyId} is now ACTIVE.`);
+      _liveHydrated.delete('strategy');
+      hydrateStrategyResearch();
+    } else {
+      const msg = result.detail || result.message || JSON.stringify(result);
+      alert(`Cannot activate: ${msg}`);
+    }
+  } catch (e) {
+    alert(`Error: ${e.message}`);
   }
 }
 
@@ -3290,6 +3303,7 @@ function renderPage(pageId) {
   if (pageId === 'model')       hydrateModelCenter();
   if (pageId === 'paper')       hydratePaperPortfolio();
   if (pageId === 'risk')        hydrateRisk();
+  if (pageId === 'learning')    hydrateLearnCenter();
   if (pageId === 'strategy')    hydrateStrategyResearch();
   if (pageId === 'agents')           hydrateResearchOps();
   if (pageId === 'vault')            hydrateVault();
@@ -3301,6 +3315,134 @@ function renderPage(pageId) {
     hydratePaperPortfolioStrip();
   }
   if (pageId === 'intelligence-lab') hydrateIntelligenceLab();
+  if (pageId === 'live-prices')      hydrateLivePrices();
+}
+
+// ── Live Prices — real-time index/commodity quotes ────────────
+let _livePricesTimer = null;
+
+async function hydrateLivePrices() {
+  await refreshLivePrices();
+  // Auto-refresh every 60 seconds while the page is visible
+  if (_livePricesTimer) clearInterval(_livePricesTimer);
+  _livePricesTimer = setInterval(() => {
+    const page = document.getElementById('page-live-prices');
+    if (page && page.classList.contains('active')) refreshLivePrices();
+    else clearInterval(_livePricesTimer);
+  }, 60000);
+}
+
+async function refreshLivePrices() {
+  const grid      = document.getElementById('live-prices-grid');
+  const tableBody = document.getElementById('live-prices-table-body');
+  const updatedEl = document.getElementById('live-prices-updated');
+
+  const data = await Api.livePrices();
+
+  if (!data || !data.length) {
+    if (grid) grid.innerHTML = '<div class="kpi-card" style="grid-column:1/-1;text-align:center;color:var(--text-muted)">Live prices unavailable — backend offline</div>';
+    return;
+  }
+
+  if (updatedEl) updatedEl.textContent = 'Updated: ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  // ── KPI grid ────────────────────────────────────────────────
+  const ICONS = { nifty50: '◈', sensex: '◎', banknifty: '◉', niftyit: '▦', usdinr: '₹', gold: '◆', crude: '◉' };
+  const FMT = {
+    nifty50:   v => v.toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+    sensex:    v => v.toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+    banknifty: v => v.toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+    niftyit:   v => v.toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+    usdinr:    v => '₹' + v.toFixed(2),
+    gold:      v => '$' + v.toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+    crude:     v => '$' + v.toFixed(2),
+  };
+
+  if (grid) {
+    grid.innerHTML = data.map(d => {
+      if (d.price == null) return `
+        <div class="kpi-card" style="text-align:center">
+          <div class="kpi-label">${ICONS[d.key] || '◎'} ${d.label}</div>
+          <div class="kpi-value" style="color:var(--text-muted)">—</div>
+          <div class="kpi-sub">Unavailable</div>
+        </div>`;
+      const isUp    = (d.changePct || 0) >= 0;
+      const color   = isUp ? 'var(--positive)' : 'var(--negative)';
+      const arrow   = isUp ? '▲' : '▼';
+      const sign    = isUp ? '+' : '';
+      const fmtFn   = FMT[d.key] || (v => v.toLocaleString('en-IN', { maximumFractionDigits: 2 }));
+      return `
+        <div class="kpi-card" style="text-align:center;border-color:${isUp ? 'rgba(0,212,170,0.2)' : 'rgba(239,68,68,0.2)'}">
+          <div class="kpi-label">${ICONS[d.key] || '◎'} ${d.label}</div>
+          <div class="kpi-value" style="color:${color};font-size:1.05rem">${fmtFn(d.price)}</div>
+          <div class="kpi-sub" style="color:${color}">${arrow} ${sign}${d.change != null ? Math.abs(d.change).toLocaleString('en-IN', {maximumFractionDigits:2}) : '—'} (${sign}${(d.changePct || 0).toFixed(2)}%)</div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── Table ────────────────────────────────────────────────────
+  if (tableBody) {
+    tableBody.innerHTML = data.map(d => {
+      if (d.price == null) return `<tr><td>${d.label}</td><td colspan="4" style="color:var(--text-muted)">Unavailable</td></tr>`;
+      const isUp  = (d.changePct || 0) >= 0;
+      const cls   = isUp ? 'positive' : 'negative';
+      const sign  = isUp ? '+' : '';
+      const fmtFn = FMT[d.key] || (v => v.toLocaleString('en-IN', { maximumFractionDigits: 2 }));
+      return `
+        <tr>
+          <td><strong>${d.label}</strong></td>
+          <td>${fmtFn(d.price)}</td>
+          <td class="${cls}">${sign}${d.change != null ? d.change.toLocaleString('en-IN', {maximumFractionDigits:2}) : '—'}</td>
+          <td class="${cls}">${sign}${(d.changePct || 0).toFixed(2)}%</td>
+          <td><span style="color:${isUp?'var(--positive)':'var(--negative)'};font-size:1.1rem">${isUp ? '▲' : '▼'}</span></td>
+        </tr>`;
+    }).join('');
+  }
+
+  // ── Charts: Nifty50 + Sensex history from DB ─────────────────
+  const [niftyHist, sensexHist] = await Promise.all([
+    Api.indexHistory('NIFTY50', 30).catch(() => null),
+    Api.indexHistory('BANKNIFTY', 30).catch(() => null),
+  ]);
+
+  function buildHistChart(canvasId, histData, label, color) {
+    // API returns a flat array directly
+    const hist = Array.isArray(histData) ? histData : (histData?.history || []);
+    if (!hist.length) return;
+    ChartRegistry.create(canvasId, {
+      type: 'line',
+      data: {
+        labels: hist.map(h => h.date?.slice(5)),
+        datasets: [{
+          label,
+          data: hist.map(h => h.close),
+          borderColor: color,
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: true,
+          backgroundColor: (ctx) => {
+            const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
+            const rgba = (a) => color.startsWith('rgb(') ? color.replace('rgb(', 'rgba(').replace(')', `,${a})`) : color;
+            g.addColorStop(0, rgba(0.18));
+            g.addColorStop(1, rgba(0.00));
+            return g;
+          },
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y.toLocaleString('en-IN', {maximumFractionDigits:2})}` }}},
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { color: 'rgba(255,255,255,0.04)' }},
+          y: { ticks: { maxTicksLimit: 5, callback: v => v.toLocaleString('en-IN', {maximumFractionDigits:0}) }, grid: { color: 'rgba(255,255,255,0.04)' }},
+        },
+      },
+    });
+  }
+
+  buildHistChart('liveNiftyChart',  niftyHist,  'Nifty 50',  'rgb(0,212,170)');
+  buildHistChart('liveSensexChart', sensexHist, 'Bank Nifty', 'rgb(99,102,241)');
 }
 
 // ── Risk Center — live hydration ─────────────────────────────
@@ -3407,6 +3549,54 @@ async function hydrateRisk() {
       statusEl.textContent = data.circuitStatus;
       statusEl.className = 'kpi-value ' + (data.circuitStatus === 'TRIGGERED' ? 'negative' : 'positive');
     }
+  }
+}
+
+// ── Learning Centre — live hydration ─────────────────────────
+async function hydrateLearnCenter() {
+  const liveData = await Api.learningOverview(30);
+  if (!liveData) return;
+
+  const _set = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+  const score = liveData.intelligenceScore || 0;
+  const delta = liveData.scoreDelta || 0;
+  _set('lc-kpi-score', `${score.toFixed(1)} / 100`);
+  _set('lc-kpi-delta', `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} vs yesterday`);
+  _set('lc-kpi-failures', liveData.totalFailures ?? 0);
+  _set('lc-kpi-resolved', `${liveData.resolvedFailures ?? 0} resolved`);
+  _set('lc-kpi-lessons', liveData.totalLessons ?? 0);
+  _set('lc-kpi-applied', `${liveData.appliedLessons ?? 0} applied`);
+  _set('lc-kpi-critical', liveData.failuresBySeverity?.critical ?? 0);
+
+  // Recent events feed
+  const events = liveData.recentEvents || [];
+  const evBody = el('lc-events-body');
+  if (evBody && events.length) {
+    const outcomeColor = { positive: '#00d4aa', negative: '#ef4444', neutral: '#6b7280' };
+    evBody.innerHTML = events.slice(0, 20).map(ev => `
+      <tr>
+        <td style="color:var(--text-muted);white-space:nowrap">${(ev.date || '').slice(5)}</td>
+        <td><span style="color:${outcomeColor[ev.outcome] || '#fff'};font-size:0.68rem">${(ev.category || '').toUpperCase()}</span></td>
+        <td style="max-width:340px;white-space:normal;font-size:0.72rem">${(ev.description || '').slice(0, 120)}</td>
+      </tr>`).join('');
+  } else if (evBody) {
+    evBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);padding:12px 0">No events recorded yet.</td></tr>';
+  }
+
+  // Score components radar — update chart data
+  const comp = liveData.components || {};
+  const radarCanvas = document.getElementById('scoreComponentsChart');
+  if (radarCanvas && radarCanvas._chartInstance) {
+    const ds = radarCanvas._chartInstance.data.datasets[0];
+    ds.data = [
+      comp.predictionQuality  ?? 50,
+      comp.portfolioQuality   ?? 50,
+      comp.riskQuality        ?? 50,
+      comp.learningQuality    ?? 50,
+      comp.calibrationQuality ?? 50,
+      comp.featureQuality     ?? 50,
+    ];
+    radarCanvas._chartInstance.update();
   }
 }
 
@@ -3894,13 +4084,14 @@ async function runIntelligencePipeline() {
   status.style.color = 'var(--accent)';
   result.textContent = '';
   try {
-    const res = await API.post('/api/v1/intelligence-pipeline/run');
-    status.style.color = 'var(--positive)';
-    status.textContent = `✓ ${res.status}`;
+    const res = await Api.triggerIntelligence();
+    const errors = res.errors || 0;
+    status.style.color = errors > 0 ? 'var(--warning)' : 'var(--positive)';
+    status.textContent = errors > 0 ? `⚠ ${res.status}` : `✓ ${res.status}`;
     const steps = res.steps || {};
     result.innerHTML = Object.entries(steps).map(([k, v]) =>
       `<div style="display:flex;justify-content:space-between;padding:2px 0">
-         <span style="color:var(--text-secondary)">${k}</span>
+         <span style="color:var(--text-secondary)">${k.replace(/_/g,' ')}</span>
          <span style="color:${v.status === 'ok' ? 'var(--positive)' : 'var(--negative)'}">${v.status || '—'}</span>
        </div>`
     ).join('');

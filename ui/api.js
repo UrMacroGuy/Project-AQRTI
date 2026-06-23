@@ -69,6 +69,19 @@ const Api = {
 
   async overview()                      { return apiFetch('/overview'); },
   async market()                        { return apiFetch('/market'); },
+  async livePrices() {
+    // yfinance parallel fetch — give 20s for network latency
+    const url = `${API_CONFIG.BASE}/market/live`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/live failed:', e.message); return null; }
+  },
+  async indexHistory(name, days = 30)  { return apiFetch(`/market/history/${name}`, { days }); },
   async predictions(p = {})            { return apiFetch('/predictions', p); },
   async news(p = {})                    { return apiFetch('/news', p); },
   async newsStats()                     { return apiFetch('/news/stats'); },

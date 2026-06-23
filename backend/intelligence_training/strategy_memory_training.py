@@ -1,4 +1,4 @@
-"""
+﻿"""
 Strategy Memory Training — Phase 8.5J
 Learns which strategies survive, decay, or fail — and under what conditions.
 Every retired strategy becomes institutional memory.
@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -56,20 +57,18 @@ class StrategyMemoryRecord:
 
 def build_strategy_memory_record(strategy_id: str, db: Session) -> Optional[StrategyMemoryRecord]:
     """Build a memory record for a single strategy."""
-    strat = db.execute(
-        """
+    strat = db.execute(text("""
         SELECT strategy_id, name, family, status, fitness_score,
                sharpe, win_rate, max_drawdown, created_at, updated_at,
                bull_sharpe, bear_sharpe, sideways_sharpe, volatile_sharpe
         FROM strategies_v2 WHERE strategy_id = :sid
-        """,
+        """),
         {"sid": strategy_id},
     ).fetchone()
 
     if not strat:
         # Try graveyard
-        strat = db.execute(
-            """
+        strat = db.execute(text("""
             SELECT strategy_id, name, family, 'retired' as status,
                    final_fitness as fitness_score, NULL as sharpe,
                    final_win_rate as win_rate, NULL as max_drawdown,
@@ -77,7 +76,7 @@ def build_strategy_memory_record(strategy_id: str, db: Session) -> Optional[Stra
                    NULL as bull_sharpe, NULL as bear_sharpe,
                    NULL as sideways_sharpe, NULL as volatile_sharpe
             FROM strategy_graveyard WHERE strategy_id = :sid
-            """,
+            """),
             {"sid": strategy_id},
         ).fetchone()
         if not strat:
@@ -88,15 +87,14 @@ def build_strategy_memory_record(strategy_id: str, db: Session) -> Optional[Stra
     if strat.created_at and strat.updated_at:
         try:
             from datetime import datetime as dt
-            c = dt.fromisoformat(str(strat.created_at)) if isinstance(strat.created_at, str) else strat.created_at
-            u = dt.fromisoformat(str(strat.updated_at)) if isinstance(strat.updated_at, str) else strat.updated_at
+            c = dt.fromisoformat(str(strat.created_at) if isinstance(strat.created_at, str) else strat.created_at)
+            u = dt.fromisoformat(str(strat.updated_at) if isinstance(strat.updated_at, str) else strat.updated_at)
             survival_days = max(0, (u - c).days)
         except Exception:
             pass
 
     # Peak fitness from version history
-    peak_row = db.execute(
-        "SELECT MAX(fitness_score) as peak FROM strategy_versions WHERE strategy_id = :sid",
+    peak_row = db.execute(text("SELECT MAX(fitness_score) as peak FROM strategy_versions WHERE strategy_id = :sid"),
         {"sid": strategy_id},
     ).fetchone()
     peak_fitness = float(peak_row.peak) if peak_row and peak_row.peak else strat.fitness_score
@@ -121,8 +119,7 @@ def build_strategy_memory_record(strategy_id: str, db: Session) -> Optional[Stra
     worst_regimes = sorted(valid, key=lambda r: valid[r])[:2] if valid else []
 
     # Failure reason from graveyard
-    grave_row = db.execute(
-        "SELECT failure_reason, lessons_json FROM strategy_graveyard WHERE strategy_id = :sid",
+    grave_row = db.execute(text("SELECT failure_reason, lessons_json FROM strategy_graveyard WHERE strategy_id = :sid"),
         {"sid": strategy_id},
     ).fetchone()
     failure_reason = grave_row.failure_reason if grave_row else None
@@ -149,8 +146,7 @@ def build_strategy_memory_record(strategy_id: str, db: Session) -> Optional[Stra
 
     # Persist
     try:
-        db.execute(
-            """
+        db.execute(text("""
             INSERT INTO strategy_memory
                 (strategy_id, name, family, status, survival_days, final_fitness,
                  peak_fitness, decay_detected, failure_reason, best_regimes_json,
@@ -164,7 +160,7 @@ def build_strategy_memory_record(strategy_id: str, db: Session) -> Optional[Stra
                 final_fitness = excluded.final_fitness,
                 decay_detected = excluded.decay_detected,
                 computed_at = excluded.computed_at
-            """,
+            """),
             {
                 "sid": record.strategy_id, "name": record.name, "family": record.family,
                 "status": record.status, "days": record.survival_days,
@@ -182,8 +178,7 @@ def build_strategy_memory_record(strategy_id: str, db: Session) -> Optional[Stra
 
 def analyze_family_survival(db: Session) -> Dict[str, Any]:
     """Analyse which strategy families survive longest."""
-    rows = db.execute(
-        """
+    rows = db.execute(text("""
         SELECT family,
                AVG(survival_days) as avg_survival,
                AVG(final_fitness) as avg_fitness,
@@ -191,7 +186,7 @@ def analyze_family_survival(db: Session) -> Dict[str, Any]:
                SUM(CASE WHEN decay_detected = 1 THEN 1 ELSE 0 END) as decay_count
         FROM strategy_memory
         GROUP BY family ORDER BY avg_fitness DESC
-        """
+        """)
     ).fetchall()
     return {r.family: {
         "avg_survival_days": round(r.avg_survival or 0, 1),
@@ -205,8 +200,8 @@ def run_strategy_memory_pipeline() -> Dict[str, Any]:
     db = get_session_factory()()
     try:
         # Process all strategies (active + retired)
-        active_rows = db.execute("SELECT strategy_id FROM strategies_v2").fetchall()
-        grave_rows = db.execute("SELECT strategy_id FROM strategy_graveyard").fetchall()
+        active_rows = db.execute(text("SELECT strategy_id FROM strategies_v2")).fetchall()
+        grave_rows = db.execute(text("SELECT strategy_id FROM strategy_graveyard")).fetchall()
         all_ids = list({r.strategy_id for r in active_rows + grave_rows})
 
         records = []

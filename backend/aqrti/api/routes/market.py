@@ -123,6 +123,59 @@ def get_market(db: Session = Depends(get_db_dependency)):
     }
 
 
+_LIVE_INDEX_MAP = {
+    "nifty50":   ("^NSEI",    "Nifty 50"),
+    "sensex":    ("^BSESN",   "Sensex"),
+    "banknifty": ("^NSEBANK", "Bank Nifty"),
+    "niftyit":   ("^CNXIT",   "Nifty IT"),
+    "usdinr":    ("USDINR=X", "USD/INR"),
+    "gold":      ("GC=F",     "Gold (USD)"),
+    "crude":     ("CL=F",     "Crude Oil"),
+}
+
+
+@router.get("/live")
+def get_live_prices():
+    """Fetch real-time index/commodity prices via yfinance (parallel)."""
+    try:
+        import yfinance as yf
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+    except ImportError:
+        raise HTTPException(status_code=503, detail="yfinance not installed")
+
+    def _fetch_one(key: str, sym: str, label: str) -> dict:
+        try:
+            info   = yf.Ticker(sym).fast_info
+            price  = getattr(info, "last_price", None)
+            prev   = getattr(info, "previous_close", None)
+            if price is None or prev is None:
+                raise ValueError("no price")
+            change     = price - prev
+            change_pct = (change / prev) * 100 if prev else 0.0
+            return {
+                "key":       key,
+                "label":     label,
+                "price":     round(float(price), 2),
+                "prev":      round(float(prev), 2),
+                "change":    round(float(change), 2),
+                "changePct": round(float(change_pct), 2),
+            }
+        except Exception:
+            return {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None}
+
+    items = list(_LIVE_INDEX_MAP.items())
+    results_by_key = {}
+    with ThreadPoolExecutor(max_workers=len(items)) as pool:
+        futures = {pool.submit(_fetch_one, key, sym, label): key for key, (sym, label) in items}
+        for fut in as_completed(futures, timeout=12):
+            r = fut.result()
+            results_by_key[r["key"]] = r
+
+    # Return in original order
+    return [results_by_key.get(key, {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None})
+            for key, (sym, label) in items]
+
+
 @router.get("/history/{index_name}")
 def get_index_history_route(
     index_name: str,

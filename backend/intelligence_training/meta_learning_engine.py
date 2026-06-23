@@ -1,4 +1,4 @@
-"""
+﻿"""
 AQRTI Meta Learning Engine — Phase 8.5F
 Learns about AQRTI's own learning process:
   - When is AQRTI likely wrong?
@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -54,8 +55,7 @@ class MetaInsight:
 def _load_prediction_outcomes(days_back: int, db: Session) -> pd.DataFrame:
     """Load predictions with actual outcomes for meta-analysis."""
     cutoff = date.today() - timedelta(days=days_back)
-    rows = db.execute(
-        """
+    rows = db.execute(text("""
         SELECT p.date, p.symbol, p.direction, p.confidence, p.expected_return,
                p.actual_return, p.success, p.regime,
                ch.model_agreement, ch.historical_accuracy, ch.regime_confidence,
@@ -63,7 +63,7 @@ def _load_prediction_outcomes(days_back: int, db: Session) -> pd.DataFrame:
         FROM predictions p
         LEFT JOIN confidence_history ch ON ch.symbol = p.symbol AND ch.prediction_date = p.date
         WHERE p.date >= :cutoff AND p.actual_return IS NOT NULL
-        """,
+        """),
         {"cutoff": cutoff},
     ).fetchall()
     if not rows:
@@ -191,9 +191,9 @@ def analyze_trust_conditions(df: pd.DataFrame) -> List[MetaInsight]:
     # High-trust: high model_agreement + high historical_accuracy
     if "model_agreement" in df.columns and "historical_accuracy" in df.columns:
         high_trust = df[
-            (df["model_agreement"].notna()) &
+            df["model_agreement"].notna() &
             (df["model_agreement"] >= 0.8) &
-            (df["historical_accuracy"].notna()) &
+            df["historical_accuracy"].notna() &
             (df["historical_accuracy"] >= 0.65)
         ]
         if len(high_trust) >= 10:
@@ -235,14 +235,13 @@ def run_meta_learning_analysis(days_back: int = 365, db=None) -> Dict[str, Any]:
         # Save insights to DB
         for ins in all_insights:
             try:
-                db.execute(
-                    """
+                db.execute(text("""
                     INSERT INTO meta_learning_records
                         (insight_type, title, description, condition_text,
                          evidence_json, failure_rate, sample_count, severity, created_at)
                     VALUES
                         (:type, :title, :desc, :cond, :ev, :fr, :cnt, :sev, :now)
-                    """,
+                    """),
                     {
                         "type": ins.insight_type, "title": ins.title,
                         "desc": ins.description, "cond": ins.condition,

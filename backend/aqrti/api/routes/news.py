@@ -15,7 +15,7 @@ router = APIRouter()
 
 @router.get("")
 def get_news(
-    hours: int   = Query(default=24, ge=1, le=168),
+    hours: int   = Query(default=72, ge=1, le=168),
     company: str = Query(default=""),
     min_impact: float = Query(default=0.0, ge=0, le=100),
     limit: int   = Query(default=50, ge=1, le=200),

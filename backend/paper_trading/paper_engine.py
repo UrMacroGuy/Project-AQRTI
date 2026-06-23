@@ -84,7 +84,10 @@ def run_paper_trading_cycle(version: int = 1) -> dict:
             }
 
         # ── Step 3: Execute rebalance ──────────────────────────────
-        rebalance_result = execute_rebalance(db, target["weights"], reason="daily_rebalance")
+        rebalance_result = execute_rebalance(
+            db, target["weights"], reason="daily_rebalance",
+            candidates=target.get("candidates", []),
+        )
 
         # ── Step 4: Mark to market ─────────────────────────────────
         mtm = mark_to_market(db)

@@ -1,0 +1,1176 @@
+INFO:     Will watch for changes in these directories: ['C:\\Users\\praty\\OneDrive\\Desktop\\Project AQRTI\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [28540] using WatchFiles
+INFO:     Started server process [26072]
+INFO:     Waiting for application startup.
+2026-06-24 01:09:07 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:09:07 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:09:08 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:09:08 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+INFO:     127.0.0.1:60947 - "GET /api/v1/replay/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/replay/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/news?limit=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/models/stats HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/learning HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/sentiment HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/vault/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/risk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/performance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/equity-curve?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60952 - "GET /api/v1/strategies/leaderboard?top_n=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60956 - "GET /api/v1/strategies/leaderboard?top_n=3 HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:60956 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'paper_trading\paper_execution.py'. Reloading...
+INFO:     127.0.0.1:62724 - "GET /api/v1/regime-datasets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/feature-proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/model-memory HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/strategy-memory HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/research-memory/latest HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/failure-patterns HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/prediction-patterns HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62724 - "GET /api/v1/replay/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60647 - "GET /api/v1/replay/history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60647 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60647 - "GET /health HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-06-24 01:14:05 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:14:05 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [26072]
+Process SpawnProcess-1:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+WARNING:  WatchFiles detected changes in 'paper_trading\paper_execution.py', 'paper_trading\paper_engine.py'. Reloading...
+INFO:     Started server process [10688]
+INFO:     Waiting for application startup.
+2026-06-24 01:14:07 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:14:07 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:14:07 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:14:07 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+2026-06-24 01:14:07 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:14:07 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\starlette\routing.py", line 741, in lifespan
+    await receive()
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+Process SpawnProcess-2:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+INFO:     Started server process [16068]
+INFO:     Waiting for application startup.
+2026-06-24 01:14:09 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:14:09 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:14:09 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:14:09 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+INFO:     127.0.0.1:59815 - "OPTIONS /api/v1/feature-proposals/discover HTTP/1.1" 200 OK
+2026-06-24 01:17:19 | INFO     | aqrti.feature_discovery      | Feature discovery: 0 failure triggers identified
+2026-06-24 01:17:19 | INFO     | aqrti.feature_discovery      | Generated 8 feature proposals
+INFO:     127.0.0.1:59815 - "POST /api/v1/feature-proposals/discover HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/feature-proposals HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "OPTIONS /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "POST /api/v1/meta-learning/run HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59815 - "GET /api/v1/meta-learning?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54379 - "OPTIONS /admin/data-supremacy HTTP/1.1" 200 OK
+2026-06-24 01:17:36 | INFO     | aqrti.api                    | Manual data supremacy pipeline triggered.
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+No data from corporate_actions
+GET https://www.nseindia.com/api/corporates-announcements failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/corporates-announcements?index=equities&from_date=17-06-2026&to_date=24-06-2026
+No data from announcements
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=BANKNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=FINNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+INFO:     127.0.0.1:54379 - "POST /admin/data-supremacy HTTP/1.1" 200 OK
+2026-06-24 01:18:02 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:18:02 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:18:02 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:18:02 | INFO     | aqrti.risk_allocator         | Investable candidates: 0 (after filters, top_n=12)
+2026-06-24 01:18:02 | WARNING  | aqrti.portfolio_builder      | No investable candidates for 2026-06-24
+2026-06-24 01:18:02 | WARNING  | aqrti.paper_engine           | No target weights generated — skipping rebalance
+2026-06-24 01:18:02 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=0.00%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+INFO:     127.0.0.1:62066 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+2026-06-24 01:18:02 | INFO     | aqrti.api                    | Manual data supremacy pipeline triggered.
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+No data from corporate_actions
+GET https://www.nseindia.com/api/corporates-announcements failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/corporates-announcements?index=equities&from_date=17-06-2026&to_date=24-06-2026
+No data from announcements
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=BANKNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=FINNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+INFO:     127.0.0.1:62109 - "POST /admin/data-supremacy HTTP/1.1" 200 OK
+2026-06-24 01:18:28 | INFO     | aqrti.api                    | Manual data supremacy pipeline triggered.
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+No data from corporate_actions
+GET https://www.nseindia.com/api/corporates-announcements failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/corporates-announcements?index=equities&from_date=17-06-2026&to_date=24-06-2026
+No data from announcements
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=BANKNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=FINNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+INFO:     127.0.0.1:53611 - "POST /admin/data-supremacy HTTP/1.1" 200 OK
+2026-06-24 01:18:54 | INFO     | aqrti.api                    | Manual data supremacy pipeline triggered.
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+No data from corporate_actions
+GET https://www.nseindia.com/api/corporates-announcements failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/corporates-announcements?index=equities&from_date=17-06-2026&to_date=24-06-2026
+No data from announcements
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=BANKNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=FINNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+INFO:     127.0.0.1:50222 - "POST /admin/data-supremacy HTTP/1.1" 200 OK
+2026-06-24 01:19:20 | INFO     | aqrti.api                    | Manual data supremacy pipeline triggered.
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+No data from corporate_actions
+GET https://www.nseindia.com/api/corporates-announcements failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/corporates-announcements?index=equities&from_date=17-06-2026&to_date=24-06-2026
+No data from announcements
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=BANKNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=FINNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+INFO:     127.0.0.1:54128 - "POST /admin/data-supremacy HTTP/1.1" 200 OK
+2026-06-24 01:19:46 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:19:46 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:19:46 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:19:46 | INFO     | aqrti.risk_allocator         | Investable candidates: 0 (after filters, top_n=12)
+2026-06-24 01:19:46 | WARNING  | aqrti.portfolio_builder      | No investable candidates for 2026-06-24
+2026-06-24 01:19:46 | WARNING  | aqrti.paper_engine           | No target weights generated — skipping rebalance
+2026-06-24 01:19:46 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=0.00%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+INFO:     127.0.0.1:58399 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+2026-06-24 01:19:46 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:19:46 | INFO     | aqrti.risk_allocator         | Investable candidates: 0 (after filters, top_n=12)
+2026-06-24 01:19:46 | WARNING  | aqrti.portfolio_builder      | No investable candidates for 2026-06-24
+INFO:     127.0.0.1:57926 - "GET /api/v1/predictions?limit=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57926 - "GET /api/v1/predictions/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57929 - "GET /api/v1/predictions?limit=20 HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'portfolio\risk_allocator.py'. Reloading...
+2026-06-24 01:21:08 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:21:08 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:21:08 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:21:08 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+2026-06-24 01:21:08 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:21:08 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+2026-06-24 01:21:08 | INFO     | aqrti.paper_trade            | Closed position: RELIANCE  exit=1328.10  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:21:08 | INFO     | aqrti.paper_trade            | Opened position: AXISBANK  shares=1.8117  capital=2480.26
+2026-06-24 01:21:08 | INFO     | aqrti.paper_trade            | Opened position: BAJFINANCE  shares=2.4391  capital=2376.92
+2026-06-24 01:21:08 | INFO     | aqrti.paper_trade            | Opened position: HDFCBANK  shares=2.8918  capital=2277.88
+2026-06-24 01:21:08 | INFO     | aqrti.paper_trade            | Opened position: ICICIBANK  shares=1.5957  capital=2182.97
+2026-06-24 01:21:08 | INFO     | aqrti.paper_trade            | Opened position: KOTAKBANK  shares=5.1706  capital=2092.01
+2026-06-24 01:21:08 | INFO     | aqrti.paper_trade            | Opened position: TITAN  shares=0.4579  capital=2004.84
+2026-06-24 01:21:08 | INFO     | aqrti.paper_execution        | Rebalance: closed=1 opened=6 errors=0  new_value=94280.99
+2026-06-24 01:21:08 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=-5.72%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+2026-06-24 01:21:08 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE COMPLETE: opened=6 closed=1 value=94280.99 ===
+INFO:     127.0.0.1:55763 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62258 - "GET /api/v1/market HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58895 - "GET /api/v1/market HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-06-24 01:21:51 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:21:51 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [16068]
+Process SpawnProcess-3:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+WARNING:  WatchFiles detected changes in 'portfolio\risk_allocator.py'. Reloading...
+INFO:     Started server process [9540]
+INFO:     Waiting for application startup.
+2026-06-24 01:21:53 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:21:53 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:21:54 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:21:54 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+2026-06-24 01:21:54 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:21:54 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\starlette\routing.py", line 741, in lifespan
+    await receive()
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+Process SpawnProcess-4:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+INFO:     Started server process [14316]
+INFO:     Waiting for application startup.
+2026-06-24 01:21:56 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:21:56 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:21:56 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:21:56 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+WARNING:  WatchFiles detected changes in 'aqrti\api\routes\market.py'. Reloading...
+INFO:     127.0.0.1:59880 - "GET /api/v1/market/live HTTP/1.1" 404 Not Found
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-06-24 01:22:53 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:22:53 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [14316]
+Process SpawnProcess-5:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+INFO:     Started server process [20700]
+INFO:     Waiting for application startup.
+2026-06-24 01:22:55 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:22:55 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:22:55 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:22:55 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+INFO:     127.0.0.1:59889 - "GET /api/v1/market/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51174 - "GET /api/v1/market/history/NIFTY50?days=30 HTTP/1.1" 200 OK
+2026-06-24 01:25:32 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:25:32 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:25:32 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:25:32 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+2026-06-24 01:25:32 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:25:32 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+2026-06-24 01:25:32 | INFO     | aqrti.paper_execution        | Rebalance: closed=0 opened=0 errors=0  new_value=94280.99
+2026-06-24 01:25:32 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=-5.72%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+2026-06-24 01:25:32 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE COMPLETE: opened=0 closed=0 value=94280.99 ===
+INFO:     127.0.0.1:51191 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51191 - "GET /api/v1/market/live HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51191 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63535 - "GET /health HTTP/1.1" 200 OK
+2026-06-24 01:27:55 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:27:55 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:27:55 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:27:55 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+2026-06-24 01:27:55 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:27:55 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+2026-06-24 01:27:55 | INFO     | aqrti.paper_execution        | Rebalance: closed=0 opened=0 errors=0  new_value=94280.99
+2026-06-24 01:27:55 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=-5.72%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+2026-06-24 01:27:55 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE COMPLETE: opened=0 closed=0 value=94280.99 ===
+INFO:     127.0.0.1:65437 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65437 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65437 - "GET /api/v1/performance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65437 - "GET /api/v1/equity-curve?days=90 HTTP/1.1" 200 OK
+2026-06-24 01:27:55 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:27:55 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+2026-06-24 01:27:56 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:27:56 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+INFO:     127.0.0.1:65437 - "GET /api/v1/paper-portfolio/allocation?method=confidence_weighted HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65437 - "GET /api/v1/paper-trades?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52984 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52984 - "GET /api/v1/paper-trades?limit=50 HTTP/1.1" 200 OK
+2026-06-24 01:28:39 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+INFO:     127.0.0.1:60272 - "GET /api/v1/equity-curve?days=90 HTTP/1.1" 200 OK
+2026-06-24 01:28:39 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+INFO:     127.0.0.1:59296 - "GET /api/v1/performance HTTP/1.1" 200 OK
+2026-06-24 01:28:40 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:28:40 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+INFO:     127.0.0.1:49220 - "GET /api/v1/paper-portfolio/allocation?method=confidence_weighted HTTP/1.1" 200 OK
+2026-06-24 01:28:41 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+INFO:     127.0.0.1:59296 - "GET /api/v1/performance HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60272 - "GET /api/v1/equity-curve?days=90 HTTP/1.1" 200 OK
+2026-06-24 01:28:41 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+INFO:     127.0.0.1:62689 - "GET /api/v1/paper-trades?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49220 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+2026-06-24 01:28:41 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:28:41 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+INFO:     127.0.0.1:52984 - "GET /api/v1/paper-portfolio/allocation?method=confidence_weighted HTTP/1.1" 200 OK
+2026-06-24 01:28:43 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+INFO:     127.0.0.1:49220 - "GET /api/v1/performance HTTP/1.1" 200 OK
+2026-06-24 01:28:43 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+INFO:     127.0.0.1:59296 - "GET /api/v1/paper-trades?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/equity-curve?days=90 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52984 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+2026-06-24 01:28:43 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:28:43 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+INFO:     127.0.0.1:60272 - "GET /api/v1/paper-portfolio/allocation?method=confidence_weighted HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60272 - "OPTIONS /admin/data-supremacy HTTP/1.1" 200 OK
+2026-06-24 01:28:47 | INFO     | aqrti.api                    | Manual data supremacy pipeline triggered.
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+No data from corporate_actions
+GET https://www.nseindia.com/api/corporates-announcements failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/corporates-announcements?index=equities&from_date=17-06-2026&to_date=24-06-2026
+No data from announcements
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=BANKNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com/api/option-chain-indices failed: 404 Client Error: Not Found for url: https://www.nseindia.com/api/option-chain-indices?symbol=FINNIFTY
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+GET https://www.nseindia.com failed: 403 Client Error: Forbidden for url: https://www.nseindia.com/
+INFO:     127.0.0.1:60272 - "POST /admin/data-supremacy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/data-quality/source-health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/data-quality?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/fii-dii?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/market-breadth HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/market-breadth/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/sector-rotation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/data-quality/source-health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/options-intelligence?symbol=NIFTY HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/earnings/calendar?days_ahead=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62689 - "GET /api/v1/corporate?days=30&limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/fii-dii?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/options-intelligence?symbol=NIFTY HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/market-breadth HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/market-breadth/history?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/sector-rotation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/earnings/calendar?days_ahead=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/earnings/summary?days=90 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/corporate?limit=10 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61542 - "GET /api/v1/corporate/summary?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55460 - "OPTIONS /admin/strategy-research HTTP/1.1" 200 OK
+2026-06-24 01:29:21 | INFO     | aqrti.api                    | Manual strategy research loop triggered.
+2026-06-24 01:29:21 | INFO     | aqrti.strategy_research_loop | Daily strategy research loop starting — 2026-06-24
+2026-06-24 01:29:21 | INFO     | aqrti.strategy_generator     | Generated 50 candidates (8 families) in 50 attempts
+2026-06-24 01:29:21 | INFO     | aqrti.strategy_generator     | Persisted 50 new candidate strategies (generation=0)
+2026-06-24 01:29:21 | INFO     | aqrti.strategy_research_loop | Step 1 — Generated: 50 new candidates
+2026-06-24 01:29:23 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_BC57D1784D: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:24 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_8A31757F31: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:26 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_1364EBC2ED: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:27 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_BA4604CB2A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:29 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_E86CE0D9ED: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:30 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_A64E014812: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:32 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_EE62AFA158: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:33 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_7A6AFAA93B: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:35 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_1D516345EE: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:36 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_7435F4B16F: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:37 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_8042B3FE25: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:39 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_265ECE29C6: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:40 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_73027CC861: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:42 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_C06AB43A11: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:43 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_1CC160333E: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:44 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_CFE3D293C2: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:46 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_FA2469B1F5: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:47 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_FAE306CC9E: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:49 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_595AD40969: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:50 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_B2DDD64A08: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:51 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_997079F374: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:53 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_CEA3864979: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:54 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_C4E534099A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:56 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0F117077D9: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:57 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_60D6F975B4: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:29:58 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_A3AD1C580A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:00 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_3EDFDBC2FA: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:01 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_6241E14680: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:03 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_9AFABCB919: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:04 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0E38958082: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:06 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_9CC893FD06: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:08 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_5B8613B961: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:09 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0DC53005F7: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:10 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_2A4C771CF8: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:12 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_E3AF896A24: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:13 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_55C39B4CE7: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:15 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_FE658DC23F: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:16 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_DF421FB6AE: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:18 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_B0BE0F8256: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:19 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_F94BCC83B2: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:20 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_5E06051364: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:22 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_868C98E129: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:23 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_C51FBFB1D8: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:24 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_B40E210BD2: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:26 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0D1DB37912: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:27 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_711989993A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:29 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_A7804B36C9: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:30 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_EEA4EF5B78: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:31 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_45B692B404: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_E0190046F7: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Step 2 — Backtested: 50 strategies
+2026-06-24 01:30:33 | INFO     | aqrti.fitness_engine         | Scored 3 strategies
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Step 3 — Scored: 3 strategies
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_lifecycle     | Lifecycle sweep: promoted=0 retired=0
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Step 4 — Lifecycle: promoted=0 retired=0
+2026-06-24 01:30:33 | INFO     | aqrti.evolution_engine       | No eligible parents found for evolution
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Step 5 — Evolution gen=?: created=0
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Step 6 — Graveyard: total=3
+2026-06-24 01:30:33 | INFO     | aqrti.research_engine        | Full research completed: 6 reports generated
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Step 7 — Research: 6 reports generated
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_memory        | Population snapshot recorded: total=300 active=0
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Step 8 — Snapshot: total=300 active=0 avg_fitness=14.1
+2026-06-24 01:30:33 | INFO     | aqrti.strategy_research_loop | Daily strategy research loop complete
+INFO:     127.0.0.1:55460 - "POST /admin/strategy-research HTTP/1.1" 200 OK
+2026-06-24 01:30:33 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:30:33 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:30:33 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+2026-06-24 01:30:33 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+2026-06-24 01:30:33 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:30:33 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+2026-06-24 01:30:33 | INFO     | aqrti.paper_execution        | Rebalance: closed=0 opened=0 errors=0  new_value=94280.99
+2026-06-24 01:30:33 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=-5.72%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+2026-06-24 01:30:33 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE COMPLETE: opened=0 closed=0 value=94280.99 ===
+INFO:     127.0.0.1:60851 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53327 - "OPTIONS /admin/vault HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62034 - "OPTIONS /api/v1/research-briefs/generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61833 - "OPTIONS /admin/vault HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53327 - "GET /api/v1/performance HTTP/1.1" 200 OK
+2026-06-24 01:30:33 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 50%
+INFO:     127.0.0.1:58457 - "GET /api/v1/research/latest HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60851 - "GET /api/v1/equity-curve?days=90 HTTP/1.1" 200 OK
+2026-06-24 01:30:33 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+INFO:     127.0.0.1:54416 - "GET /api/v1/vault/snapshots?days=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53327 - "GET /api/v1/paper-trades?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54416 - "GET /api/v1/archives/knowledge?days=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54416 - "GET /api/v1/archives/portfolio?days=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62034 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60851 - "GET /api/v1/vault/snapshots?days=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54416 - "GET /api/v1/archives/research?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60851 - "GET /api/v1/archives/knowledge?days=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54416 - "GET /api/v1/archives/portfolio?days=14 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60851 - "GET /api/v1/backups HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60851 - "GET /api/v1/vault-briefs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54416 - "GET /api/v1/archives/research?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54416 - "GET /api/v1/backups HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54416 - "GET /api/v1/vault-briefs HTTP/1.1" 200 OK
+2026-06-24 01:30:34 | INFO     | aqrti.risk_allocator         | Investable candidates: 12 (after filters, top_n=12)
+2026-06-24 01:30:34 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=12  exposure=50.0%  cash=50.0%
+INFO:     127.0.0.1:61833 - "GET /api/v1/paper-portfolio/allocation?method=confidence_weighted HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54838 - "OPTIONS /api/v1/strategies/abc002/activate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54838 - "POST /api/v1/strategies/abc002/activate HTTP/1.1" 404 Not Found
+WARNING:  WatchFiles detected changes in 'data_supremacy\sector_rotation.py'. Reloading...
+INFO:     127.0.0.1:61654 - "OPTIONS /admin/agent-pipeline HTTP/1.1" 200 OK
+2026-06-24 01:31:31 | INFO     | aqrti.api                    | Manual agent pipeline triggered.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | === DAILY AGENT PIPELINE START ===
+2026-06-24 01:31:31 | INFO     | aqrti.agent.market_research  | [market_research] Starting execution
+2026-06-24 01:31:31 | INFO     | aqrti.agent.market_research  | [market_research] Completed. Market: SIDEWAYS (conf=55%). 1 findings.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | Agent market_research: 1 findings
+2026-06-24 01:31:31 | INFO     | aqrti.agent.news_research    | [news_research] Starting execution
+2026-06-24 01:31:31 | INFO     | aqrti.agent.news_research    | [news_research] Completed. News research: 2 findings. [!] High urgency items detected.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | Agent news_research: 2 findings
+2026-06-24 01:31:31 | INFO     | aqrti.agent.pattern_research | [pattern_research] Starting execution
+2026-06-24 01:31:31 | INFO     | aqrti.agent.pattern_research | [pattern_research] Completed. Pattern research: 0 findings. Patterns operating normally.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | Agent pattern_research: 0 findings
+2026-06-24 01:31:31 | INFO     | aqrti.agent.model_research   | [model_research] Starting execution
+2026-06-24 01:31:31 | INFO     | aqrti.agent.model_research   | [model_research] Completed. Model health: 0 drifted models, 0 decayed features, 0 recent failures. Calibration=50.0.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | Agent model_research: 2 findings
+2026-06-24 01:31:31 | INFO     | aqrti.agent.strategy_research | [strategy_research] Starting execution
+2026-06-24 01:31:31 | INFO     | aqrti.agent.strategy_research | [strategy_research] Completed. Strategy population: 53 active, 247 candidates, 3 in graveyard. 3 decaying. 0 resurrection candidates. 6 findings.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | Agent strategy_research: 6 findings
+2026-06-24 01:31:31 | INFO     | aqrti.agent.risk_research    | [risk_research] Starting execution
+2026-06-24 01:31:31 | INFO     | aqrti.agent.risk_research    | [risk_research] Completed. Risk assessment: drawdown=-5.7% 1 findings. No critical issues.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | Agent risk_research: 1 findings
+2026-06-24 01:31:31 | INFO     | aqrti.agent.cro              | [cro] Starting execution
+2026-06-24 01:31:31 | INFO     | aqrti.agent.cro              | [cro] Completed. CRO brief for 2026-06-24: 8 reports aggregated. 0 critical findings. Knowledge score: 71.5. Regime: SIDEWAYS.
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | Agent cro: 1 findings
+2026-06-24 01:31:31 | INFO     | aqrti.agent_scheduler        | === DAILY AGENT PIPELINE COMPLETE ===
+INFO:     127.0.0.1:61654 - "POST /admin/agent-pipeline HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61654 - "GET /api/v1/agents HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61654 - "GET /api/v1/research-briefs/today HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61654 - "GET /api/v1/research-findings/summary?days=7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61654 - "GET /api/v1/agents/messages/all?days=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61654 - "GET /api/v1/agents/performance/stats?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51310 - "GET /api/v1/strategies/leaderboard?top_n=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51310 - "POST /api/v1/strategies//activate HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:51313 - "GET /api/v1/strategies/leaderboard?top_n=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51313 - "GET /api/v1/strategies?limit=3 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-06-24 01:32:54 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:32:54 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [20700]
+Process SpawnProcess-6:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+WARNING:  WatchFiles detected changes in 'data_supremacy\breadth_engine.py'. Reloading...
+INFO:     Started server process [28724]
+INFO:     Waiting for application startup.
+2026-06-24 01:32:56 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:32:56 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:32:56 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:32:56 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+2026-06-24 01:32:56 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:32:56 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\starlette\routing.py", line 741, in lifespan
+    await receive()
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+Process SpawnProcess-7:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+INFO:     Started server process [21636]
+INFO:     Waiting for application startup.
+2026-06-24 01:32:58 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:32:58 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:32:58 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:32:58 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+INFO:     127.0.0.1:57282 - "GET /api/v1/learning?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57282 - "GET /api/v1/failures/summary?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57282 - "GET /api/v1/lessons?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57282 - "GET /api/v1/drift?days=90 HTTP/1.1" 200 OK
+2026-06-24 01:33:12 | INFO     | aqrti.feature_ranker         | No importance data available for ranking
+INFO:     127.0.0.1:57282 - "GET /api/v1/feature-intelligence/ranking?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61448 - "GET /api/v1/learning?days=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59505 - "GET /api/v1/strategies/leaderboard?top_n=3&status=promoted HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:52992 - "GET /api/v1/strategies/leaderboard?top_n=5&status=promoted HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52996 - "GET /api/v1/strategies/AQRTI_STR_A8DC98D969 HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'portfolio\risk_allocator.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+2026-06-24 01:37:56 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:37:56 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [21636]
+Process SpawnProcess-8:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+WARNING:  WatchFiles detected changes in 'portfolio\risk_allocator.py'. Reloading...
+INFO:     Started server process [13580]
+INFO:     Waiting for application startup.
+2026-06-24 01:37:59 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:37:59 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:37:59 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:37:59 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+2026-06-24 01:37:59 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:37:59 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\starlette\routing.py", line 741, in lifespan
+    await receive()
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+Process SpawnProcess-9:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+WARNING:  WatchFiles detected changes in 'aqrti\api\routes\strategies.py'. Reloading...
+INFO:     Started server process [20152]
+INFO:     Waiting for application startup.
+2026-06-24 01:38:00 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:38:00 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:38:00 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:38:00 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+2026-06-24 01:38:00 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:38:00 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+ERROR:    Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\starlette\routing.py", line 741, in lifespan
+    await receive()
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\lifespan\on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError
+
+Process SpawnProcess-10:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+INFO:     Started server process [13852]
+INFO:     Waiting for application startup.
+2026-06-24 01:38:02 | INFO     | aqrti.api                    | AQRTI Backend starting up …
+2026-06-24 01:38:02 | INFO     | aqrti.database               | Database initialized — all tables verified.
+2026-06-24 01:38:02 | INFO     | aqrti.scheduler              | Scheduler started. Daily ingestion cron: 30 15 * * 1-5 (IST)
+2026-06-24 01:38:02 | INFO     | aqrti.api                    | AQRTI Backend ready on port 8000
+INFO:     Application startup complete.
+INFO:     127.0.0.1:62187 - "GET /api/v1/predictions?limit=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55206 - "GET /api/v1/news?limit=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55210 - "GET /api/v1/strategies/leaderboard?top_n=5&status=promoted HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55214 - "GET /api/v1/news?limit=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55217 - "GET /api/v1/predictions?limit=2 HTTP/1.1" 200 OK
+2026-06-24 01:39:05 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:39:05 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:39:05 | INFO     | aqrti.risk_allocator         | Using strategy 'Momentum_momentum_10d_7.3' (id=AQRTI_STR_A8DC98D969): min_confidence=74.3, allowed_regimes=['BULL']
+2026-06-24 01:39:05 | WARNING  | aqrti.risk_allocator         | Current regime SIDEWAYS not in strategy's allowed_regimes ['BULL'] — reducing exposure but still trading
+2026-06-24 01:39:05 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 30%
+2026-06-24 01:39:05 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+2026-06-24 01:39:05 | INFO     | aqrti.risk_allocator         | Investable candidates: 5 (after filters, top_n=5)
+2026-06-24 01:39:05 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=5  exposure=30.0%  cash=70.0%
+2026-06-24 01:39:05 | INFO     | aqrti.paper_trade            | Closed position: BAJFINANCE  exit=974.50  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:39:05 | INFO     | aqrti.paper_trade            | Closed position: HDFCBANK  exit=787.70  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:39:05 | INFO     | aqrti.paper_trade            | Closed position: INFY  exit=1032.60  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:39:05 | INFO     | aqrti.paper_trade            | Closed position: TATASTEEL  exit=196.80  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:39:05 | INFO     | aqrti.paper_trade            | Closed position: TCS  exit=2073.50  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:39:05 | INFO     | aqrti.paper_trade            | Closed position: TITAN  exit=4378.00  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:39:05 | INFO     | aqrti.paper_trade            | Closed position: WIPRO  exit=176.67  pnl=0.00 (0.00%)  reason=daily_rebalance
+2026-06-24 01:39:05 | INFO     | aqrti.paper_execution        | Rebalance: closed=7 opened=0 errors=0  new_value=66168.05
+2026-06-24 01:39:05 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=-33.83%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+2026-06-24 01:39:05 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE COMPLETE: opened=0 closed=7 value=66168.05 ===
+INFO:     127.0.0.1:55218 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55223 - "GET /api/v1/strategies?status=shadow&limit=2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55233 - "GET /api/v1/strategies?status=shadow HTTP/1.1" 200 OK
+WARNING:  WatchFiles detected changes in 'aqrti\api\routes\news.py'. Reloading...
+INFO:     127.0.0.1:58801 - "GET /health HTTP/1.1" 200 OK
+2026-06-24 01:39:41 | INFO     | aqrti.strategy_lifecycle     | Strategy AQRTI_STR_BC57D1784D retired. Reason: test_breed
+2026-06-24 01:39:41 | INFO     | aqrti.evolution_engine       | No eligible parents found for evolution
+INFO:     127.0.0.1:60220 - "POST /api/v1/strategies/AQRTI_STR_BC57D1784D/retire?reason=test_breed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60223 - "GET /api/v1/news?limit=50&hours=72 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60223 - "GET /api/v1/news?limit=50&hours=72 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60219 - "OPTIONS /admin/strategy-research HTTP/1.1" 200 OK
+2026-06-24 01:39:46 | INFO     | aqrti.api                    | Manual strategy research loop triggered.
+2026-06-24 01:39:46 | INFO     | aqrti.strategy_research_loop | Daily strategy research loop starting — 2026-06-24
+2026-06-24 01:39:46 | INFO     | aqrti.strategy_generator     | Generated 50 candidates (8 families) in 50 attempts
+2026-06-24 01:39:46 | INFO     | aqrti.strategy_generator     | Persisted 50 new candidate strategies (generation=0)
+2026-06-24 01:39:46 | INFO     | aqrti.strategy_research_loop | Step 1 — Generated: 50 new candidates
+2026-06-24 01:39:47 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_BC57D1784D: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:49 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_8A31757F31: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:50 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_1364EBC2ED: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:52 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_BA4604CB2A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:53 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_E86CE0D9ED: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:54 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_A64E014812: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:56 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_EE62AFA158: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:57 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_7A6AFAA93B: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:39:59 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_1D516345EE: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:00 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_7435F4B16F: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:01 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_8042B3FE25: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:03 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_265ECE29C6: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:04 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_73027CC861: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:06 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_C06AB43A11: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:07 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_1CC160333E: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:09 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_CFE3D293C2: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:10 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_FA2469B1F5: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:11 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_FAE306CC9E: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:13 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_595AD40969: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:14 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_B2DDD64A08: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:16 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_997079F374: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:17 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_CEA3864979: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:18 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_C4E534099A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:19 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0F117077D9: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:20 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_60D6F975B4: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:21 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_A3AD1C580A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:22 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_3EDFDBC2FA: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:23 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_6241E14680: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:24 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_9AFABCB919: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:25 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0E38958082: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:26 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_9CC893FD06: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:27 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_5B8613B961: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:27 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0DC53005F7: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:28 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_2A4C771CF8: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:29 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_E3AF896A24: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:30 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_55C39B4CE7: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:31 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_FE658DC23F: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:32 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_DF421FB6AE: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:33 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_B0BE0F8256: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:34 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_F94BCC83B2: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:35 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_5E06051364: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:36 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_868C98E129: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:37 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_C51FBFB1D8: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:38 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_B40E210BD2: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:39 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_0D1DB37912: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:40 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_711989993A: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:40 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_A7804B36C9: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:41 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_EEA4EF5B78: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:42 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_45B692B404: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_backtester    | Backtest AQRTI_STR_E0190046F7: trades=0 sharpe=0.000 win_rate=0.0% mdd=0.0%
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Step 2 — Backtested: 50 strategies
+2026-06-24 01:40:43 | INFO     | aqrti.fitness_engine         | Scored 3 strategies
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Step 3 — Scored: 3 strategies
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_lifecycle     | Lifecycle sweep: promoted=0 retired=0
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Step 4 — Lifecycle: promoted=0 retired=0
+2026-06-24 01:40:43 | INFO     | aqrti.evolution_engine       | No eligible parents found for evolution
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Step 5 — Evolution gen=?: created=0
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Step 6 — Graveyard: total=3
+2026-06-24 01:40:43 | INFO     | aqrti.research_engine        | Full research completed: 6 reports generated
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Step 7 — Research: 6 reports generated
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_memory        | Population snapshot recorded: total=350 active=0
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Step 8 — Snapshot: total=350 active=0 avg_fitness=14.1
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_research_loop | Daily strategy research loop complete
+INFO:     127.0.0.1:60219 - "POST /admin/strategy-research HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     127.0.0.1:50131 - "OPTIONS /api/v1/feature-proposals/discover HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50722 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63185 - "OPTIONS /api/v1/meta-learning/run HTTP/1.1" 200 OK
+2026-06-24 01:40:43 | INFO     | aqrti.api                    | Manual paper trading cycle triggered.
+2026-06-24 01:40:43 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE STARTED ===
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | Using strategy 'Momentum_momentum_10d_7.3' (id=AQRTI_STR_A8DC98D969): min_confidence=74.3, allowed_regimes=['BULL']
+2026-06-24 01:40:43 | WARNING  | aqrti.risk_allocator         | Current regime SIDEWAYS not in strategy's allowed_regimes ['BULL'] — reducing exposure but still trading
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 30%
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | Investable candidates: 5 (after filters, top_n=5)
+2026-06-24 01:40:43 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=5  exposure=30.0%  cash=70.0%
+2026-06-24 01:40:43 | INFO     | aqrti.paper_execution        | Rebalance: closed=0 opened=0 errors=0  new_value=66168.05
+2026-06-24 01:40:43 | INFO     | aqrti.performance_tracker    | Performance snapshot: ret=-33.83%  sharpe=0.00  sortino=0.00  win=0.0%  pf=0.00
+2026-06-24 01:40:43 | INFO     | aqrti.paper_engine           | === PAPER TRADING CYCLE COMPLETE: opened=0 closed=0 value=66168.05 ===
+INFO:     127.0.0.1:63568 - "POST /admin/paper-trade HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55373 - "OPTIONS /admin/intelligence HTTP/1.1" 200 OK
+INFO:     Waiting for connections to close. (CTRL+C to force quit)
+INFO:     127.0.0.1:55373 - "GET /api/v1/paper-portfolio HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55373 - "GET /api/v1/paper-trades?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63185 - "GET /api/v1/equity-curve?days=90 HTTP/1.1" 200 OK
+2026-06-24 01:40:43 | INFO     | aqrti.strategy_lifecycle     | Strategy AQRTI_STR_A8DC98D969 retired. Reason: test_breed
+INFO:     127.0.0.1:63568 - "GET /api/v1/performance HTTP/1.1" 200 OK
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | Using strategy 'Momentum_momentum_10d_7.3' (id=AQRTI_STR_A8DC98D969): min_confidence=74.3, allowed_regimes=['BULL']
+INFO:     127.0.0.1:60422 - "GET /api/v1/graveyard?limit=20 HTTP/1.1" 200 OK
+2026-06-24 01:40:43 | INFO     | aqrti.evolution_engine       | No eligible parents found for evolution
+2026-06-24 01:40:43 | WARNING  | aqrti.risk_allocator         | Current regime SIDEWAYS not in strategy's allowed_regimes ['BULL'] — reducing exposure but still trading
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | Regime: SIDEWAYS  max_exposure: 30%
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | No predictions for 2026-06-24 — using latest available: 2026-06-23
+INFO:     127.0.0.1:60422 - "GET /api/v1/graveyard/resurrection-candidates HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60422 - "GET /api/v1/research/latest HTTP/1.1" 200 OK
+2026-06-24 01:40:43 | INFO     | aqrti.risk_allocator         | Investable candidates: 5 (after filters, top_n=5)
+2026-06-24 01:40:43 | INFO     | aqrti.portfolio_builder      | Portfolio built: method=confidence_weighted  stocks=5  exposure=30.0%  cash=70.0%
+INFO:     127.0.0.1:50131 - "GET /api/v1/paper-portfolio/allocation?method=confidence_weighted HTTP/1.1" 200 OK
+INFO:     Waiting for application shutdown.
+2026-06-24 01:40:49 | INFO     | aqrti.scheduler              | Scheduler stopped.
+2026-06-24 01:40:49 | INFO     | aqrti.api                    | AQRTI Backend shut down.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [13852]
+Process SpawnProcess-11:
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 78, in subprocess_started
+    target(sockets=sockets)
+  File "C:\Users\praty\OneDrive\Desktop\Project AQRTI\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\praty\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\Lib\asyncio\runners.py", line 123, in run
+    raise KeyboardInterrupt()
+KeyboardInterrupt

@@ -89,7 +89,6 @@ def compute_model_reliability(
             acc_vals = [r.metric_value for r in metric_rows if r.metric_name == "accuracy"]
             if acc_vals:
                 recent_accuracy = float(np.mean(acc_vals))
-
         # Drift score from model_drift_history
         drift_rows = db.execute(
             text("""

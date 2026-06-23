@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from aqrti.database.engine import get_session_factory
@@ -49,15 +50,13 @@ def build_agent_reports_dataset(db: Optional[Session] = None) -> ResearchDataset
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT ar.report_date, ar.agent_id, ar.category, ar.title,
                    ar.summary, ar.urgency, a.agent_type
             FROM agent_reports ar
             LEFT JOIN agents a ON a.agent_id = ar.agent_id
             ORDER BY ar.report_date
-            """
-        ).fetchall()
+            """)).fetchall()
         records = [dict(r._mapping) for r in rows]
         dates = [r["report_date"] for r in records if r["report_date"]] if records else []
         cats = list({r["category"] for r in records if r.get("category")})
@@ -80,12 +79,10 @@ def build_research_briefs_dataset(db: Optional[Session] = None) -> ResearchDatas
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT brief_date, title, market_summary, regime_at, knowledge_score
             FROM research_briefs ORDER BY brief_date
-            """
-        ).fetchall()
+            """)).fetchall()
         records = [dict(r._mapping) for r in rows]
         dates = [r["brief_date"] for r in records if r["brief_date"]] if records else []
         return ResearchDataset(
@@ -107,12 +104,10 @@ def build_strategy_research_dataset(db: Optional[Session] = None) -> ResearchDat
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT report_date, category, title, summary, recommendations
             FROM strategy_research_reports ORDER BY report_date
-            """
-        ).fetchall()
+            """)).fetchall()
         records = [dict(r._mapping) for r in rows]
         dates = [r["report_date"] for r in records if r["report_date"]] if records else []
         cats = list({r["category"] for r in records if r.get("category")})
@@ -135,13 +130,11 @@ def build_drift_reports_dataset(db: Optional[Session] = None) -> ResearchDataset
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT model_name, task, measured_date, drift_pct, drift_flag,
                    accuracy, auc_roc, ic, baseline_metric
             FROM model_drift_history ORDER BY measured_date
-            """
-        ).fetchall()
+            """)).fetchall()
         records = [dict(r._mapping) for r in rows]
         dates = [r["measured_date"] for r in records if r["measured_date"]] if records else []
         return ResearchDataset(
@@ -163,13 +156,11 @@ def build_knowledge_events_dataset(db: Optional[Session] = None) -> ResearchData
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT event_date, category, symbol, event_type, description,
                    outcome, magnitude, confidence_at, actual_result, regime
             FROM knowledge_events ORDER BY event_date
-            """
-        ).fetchall()
+            """)).fetchall()
         records = [dict(r._mapping) for r in rows]
         dates = [r["event_date"] for r in records if r["event_date"]] if records else []
         cats = list({r["category"] for r in records if r.get("category")})

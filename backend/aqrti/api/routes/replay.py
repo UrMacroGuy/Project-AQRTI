@@ -19,6 +19,19 @@ from aqrti.database.engine import get_db_dependency
 router = APIRouter()
 
 
+@router.get("/history")
+def get_replay_history(db: Session = Depends(get_db_dependency)):
+    """List recent historical replays."""
+    from sqlalchemy import text
+    try:
+        rows = db.execute(
+            text("SELECT * FROM historical_replays ORDER BY created_at DESC LIMIT 50")
+        ).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception as exc:
+        return []
+
+
 @router.get("/{replay_date}")
 def replay_date(replay_date: str, db: Session = Depends(get_db_dependency)):
     from vault.replay_engine import replay_date as _replay

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Confidence Quality Model — Phase 8.5F
 Learns when AQRTI's confidence scores are well-calibrated vs. overconfident.
 """
@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -22,8 +23,6 @@ MODEL_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "ml_models", "meta", "confidence_quality_model.pkl",
 )
-
-
 class ConfidenceQualityModel:
     """
     Measures and corrects confidence calibration.
@@ -39,12 +38,11 @@ class ConfidenceQualityModel:
         db = get_session_factory()()
         try:
             cutoff = date.today() - timedelta(days=days_back)
-            rows = db.execute(
-                """
+            rows = db.execute(text("""
                 SELECT p.confidence, p.success, p.regime
                 FROM predictions p
                 WHERE p.date >= :cutoff AND p.success IS NOT NULL AND p.confidence IS NOT NULL
-                """,
+                """),
                 {"cutoff": cutoff},
             ).fetchall()
 

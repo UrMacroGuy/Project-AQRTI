@@ -1,4 +1,4 @@
-"""
+﻿"""
 AQRTI Market Reconstruction Engine — Phase 8.5A
 Reconstructs a full feature matrix for any historical date range,
 with strict no-future-leakage: only data up to reconstruction_date is used.
@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -92,9 +93,7 @@ def reconstruct_price_series(
         db = get_session_factory()()
     try:
         start = as_of_date - timedelta(days=lookback_days)
-        rows = db.execute(
-            "SELECT date, open, high, low, close, volume, daily_return "
-            "FROM daily_prices WHERE symbol = :sym AND date BETWEEN :s AND :d ORDER BY date",
+        rows = db.execute(text("SELECT date, open, high, low, close, volume, daily_return FROM daily_prices WHERE symbol = :sym AND date BETWEEN :s AND :d ORDER BY date"),
             {"sym": symbol, "s": start, "d": as_of_date},
         ).fetchall()
         if not rows:
@@ -119,9 +118,7 @@ def reconstruct_regime_history(
         db = get_session_factory()()
     try:
         start = as_of_date - timedelta(days=lookback_days)
-        rows = db.execute(
-            "SELECT date, regime, confidence, breadth_pct, volatility_pct "
-            "FROM market_regimes WHERE date BETWEEN :s AND :d ORDER BY date",
+        rows = db.execute(text("SELECT date, regime, confidence, breadth_pct, volatility_pct FROM market_regimes WHERE date BETWEEN :s AND :d ORDER BY date"),
             {"s": start, "d": as_of_date},
         ).fetchall()
         if not rows:
@@ -146,9 +143,7 @@ def reconstruct_sentiment_series(
         db = get_session_factory()()
     try:
         start = as_of_date - timedelta(days=lookback_days)
-        rows = db.execute(
-            "SELECT date(timestamp) as dt, score, velocity, confidence "
-            "FROM sentiment_records WHERE entity = :e AND date(timestamp) BETWEEN :s AND :d ORDER BY dt",
+        rows = db.execute(text("SELECT date(timestamp) as dt, score, velocity, confidence FROM sentiment_records WHERE entity = :e AND date(timestamp) BETWEEN :s AND :d ORDER BY dt"),
             {"e": entity, "s": start, "d": as_of_date},
         ).fetchall()
         if not rows:
@@ -171,8 +166,7 @@ def get_trading_dates(
     if own_session:
         db = get_session_factory()()
     try:
-        rows = db.execute(
-            "SELECT DISTINCT date FROM daily_prices WHERE date BETWEEN :s AND :e ORDER BY date",
+        rows = db.execute(text("SELECT DISTINCT date FROM daily_prices WHERE date BETWEEN :s AND :e ORDER BY date"),
             {"s": start_date, "e": end_date},
         ).fetchall()
         result = []
@@ -207,16 +201,13 @@ def reconstruct_full_context(
         }
 
         # Features
-        feat_rows = db.execute(
-            "SELECT feature_name, value FROM feature_values WHERE symbol = :s AND date = :d",
+        feat_rows = db.execute(text("SELECT feature_name, value FROM feature_values WHERE symbol = :s AND date = :d"),
             {"s": symbol, "d": as_of_date},
         ).fetchall()
         context["features"] = {r.feature_name: r.value for r in feat_rows}
 
         # Recent price stats (5d, 10d)
-        price_rows = db.execute(
-            "SELECT date, close, daily_return FROM daily_prices "
-            "WHERE symbol = :s AND date <= :d ORDER BY date DESC LIMIT 30",
+        price_rows = db.execute(text("SELECT date, close, daily_return FROM daily_prices WHERE symbol = :s AND date <= :d ORDER BY date DESC LIMIT 30"),
             {"s": symbol, "d": as_of_date},
         ).fetchall()
         if price_rows:
@@ -226,8 +217,7 @@ def reconstruct_full_context(
             context["return_10d_realized"] = sum(returns[:10]) if len(returns) >= 10 else None
 
         # Regime
-        regime_row = db.execute(
-            "SELECT regime, confidence FROM market_regimes WHERE date <= :d ORDER BY date DESC LIMIT 1",
+        regime_row = db.execute(text("SELECT regime, confidence FROM market_regimes WHERE date <= :d ORDER BY date DESC LIMIT 1"),
             {"d": as_of_date},
         ).fetchone()
         if regime_row:
@@ -235,9 +225,7 @@ def reconstruct_full_context(
             context["regime_confidence"] = regime_row.confidence
 
         # Sentiment
-        sent_row = db.execute(
-            "SELECT score, velocity FROM sentiment_records "
-            "WHERE entity = :e AND date(timestamp) <= :d ORDER BY timestamp DESC LIMIT 1",
+        sent_row = db.execute(text("SELECT score, velocity FROM sentiment_records WHERE entity = :e AND date(timestamp) <= :d ORDER BY timestamp DESC LIMIT 1"),
             {"e": symbol, "d": as_of_date},
         ).fetchone()
         if sent_row:
@@ -245,8 +233,7 @@ def reconstruct_full_context(
             context["sentiment_velocity"] = sent_row.velocity
 
         # AQRTI confidence on this date
-        pred_row = db.execute(
-            "SELECT confidence, direction FROM predictions WHERE symbol = :s AND date = :d",
+        pred_row = db.execute(text("SELECT confidence, direction FROM predictions WHERE symbol = :s AND date = :d"),
             {"s": symbol, "d": as_of_date},
         ).fetchone()
         if pred_row:

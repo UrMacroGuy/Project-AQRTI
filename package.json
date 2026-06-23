@@ -1,89 +1,13 @@
 {
-    "name": "aqrti-intelligence-terminal",
-    "version": "1.0.0",
-    "description": "AQRTI Intelligence Terminal",
-    "private": true,
-    "main": "desktop/electron/main.js",
-    "author": {
-        "name": "AQRTI",
-        "email": "pratyushdave80@gmail.com"
-    },
-    "license": "UNLICENSED",
-    "scripts": {
-        "dev": "npx serve ui -p 3000 --no-clipboard",
-        "backend": "cd backend && .venv\\Scripts\\python -m uvicorn aqrti.api.app:app --host 0.0.0.0 --port 8000 --reload --reload-dir .",
-        "start": "node scripts/start-electron.js",
-        "dist": "electron-builder --win --publish never",
-        "pack": "electron-builder --dir"
-    },
-    "dependencies": {
-        "electron-updater": "^6.1.8"
-    },
-    "devDependencies": {
-        "electron": "^28.3.3",
-        "electron-builder": "^24.13.3"
-    },
-    "engines": {
-        "node": ">=18.0.0"
-    },
-    "build": {
-        "appId": "com.aqrti.terminal",
-        "productName": "AQRTI Intelligence Terminal",
-        "artifactName": "${productName} ${version}.${ext}",
-        "copyright": "Copyright 2025 AQRTI",
-        "asar": true,
-        "files": [
-            "desktop/**/*",
-            "ui/**/*",
-            "!ui/node_modules/**",
-            "!**/__pycache__/**",
-            "!**/*.pyc",
-            "!backend/**",
-            "!graphify-out/**",
-            "!plans/**",
-            "!scripts/**"
-        ],
-        "directories": {
-            "buildResources": "desktop/assets",
-            "output": "dist/installers"
-        },
-        "win": {
-            "target": [
-                {
-                    "target": "nsis",
-                    "arch": [
-                        "x64"
-                    ]
-                },
-                {
-                    "target": "portable",
-                    "arch": [
-                        "x64"
-                    ]
-                }
-            ],
-            "icon": "desktop/assets/icon.ico",
-            "requestedExecutionLevel": "asInvoker",
-            "publisherName": "AQRTI"
-        },
-        "nsis": {
-            "oneClick": true,
-            "perMachine": false,
-            "installerIcon": "desktop/assets/icon.ico",
-            "uninstallerIcon": "desktop/assets/icon.ico",
-            "createDesktopShortcut": true,
-            "createStartMenuShortcut": true,
-            "shortcutName": "AQRTI Intelligence Terminal",
-            "runAfterFinish": false,
-            "menuCategory": "AQRTI"
-        },
-        "portable": {
-            "artifactName": "AQRTI Portable ${version}.exe"
-        },
-        "publish": {
-            "provider": "github",
-            "owner": "aqrti",
-            "repo": "aqrti-terminal"
-        }
-    }
+  "name": "aqrti-intelligence-terminal",
+  "version": "1.0.0",
+  "description": "AQRTI Intelligence Terminal",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve ui -p 3000 --no-clipboard",
+    "backend": "cd backend && .venv\\Scripts\\python -m uvicorn aqrti.api.app:app --host 0.0.0.0 --port 8000 --reload"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

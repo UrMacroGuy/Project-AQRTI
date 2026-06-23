@@ -162,6 +162,15 @@ def retire(
     result = retire_strategy(db, strategy_id, failure_reason=reason)
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
+
+    # 2-for-1 breeding: spawn 2 offspring to replace the retired strategy
+    try:
+        breed_result = evolve_population(db, n_offspring=2)
+        result["bred_offspring"] = breed_result.get("evolved", 0)
+        result["breed_message"] = f"Spawned {breed_result.get('evolved', 0)} new strategies to replace retired one"
+    except Exception as exc:
+        result["breed_error"] = str(exc)
+
     return result
 
 

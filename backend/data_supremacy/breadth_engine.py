@@ -38,6 +38,19 @@ def compute_breadth(db: Session, target_date: date | None = None) -> dict:
 
     prices_today = db.query(DailyPrice).filter(DailyPrice.date == target).all()
     if not prices_today:
+        # Fall back to most recent available date
+        latest_row = db.query(DailyPrice.date).order_by(DailyPrice.date.desc()).first()
+        if not latest_row:
+            return {"status": "no_data", "date": str(target)}
+        target = latest_row[0]
+        existing = db.query(MarketBreadth).filter(
+            MarketBreadth.breadth_date == target,
+            MarketBreadth.universe == "NIFTY500",
+        ).first()
+        if existing:
+            return {"status": "already_exists", "date": str(target)}
+        prices_today = db.query(DailyPrice).filter(DailyPrice.date == target).all()
+    if not prices_today:
         return {"status": "no_data", "date": str(target)}
 
     advancing = sum(1 for p in prices_today if p.daily_return and p.daily_return > 0)

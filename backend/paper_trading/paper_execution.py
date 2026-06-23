@@ -36,6 +36,7 @@ def execute_rebalance(
     db:              Session,
     target_weights:  dict[str, float],   # {symbol: weight_pct}
     reason:          str = "rebalance",
+    candidates:      list[dict] = None,  # optional candidate metadata from portfolio_builder
 ) -> dict:
     """
     Compare current positions against target_weights and execute trades.
@@ -58,6 +59,9 @@ def execute_rebalance(
     closed_list = []
     opened_list = []
     errors      = []
+
+    # Build candidate lookup for metadata pass-through
+    cand_map = {c["symbol"]: c for c in (candidates or [])}
 
     # ── Close exits first to free up cash ────────────────────────
     for symbol in sorted(to_close):
@@ -88,13 +92,18 @@ def execute_rebalance(
             errors.append({"symbol": symbol, "error": "insufficient_cash"})
             continue
 
+        cand = cand_map.get(symbol, {})
         pos = open_position(
             db              = db,
             symbol          = symbol,
             capital         = capital,
             portfolio_value = portfolio.total_value,
             entry_price     = fill,
-            direction       = "Bullish",
+            direction       = cand.get("direction", "Bullish"),
+            confidence      = cand.get("confidence", 0.0),
+            expected_return = cand.get("expectedReturn", 0.0),
+            sector          = cand.get("sector"),
+            prediction_id   = cand.get("predictionId"),
         )
         if pos:
             portfolio.current_cash -= capital

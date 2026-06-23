@@ -11,7 +11,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from aqrti.database.models import PaperPosition, PaperTrade, DailyPrice
+from aqrti.database.models import PaperPosition, PaperTrade, DailyPrice, Stock
 from aqrti.utils.logger import get_logger
 
 log = get_logger("paper_trade")
@@ -157,6 +157,11 @@ def close_position(
     }
 
 
+def _get_sector(db: Session, symbol: str) -> str:
+    row = db.query(Stock.sector).filter_by(symbol=symbol).first()
+    return row[0] if row and row[0] else "—"
+
+
 def get_open_positions(db: Session) -> list[dict]:
     """Return all open positions with current unrealized P&L."""
     positions = (
@@ -171,9 +176,10 @@ def get_open_positions(db: Session) -> list[dict]:
         unrealized_pct = (current_price - pos.entry_price) / pos.entry_price * 100
         unrealized_pnl = unrealized_pct / 100 * pos.capital_deployed
         current_value  = pos.capital_deployed + unrealized_pnl
+        sector = pos.sector if (pos.sector and 'â' not in pos.sector) else _get_sector(db, pos.symbol)
         result.append({
             "symbol":          pos.symbol,
-            "sector":          pos.sector or "—",
+            "sector":          sector,
             "entryDate":       str(pos.entry_date),
             "entryPrice":      round(pos.entry_price, 4),
             "currentPrice":    round(current_price, 4),

@@ -1,4 +1,4 @@
-"""
+﻿"""
 AQRTI Feature Discovery Engine — Phase 8.5G
 Analyzes historical failures to generate new feature ideas.
 All proposed features are human-approved before deployment.
@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -139,14 +140,13 @@ def analyze_failures_for_feature_ideas(
         db = get_session_factory()()
     try:
         cutoff = date.today() - timedelta(days=days_back)
-        rows = db.execute(
-            """
+        rows = db.execute(text("""
             SELECT failure_category, failure_type, COUNT(*) as cnt
             FROM failure_records
             WHERE failure_date >= :cutoff
             GROUP BY failure_category, failure_type
             ORDER BY cnt DESC
-            """,
+            """),
             {"cutoff": cutoff},
         ).fetchall()
 
@@ -156,7 +156,6 @@ def analyze_failures_for_feature_ideas(
             ftype = r.failure_type or ""
             if r.cnt >= 3:
                 triggers.append(f"{cat}_{ftype}".lower().replace(" ", "_"))
-
         logger.info("Feature discovery: %d failure triggers identified", len(triggers))
         return triggers
     finally:
@@ -192,14 +191,13 @@ def generate_feature_proposals(
         # Save to DB
         for p in proposals:
             try:
-                db.execute(
-                    """
+                db.execute(text("""
                     INSERT OR IGNORE INTO feature_proposals
                         (proposal_id, feature_name, category, description, formula,
                          rationale, expected_impact, source_failures_json, status, created_at)
                     VALUES
                         (:pid, :name, :cat, :desc, :formula, :rat, :impact, :src, :status, :now)
-                    """,
+                    """),
                     {
                         "pid": p.proposal_id, "name": p.feature_name, "cat": p.category,
                         "desc": p.description, "formula": p.formula, "rat": p.rationale,

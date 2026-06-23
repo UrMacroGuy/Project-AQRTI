@@ -12,20 +12,6 @@
 </head>
 <body>
 
-  <!-- ═══════════════════════════════════════════════════
-       DESKTOP TITLEBAR (only visible in Electron)
-  ═══════════════════════════════════════════════════ -->
-  <div id="aqrti-titlebar" style="display:none">
-    <div id="aqrti-titlebar-drag">
-      <span id="aqrti-titlebar-title">AQRTI Intelligence Terminal</span>
-    </div>
-    <div id="aqrti-titlebar-controls">
-      <button id="tb-settings" title="Settings">⚙</button>
-      <button id="tb-min"      title="Minimize">─</button>
-      <button id="tb-max"      title="Maximize/Restore">□</button>
-      <button id="tb-close"    title="Close to Tray">✕</button>
-    </div>
-  </div>
 
   <!-- ═══════════════════════════════════════════════════
        SIDEBAR NAVIGATION
@@ -54,6 +40,11 @@
         <li class="nav-item" data-page="market">
           <span class="nav-icon">◎</span>
           <span class="nav-label">Market Intelligence</span>
+        </li>
+        <li class="nav-item" data-page="live-prices">
+          <span class="nav-icon">◉</span>
+          <span class="nav-label">Live Prices</span>
+          <span class="nav-badge positive" id="badge-live">LIVE</span>
         </li>
         <li class="nav-item" data-page="opportunity">
           <span class="nav-icon">◆</span>
@@ -507,6 +498,68 @@
               <tbody id="deriv-body"></tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ────────────────────────────────────────────────
+         PAGE: LIVE PRICES
+    ──────────────────────────────────────────────── -->
+    <section class="page" id="page-live-prices">
+
+      <div class="panel-header" style="margin-bottom:12px;padding:0">
+        <span class="panel-title" style="font-size:1rem">Live Market Prices</span>
+        <span id="live-prices-updated" style="font-size:0.68rem;color:var(--text-muted);margin-left:12px">—</span>
+        <button class="btn-sm" style="margin-left:auto" onclick="refreshLivePrices()">⟳ Refresh</button>
+      </div>
+
+      <!-- Index grid -->
+      <div id="live-prices-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:18px">
+        <div class="kpi-card" style="text-align:center;color:var(--text-muted);grid-column:1/-1;padding:20px">Loading live prices…</div>
+      </div>
+
+      <!-- Intraday chart -->
+      <div class="two-col">
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Nifty 50 — Historical Close</span>
+            <span class="panel-tag" id="live-nifty-chart-sub">Last 30 days</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="liveNiftyChart"></canvas>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">Sensex — Historical Close</span>
+            <span class="panel-tag" id="live-sensex-chart-sub">Last 30 days</span>
+          </div>
+          <div class="panel-body chart-container">
+            <canvas id="liveSensexChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Price table -->
+      <div class="panel full-width" style="margin-top:12px">
+        <div class="panel-header">
+          <span class="panel-title">All Indices &amp; Commodities</span>
+          <span class="panel-tag">Real-time via Yahoo Finance</span>
+        </div>
+        <div class="panel-body">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Index / Instrument</th>
+                <th>Price</th>
+                <th>Change</th>
+                <th>Change %</th>
+                <th>Direction</th>
+              </tr>
+            </thead>
+            <tbody id="live-prices-table-body"></tbody>
+          </table>
         </div>
       </div>
 
@@ -1111,6 +1164,24 @@
             <span class="panel-tag">Last 30 Days</span>
           </div>
           <div class="panel-body" id="lessons-body"></div>
+        </div>
+      </div>
+
+      <!-- Recent Events Feed -->
+      <div class="panel" style="margin-bottom:1.5rem;">
+        <div class="panel-header">
+          <span class="panel-title">Recent Intelligence Events</span>
+          <span class="panel-tag">Last 30 Days</span>
+        </div>
+        <div class="panel-body">
+          <table class="data-table compact">
+            <thead>
+              <tr><th>Date</th><th>Category</th><th>Description</th></tr>
+            </thead>
+            <tbody id="lc-events-body">
+              <tr><td colspan="3" style="color:var(--text-muted);padding:12px 0">Loading…</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -2176,7 +2247,5 @@
 
   <script src="api.js"></script>
   <script src="app.js"></script>
-  <!-- Desktop bridge: active only inside Electron (window.aqrti guard inside) -->
-  <script src="desktop.js"></script>
 </body>
 </html>

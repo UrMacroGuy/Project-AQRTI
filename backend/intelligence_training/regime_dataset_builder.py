@@ -1,4 +1,4 @@
-"""
+﻿"""
 AQRTI Regime Dataset Builder — Phase 8.5B
 Generates separate training universes for each market regime.
 Each regime dataset is self-contained and reproducible.
@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from aqrti.database.engine import get_session_factory
 from aqrti.utils.logger import get_logger
@@ -154,9 +155,7 @@ def build_regime_dataset(
 
     try:
         # Get all regime records
-        regime_rows = db.execute(
-            "SELECT date, regime, breadth_pct, volatility_pct, confidence "
-            "FROM market_regimes ORDER BY date"
+        regime_rows = db.execute(text("SELECT date, regime, breadth_pct, volatility_pct, confidence FROM market_regimes ORDER BY date")
         ).fetchall()
 
         qualifying_dates = []
@@ -190,13 +189,10 @@ def build_regime_dataset(
                 fm["horizon_days"] = horizon_days
 
                 # Forward label
-                label_rows = db.execute(
-                    "SELECT symbol, close FROM daily_prices "
-                    "WHERE date > :d ORDER BY date ASC LIMIT 1",
+                label_rows = db.execute(text("SELECT symbol, close FROM daily_prices WHERE date > :d ORDER BY date ASC LIMIT 1"),
                     {"d": d},
                 ).fetchall()
-                entry_rows = db.execute(
-                    "SELECT symbol, close FROM daily_prices WHERE date = :d",
+                entry_rows = db.execute(text("SELECT symbol, close FROM daily_prices WHERE date = :d"),
                     {"d": d},
                 ).fetchall()
 
@@ -205,9 +201,7 @@ def build_regime_dataset(
 
                 # Proper per-symbol forward label
                 for sym in fm["symbol"].tolist():
-                    fwd_row = db.execute(
-                        "SELECT close FROM daily_prices WHERE symbol = :s AND date > :d "
-                        "ORDER BY date ASC LIMIT 1 OFFSET :off",
+                    fwd_row = db.execute(text("SELECT close FROM daily_prices WHERE symbol = :s AND date > :d ORDER BY date ASC LIMIT 1 OFFSET :off"),
                         {"s": sym, "d": d, "off": horizon_days - 1},
                     ).fetchone()
                     entry = entry_map.get(sym)
@@ -285,8 +279,7 @@ def save_regime_datasets_to_db(
         saved = 0
         for label, dataset in datasets.items():
             try:
-                db.execute(
-                    """
+                db.execute(text("""
                     INSERT INTO regime_datasets
                         (regime_label, definition_json, dates_json, sample_count,
                          symbols_json, date_range_start, date_range_end, metadata_json, created_at)
@@ -297,7 +290,7 @@ def save_regime_datasets_to_db(
                         sample_count = excluded.sample_count,
                         metadata_json = excluded.metadata_json,
                         created_at = excluded.created_at
-                    """,
+                    """),
                     {
                         "label": label,
                         "defn": json.dumps(dataset.definition),
