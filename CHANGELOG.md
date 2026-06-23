@@ -10,6 +10,33 @@
 
 ---
 
+## 2026-06-24 — Git Agent: Auto Commit + Push on File Changes
+
+### Files Added
+- `scripts/git_agent.py` — Python watcher daemon
+- `scripts/start_git_agent.bat` — double-click launcher
+- `scripts/register_startup.bat` — registers agent to run at Windows login via Task Scheduler
+- `scripts/unregister_startup.bat` — removes startup registration
+
+### How It Works
+1. Polls `git status --porcelain` every 30 seconds
+2. Ignores: `.db-wal`, `.db-shm`, `.log`, `.pyc`, `__pycache__` (noisy runtime files)
+3. Waits 120 seconds of no new changes (quiet period) before committing — batches a full coding session
+4. Generates smart commit message: categorises files by folder (UI, API routes, ML, paper trading, etc.)
+5. `git add <specific files>` → `git commit` → `git push origin main`
+6. On Ctrl+C: commits any pending changes before exiting
+
+### Usage
+- **Run now:** Double-click `scripts/start_git_agent.bat`
+- **Auto-start at login:** Run `scripts/register_startup.bat` (once, as Administrator)
+- **Stop auto-start:** Run `scripts/unregister_startup.bat`
+- **Tune timing:** Edit `POLL_INTERVAL` and `QUIET_PERIOD` at top of `git_agent.py`
+
+### What Was Pushed
+- The agent scripts themselves were committed and pushed as part of this session
+
+---
+
 ## 2026-06-24 — Live Data Bug Fix: All Pages Now Show Real Backend Data
 
 ### Problem
