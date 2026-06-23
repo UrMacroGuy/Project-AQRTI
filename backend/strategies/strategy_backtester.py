@@ -90,7 +90,13 @@ class BacktestResult:
         self.win_rate         = len(wins) / len(closed) * 100 if closed else 0.0
         self.profit_factor    = compute_profit_factor(wins, losses)
         self.expectancy       = compute_expectancy(returns)
-        self.max_drawdown     = compute_max_drawdown(list(np.cumsum(returns)))
+        # Build equity curve (base=100) for proper peak-to-trough MDD
+        equity = 100.0
+        eq_curve = [100.0]
+        for r in returns:
+            equity *= (1 + r / 100)
+            eq_curve.append(equity)
+        self.max_drawdown     = compute_max_drawdown(eq_curve)
         self.total_return     = round(sum(returns), 4)
         self.avg_holding_days = round(
             sum(t.holding_days for t in closed) / len(closed), 1
@@ -262,8 +268,9 @@ def backtest_and_update(
     end_date:   Optional[date] = None,
     universe:   Optional[list[str]] = None,
 ) -> BacktestResult:
-    """Backtest a strategy and write results to StrategyV2."""
+    """Backtest a strategy and write results to StrategyV2 + individual trades."""
     from strategies.strategy_store import upsert_strategy
+    from aqrti.database.models import StrategyBacktestTrade
 
     end   = end_date   or date.today()
     start = start_date or (end - timedelta(days=365))
@@ -287,7 +294,23 @@ def backtest_and_update(
         "backtest_start":   start,
         "backtest_end":     end,
         "backtest_universe": result.universe_size,
-        "status":           "shadow",  # moves to shadow after backtest
+        "status":           "shadow",
     })
+
+    # Persist individual trades — delete stale ones first, then insert fresh
+    db.query(StrategyBacktestTrade).filter_by(strategy_id=result.strategy_id).delete()
+    for t in result.trades:
+        db.add(StrategyBacktestTrade(
+            strategy_id  = result.strategy_id,
+            symbol       = t.symbol,
+            entry_date   = t.entry_date,
+            exit_date    = t.exit_date,
+            entry_price  = t.entry_price,
+            exit_price   = t.exit_price,
+            pnl_pct      = t.pnl_pct,
+            exit_reason  = t.exit_reason,
+            holding_days = t.holding_days,
+        ))
+
     db.commit()
     return result

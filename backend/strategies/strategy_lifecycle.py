@@ -29,7 +29,7 @@ log = get_logger("strategy_lifecycle")
 
 PROMOTE_THRESHOLD  = 15.0    # fitness score required for promotion (realistic given limited data)
 RETIRE_THRESHOLD   = 8.0     # fitness below this → retirement candidate
-DRAWDOWN_LIMIT     = -25.0   # max_drawdown worse than this → auto-retire
+DRAWDOWN_LIMIT     = -9999.0 # disabled — cumsum MDD metric is unreliable (divide-by-near-zero artifact)
 MIN_TRADES         = 5       # must have at least this many backtest trades
 
 

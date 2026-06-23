@@ -184,3 +184,112 @@ def evolve(
     db: Session = Depends(get_db_dependency),
 ):
     return evolve_population(db, n_offspring=n_offspring)
+
+
+@router.get("/{strategy_id}/trades")
+def get_strategy_trades(
+    strategy_id: str,
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db_dependency),
+):
+    """Return individual backtest trades for a strategy."""
+    from aqrti.database.models import StrategyBacktestTrade
+    row = get_strategy(db, strategy_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    trades = (
+        db.query(StrategyBacktestTrade)
+        .filter_by(strategy_id=strategy_id)
+        .order_by(StrategyBacktestTrade.entry_date)
+        .limit(limit)
+        .all()
+    )
+    # Build cumulative equity curve from trades
+    equity = 100.0
+    equity_curve = []
+    for t in trades:
+        pnl = t.pnl_pct or 0.0
+        equity *= (1 + pnl / 100)
+        equity_curve.append(round(equity, 4))
+
+    return {
+        "strategy_id": strategy_id,
+        "name":        row.name,
+        "family":      row.family,
+        "status":      row.status,
+        "fitness":     row.fitness_score,
+        "sharpe":      row.sharpe,
+        "win_rate":    row.win_rate,
+        "trade_count": len(trades),
+        "trades": [
+            {
+                "symbol":      t.symbol,
+                "entryDate":   str(t.entry_date),
+                "exitDate":    str(t.exit_date) if t.exit_date else None,
+                "entryPrice":  t.entry_price,
+                "exitPrice":   t.exit_price,
+                "pnlPct":      round(t.pnl_pct, 4) if t.pnl_pct else None,
+                "exitReason":  t.exit_reason,
+                "holdingDays": t.holding_days,
+                "result":      "win" if (t.pnl_pct or 0) > 0 else "loss" if (t.pnl_pct or 0) < 0 else "flat",
+            }
+            for t in trades
+        ],
+        "equityCurve": equity_curve,
+    }
+
+
+@router.post("/{strategy_id}/replay")
+def replay_strategy(
+    strategy_id: str,
+    db: Session = Depends(get_db_dependency),
+):
+    """Re-run backtest for a strategy and return full trade sequence for replay."""
+    import json as _json
+    row = get_strategy(db, strategy_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if not row.dsl_json:
+        raise HTTPException(status_code=400, detail="Strategy has no DSL definition")
+
+    from strategies.strategy_backtester import backtest_and_update
+    from strategies.strategy_dsl import StrategyDSL
+
+    try:
+        dsl = StrategyDSL.from_dict(_json.loads(row.dsl_json))
+        result = backtest_and_update(db, dsl)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # Build equity curve for replay animation
+    equity = 100.0
+    replay_frames = []
+    for t in result.trades:
+        pnl = t.pnl_pct or 0.0
+        equity *= (1 + pnl / 100)
+        replay_frames.append({
+            "symbol":      t.symbol,
+            "entryDate":   str(t.entry_date),
+            "exitDate":    str(t.exit_date) if t.exit_date else None,
+            "entryPrice":  t.entry_price,
+            "exitPrice":   t.exit_price,
+            "pnlPct":      round(t.pnl_pct, 4) if t.pnl_pct else None,
+            "equityAfter": round(equity, 2),
+            "result":      "win" if pnl > 0 else "loss" if pnl < 0 else "flat",
+            "holdingDays": t.holding_days,
+            "exitReason":  t.exit_reason,
+        })
+
+    return {
+        "strategy_id":  strategy_id,
+        "name":         row.name,
+        "family":       row.family,
+        "sharpe":       result.sharpe,
+        "win_rate":     result.win_rate,
+        "total_return": result.total_return,
+        "trade_count":  result.trade_count,
+        "max_drawdown": result.max_drawdown,
+        "frames":       replay_frames,
+        "finalEquity":  round(equity, 2),
+    }

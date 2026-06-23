@@ -998,6 +998,28 @@ class StrategyGraveyard(Base):
     buried_at        = Column(DateTime,   default=datetime.utcnow)
 
 
+class StrategyBacktestTrade(Base):
+    """Individual trade records from strategy backtests — powers per-strategy trade log and replay."""
+    __tablename__ = "strategy_backtest_trades"
+    __table_args__ = (
+        Index("ix_sbt_strategy_id", "strategy_id"),
+        Index("ix_sbt_symbol",      "symbol"),
+        Index("ix_sbt_entry_date",  "entry_date"),
+    )
+
+    id           = Column(Integer,    primary_key=True, autoincrement=True)
+    strategy_id  = Column(String(40), nullable=False)
+    symbol       = Column(String(20), nullable=False)
+    entry_date   = Column(Date,       nullable=False)
+    exit_date    = Column(Date,       nullable=True)
+    entry_price  = Column(Float,      nullable=False)
+    exit_price   = Column(Float,      nullable=True)
+    pnl_pct      = Column(Float,      nullable=True)
+    exit_reason  = Column(String(40), nullable=True)
+    holding_days = Column(Integer,    nullable=True)
+    created_at   = Column(DateTime,   default=datetime.utcnow)
+
+
 class StrategyResearchReport(Base):
     """Auto-generated research reports from the meta research engine."""
     __tablename__ = "strategy_research_reports"

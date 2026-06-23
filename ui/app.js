@@ -1507,6 +1507,21 @@ async function hydrateNews() {
   const data = await Api.news({ limit: 50 });
   if (!data || !Array.isArray(data)) return;
 
+  // KPI cards
+  const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+  _set('news-kpi-count', data.length);
+  const highImpact = data.filter(n => (n.impactScore ?? n.impact_score ?? 0) >= 80);
+  _set('news-kpi-high-impact', highImpact.length);
+  const sentScores = data.map(n => n.sentimentScore || 0).filter(s => s !== 0);
+  if (sentScores.length) {
+    const avg = sentScores.reduce((a, b) => a + b, 0) / sentScores.length;
+    const avgEl = el('news-kpi-avg-sentiment');
+    if (avgEl) { avgEl.textContent = `${avg >= 0 ? '+' : ''}${avg.toFixed(2)}`; avgEl.className = 'kpi-value ' + (avg >= 0 ? 'positive' : 'negative'); }
+    _set('news-kpi-sentiment-sub', avg >= 0.1 ? 'Positive Bias Today' : avg <= -0.1 ? 'Negative Bias Today' : 'Neutral Today');
+  }
+  const entities = new Set(data.map(n => n.company).filter(Boolean));
+  _set('news-kpi-entities', entities.size || '—');
+
   function impactSeverity(score) {
     if (score >= 75) return 'critical';
     if (score >= 55) return 'high';
@@ -1524,9 +1539,9 @@ async function hydrateNews() {
     source:    n.source || '—',
     company:   n.company || '—',
     sector:    n.sector  || '—',
-    eventType: n.event_type || 'General',
-    impact:    Math.round(n.impact_score || 0),
-    severity:  impactSeverity(n.impact_score || 0),
+    eventType: n.event_type || n.eventType || 'General',
+    impact:    Math.round(n.impact_score ?? n.impactScore ?? 0),
+    severity:  impactSeverity(n.impact_score ?? n.impactScore ?? 0),
     sentiment: sentTag(n.sentiment),
     time:      n.timestamp ? new Date(n.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
   }));
@@ -1562,6 +1577,51 @@ async function hydrateNews() {
   if (feed && mapped.length) {
     feed.innerHTML = mapped.map(newsItemHTML).join('');
   }
+
+  // Rebuild sentiment trend chart from live timestamps
+  if (mapped.length) {
+    const hourBuckets = {};
+    mapped.forEach(n => {
+      if (!n.time || n.time === '—') return;
+      const hr = n.time.split(':')[0];
+      if (!hourBuckets[hr]) hourBuckets[hr] = [];
+      const raw = data.find(d => d.headline === n.headline);
+      const score = raw ? (raw.sentiment_score ?? raw.sentimentScore ?? (n.sentiment === 'pos' ? 0.5 : n.sentiment === 'neg' ? -0.5 : 0)) : 0;
+      hourBuckets[hr].push(score);
+    });
+    const hours = Array.from({length: 24}, (_, i) => `${String(i).padStart(2,'0')}:00`);
+    const sentVals = hours.map((_, i) => {
+      const key = String(i).padStart(2,'0');
+      const bucket = hourBuckets[key];
+      return bucket && bucket.length ? bucket.reduce((a, b) => a + b, 0) / bucket.length : null;
+    });
+    ChartRegistry.create('newsSentimentTrendChart', {
+      type: 'line',
+      data: {
+        labels: hours,
+        datasets: [{
+          label: 'Avg Sentiment',
+          data: sentVals,
+          borderColor: '#00d4aa',
+          borderWidth: 2,
+          pointRadius: 2,
+          pointBackgroundColor: '#00d4aa',
+          tension: 0.4,
+          fill: true,
+          backgroundColor: 'rgba(0,212,170,0.08)',
+          spanGaps: true,
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { min: -1, max: 1, ticks: { stepSize: 0.5, callback: v => v > 0 ? `+${v}` : v } },
+          x: { ticks: { maxTicksLimit: 8 } },
+        },
+      },
+    });
+  }
 }
 
 // ── Sentiment Center — live hydration ────────────────────────
@@ -1570,6 +1630,30 @@ async function hydrateSentiment() {
   if (!data) return;
 
   const { companies, sectors } = data;
+  const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+
+  // KPI cards
+  if (companies && companies.length) {
+    const sorted = [...companies].sort((a, b) => (b.score || 0) - (a.score || 0));
+    const avgScore = companies.reduce((s, c) => s + (c.score || 0), 0) / companies.length;
+
+    // Market sentiment — derive from avg score
+    const sentiment = avgScore >= 70 ? 'Optimistic' : avgScore >= 50 ? 'Neutral' : 'Pessimistic';
+    _set('sent-kpi-market', sentiment);
+    _set('sent-kpi-market-sub', `Score: ${avgScore.toFixed(0)} / 100`);
+
+    // Fear & greed proxy from avg score
+    const fearGreed = Math.round(avgScore);
+    const zone = fearGreed >= 75 ? 'Extreme Greed' : fearGreed >= 60 ? 'Greed Zone' : fearGreed >= 40 ? 'Neutral Zone' : fearGreed >= 25 ? 'Fear Zone' : 'Extreme Fear';
+    _set('sent-kpi-fear-greed', fearGreed);
+    _set('sent-kpi-fear-greed-sub', zone);
+
+    // Strongest & weakest
+    const best = sorted[0];
+    const worst = sorted[sorted.length - 1];
+    if (best) { _set('sent-kpi-best', best.entity || '—'); _set('sent-kpi-best-score', `Score: ${Math.round(best.score || 0)}`); }
+    if (worst) { _set('sent-kpi-worst', worst.entity || '—'); _set('sent-kpi-worst-score', `Score: ${Math.round(worst.score || 0)}`); }
+  }
 
   if (companies && companies.length) {
     const top = companies.slice(0, 10);
@@ -1645,16 +1729,14 @@ async function hydrateMarketRegime() {
   const data = await Api.marketRegime();
   if (!data) return;
 
-  const badge = document.querySelector('.regime-badge');
-  if (badge) {
-    badge.textContent = data.regime || 'UNKNOWN';
-    badge.className   = 'regime-badge badge-' + (data.regime || '').toLowerCase().replace(/\s+/g, '-');
-  }
-
-  // Update topbar regime label if present
   const topbarRegime = el('topbar-regime');
   if (topbarRegime) {
     topbarRegime.textContent = data.regime || DataStore.system.regime;
+  }
+
+  const pill = document.getElementById('regime-pill');
+  if (pill) {
+    pill.className = 'regime-badge badge-' + (data.regime || '').toLowerCase().replace(/\s+/g, '-');
   }
 }
 
@@ -1684,13 +1766,32 @@ window.addEventListener('DOMContentLoaded', () => {
   hydrateOverview();
   hydrateOverviewPredictions();
   hydratePaperPortfolioStrip();
-  hydrateMarketIntelligence();
+  hydrateMarket();  // populates topbar NIFTY/BANKNIFTY tickers
+  hydrateMarketRegime();
 });
 
 // ── Opportunity Rankings — live prediction hydration ─────────
 async function hydrateOpportunities() {
   const data = await Api.predictions({ limit: 20 });
   if (!data || !data.length) return;
+
+  const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+
+  // KPI cards
+  const strong = data.filter(p => (p.confidence || 0) >= 80);
+  _set('opp-kpi-strong', strong.length);
+  const avgConf = data.reduce((s, p) => s + (p.confidence || 0), 0) / data.length;
+  _set('opp-kpi-avg-conf', `${avgConf.toFixed(1)}%`);
+  const best = [...data].sort((a, b) => (b.expectedReturn || 0) - (a.expectedReturn || 0))[0];
+  if (best) {
+    const ret = best.expectedReturn;
+    _set('opp-kpi-best-return', ret != null ? (ret >= 0 ? `+${ret.toFixed(2)}%` : `${ret.toFixed(2)}%`) : '—');
+    _set('opp-kpi-best-symbol', `${best.symbol || '—'} (${best.horizon || '10d'})`);
+  }
+  const riskCounts = { Low: 0, Medium: 0, High: 0 };
+  data.forEach(p => { const r = p.risk || 'Medium'; if (riskCounts[r] != null) riskCounts[r]++; });
+  const dominantRisk = Object.entries(riskCounts).sort((a, b) => b[1] - a[1])[0][0];
+  _set('opp-kpi-risk', dominantRisk);
 
   const tbody = el('opportunity-body');
   if (tbody) {
@@ -1762,20 +1863,39 @@ async function hydrateModelCenter() {
   const [models, stats] = await Promise.all([Api.models(), Api.modelStats()]);
   if (!models && !stats) return;
 
+  const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+
   // Update KPI badges if present
   if (stats && stats.available) {
-    const ensAccEl = el('model-ensemble-acc');
-    if (ensAccEl && stats.bestAUC != null)
-      ensAccEl.textContent = `${(stats.bestAUC * 100).toFixed(1)}%`;
+    if (stats.bestAUC != null) _set('model-ensemble-acc', `${(stats.bestAUC * 100).toFixed(1)}%`);
 
-    const activeEl = el('model-active-count');
-    if (activeEl) activeEl.textContent = stats.activeModels || '0';
+    _set('model-active-count', stats.activeModels || '0');
+    _set('model-active-sub', stats.totalFolds ? `${stats.totalFolds} Walk-Forward Folds` : 'Ensemble Active');
 
-    const foldsEl = el('model-folds-count');
-    if (foldsEl) foldsEl.textContent = stats.totalFolds || '0';
+    if (stats.lastTrainedAt) {
+      const d = new Date(stats.lastTrainedAt);
+      const today = new Date();
+      const isToday = d.toDateString() === today.toDateString();
+      _set('model-last-retrain', isToday ? 'Today' : d.toLocaleDateString('en-IN'));
+      _set('model-last-retrain-sub', d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' IST');
+    }
 
-    const icEl = el('model-best-ic');
-    if (icEl && stats.bestIC != null) icEl.textContent = stats.bestIC.toFixed(3);
+    if (stats.bestIC != null) {
+      const icEl = el('model-best-ic');
+      if (icEl) icEl.textContent = stats.bestIC.toFixed(3);
+    }
+  }
+
+  // Derive best model name + accuracy from models list
+  if (models && models.length) {
+    const dirModels = models.filter(m => m.task === 'direction' && m.isActive);
+    if (dirModels.length) {
+      const best = dirModels.reduce((a, b) => (a.primaryMetric || 0) > (b.primaryMetric || 0) ? a : b);
+      _set('model-best-name', best.modelName || '—');
+      if (best.primaryMetric != null) _set('model-best-acc', `${(best.primaryMetric * 100).toFixed(1)}% Direction`);
+    }
+    const featureCount = models.reduce((max, m) => Math.max(max, m.featureCount || m.numFeatures || 0), 0);
+    if (featureCount > 0) _set('model-features-count', featureCount);
   }
 
   // Rebuild model registry table from live data
@@ -1833,11 +1953,8 @@ async function hydrateOverviewPredictions() {
   if (regime) {
     const topbarRegime = el('topbar-regime');
     if (topbarRegime) topbarRegime.textContent = regime.regime || DataStore.system.regime;
-    const badge = document.querySelector('.regime-badge');
-    if (badge) {
-      badge.textContent = regime.regime || 'UNKNOWN';
-      badge.className   = 'regime-badge badge-' + (regime.regime || '').toLowerCase().replace(/\s+/g, '-');
-    }
+    const pill = document.getElementById('regime-pill');
+    if (pill) pill.className = 'regime-badge badge-' + (regime.regime || '').toLowerCase().replace(/\s+/g, '-');
   }
 
   if (summary && summary.available) {
@@ -1845,7 +1962,7 @@ async function hydrateOverviewPredictions() {
     if (predCountEl) predCountEl.textContent = summary.total || DataStore.system.activePredictions;
 
     const confEl = el('kpi-avg-conf');
-    if (confEl && summary.avgConfidence != null) confEl.textContent = `${summary.avgConfidence}%`;
+    if (confEl && summary.avgConfidence != null) confEl.textContent = `Avg Conf: ${summary.avgConfidence}%`;
 
     // Replace top 3 prediction cards on overview if elements exist
     if (summary.topPredictions && summary.topPredictions.length) {
@@ -2329,7 +2446,10 @@ async function hydrateStrategyResearch() {
         <td>${sharpe}</td>
         <td>${wr}</td>
         <td style="color:var(--text-muted)">${r.trade_count || 0}</td>
-        <td>${canActivate ? `<button class="panel-action-btn" onclick="activateStrategy('${r.strategy_id}')">Activate</button>` : '—'}</td>
+        <td style="white-space:nowrap">
+          ${canActivate ? `<button class="panel-action-btn" onclick="activateStrategy('${r.strategy_id}')">Activate</button> ` : ''}
+          ${r.trade_count > 0 ? `<button class="panel-action-btn" style="background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.4)" onclick="openStrategyTrades('${r.strategy_id}')">Trades</button>` : '—'}
+        </td>
       </tr>`;
     }).join('') || `<tr><td colspan="9" style="color:var(--text-muted);text-align:center">No strategies yet</td></tr>`;
   }
@@ -3156,14 +3276,12 @@ async function runQualityChecks() {
 }
 
 
-// Patch nav to also trigger live hydration on first visit
+// Patch nav to trigger live hydration on every page visit
 const _originalRenderPage = renderPage;
-const _liveHydrated = new Set();
+const _liveHydrated = new Set(); // kept for manual cache-busting by action buttons
 
 function renderPage(pageId) {
   _originalRenderPage(pageId);
-  if (_liveHydrated.has(pageId)) return;
-  _liveHydrated.add(pageId);
 
   if (pageId === 'news')        hydrateNews();
   if (pageId === 'sentiment')   hydrateSentiment();
@@ -3262,26 +3380,32 @@ async function hydrateRisk() {
   // Update KPI values
   const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
   if (data.exposure != null)       _set('risk-exposure',   `${data.exposure}%`);
-  if (data.varDaily != null)       _set('risk-var-daily',  `₹${Math.abs(data.varDaily).toFixed(0)}`);
+  if (data.varDaily != null) {
+    _set('risk-var-daily',  `−₹${Math.abs(data.varDaily).toFixed(0)}`);
+    const varPctEl = el('risk-var-pct');
+    if (varPctEl && data.varPct != null) varPctEl.textContent = `−${Math.abs(data.varPct).toFixed(2)}% of Capital`;
+  }
   if (data.maxDrawdown30d != null) _set('risk-max-dd',     `${data.maxDrawdown30d.toFixed(2)}%`);
   if (data.sharpe != null)         _set('risk-sharpe',     data.sharpe.toFixed(2));
 
-  // Circuit breaker status
-  if (data.circuitBreakers) {
-    const cb = data.circuitBreakers;
-    const _setCB = (id, triggered) => {
-      const e = el(id);
-      if (e) { e.textContent = triggered ? 'TRIGGERED' : 'CLEAR'; e.className = triggered ? 'negative' : 'positive'; }
-    };
-    _setCB('cb-daily',   cb.daily   && cb.daily.triggered);
-    _setCB('cb-weekly',  cb.weekly  && cb.weekly.triggered);
-    _setCB('cb-monthly', cb.monthly && cb.monthly.triggered);
+  // Largest position (sort by numeric weight descending)
+  if (data.positions && data.positions.length) {
+    const sorted = [...data.positions].sort((a, b) => {
+      const wa = parseFloat(String(a.weight || '0').replace('%', '')) || 0;
+      const wb = parseFloat(String(b.weight || '0').replace('%', '')) || 0;
+      return wb - wa;
+    });
+    const largest = sorted[0];
+    _set('risk-largest-pos', largest.symbol || '—');
+    _set('risk-largest-weight', largest.weight || '—');
   }
+
+  // Circuit breaker status
   if (data.circuitStatus) {
     const statusEl = el('circuit-breaker-status');
     if (statusEl) {
       statusEl.textContent = data.circuitStatus;
-      statusEl.className = data.circuitStatus === 'TRIGGERED' ? 'negative' : 'positive';
+      statusEl.className = 'kpi-value ' + (data.circuitStatus === 'TRIGGERED' ? 'negative' : 'positive');
     }
   }
 }
@@ -3308,17 +3432,20 @@ async function hydrateOverview() {
       pctEl.className = 'kpi-sub ' + (ov.dailyPnl >= 0 ? 'positive' : 'negative');
     }
   }
-  if (ov.openPositions != null)     _set('kpi-positions', ov.openPositions);
+  if (ov.openPositions != null) {
+    _set('kpi-positions', ov.openPositions);
+    if (ov.deployedCapital != null) _set('kpi-deployed', `₹${Math.round(ov.deployedCapital).toLocaleString('en-IN')} Deployed`);
+  }
   if (ov.activePredictions != null) _set('kpi-predictions', ov.activePredictions);
-  if (ov.winRate30d != null)        _set('kpi-winrate', `${ov.winRate30d.toFixed(1)}%`);
-  if (ov.knowledgeScore != null)    _set('kpi-knowledge', `${ov.knowledgeScore} / 100`);
+  if (ov.winRate30d != null) {
+    _set('kpi-winrate', `${ov.winRate30d.toFixed(1)}%`);
+    if (ov.totalTrades30d != null) _set('kpi-trades-30d', `${ov.totalTrades30d} Trades`);
+  }
+  if (ov.knowledgeScore != null)    _set('kpi-knowledge', `${ov.knowledgeScore.toFixed ? ov.knowledgeScore.toFixed(0) : ov.knowledgeScore} / 100`);
   if (ov.regime) {
     _set('topbar-regime', ov.regime);
-    const badge = document.querySelector('.regime-badge');
-    if (badge) {
-      badge.textContent = ov.regime;
-      badge.className   = 'regime-badge badge-' + ov.regime.toLowerCase().replace(/\s+/g, '-');
-    }
+    const pill = document.getElementById('regime-pill');
+    if (pill) pill.className = 'regime-badge badge-' + ov.regime.toLowerCase().replace(/\s+/g, '-');
   }
 
   // Equity curve
@@ -3378,26 +3505,55 @@ async function hydrateMarket() {
   const data = await Api.market();
   if (!data) return;
 
-  // NIFTY / BANKNIFTY ticker
+  // NIFTY / BANKNIFTY — topbar ticker + market page KPI cards
   const { indices, sectorStrength, topMovers } = data;
+  const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
   if (indices) {
     const nifty = indices.nifty50 || {};
     const bank  = indices.banknifty || {};
-    const _setIdx = (id, val, cls) => {
-      const e = el(id);
-      if (e) { e.textContent = val; if (cls) e.className = cls; }
-    };
+
     if (nifty.value != null) {
-      const niftyEl = document.querySelector('[data-nifty-val]') || el('nifty-value');
-      if (niftyEl) niftyEl.textContent = nifty.value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const niftyChg = el('nifty-change') || document.querySelector('[data-nifty-change]');
-      if (niftyChg) {
-        const pct = (nifty.returns || 0) * 100;
-        niftyChg.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
-        niftyChg.className = pct >= 0 ? 'positive' : 'negative';
-      }
+      const fmt = nifty.value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const niftyEl = el('nifty-value');
+      if (niftyEl) niftyEl.textContent = fmt;
+      _set('market-nifty-val', fmt);
+      const pct = (nifty.returns || 0) * 100;
+      const chgText = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+      const chgCls  = pct >= 0 ? 'positive' : 'negative';
+      const niftyChg = el('nifty-change');
+      if (niftyChg) { niftyChg.textContent = chgText; niftyChg.className = 'ticker-change ' + chgCls; }
+      const mNiftyChg = el('market-nifty-chg');
+      if (mNiftyChg) { mNiftyChg.textContent = chgText; mNiftyChg.className = 'kpi-sub ' + chgCls; }
+    }
+    if (bank.value != null) {
+      const fmt = bank.value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const bankEl = el('banknifty-value');
+      if (bankEl) bankEl.textContent = fmt;
+      _set('market-banknifty-val', fmt);
+      const pct = (bank.returns || 0) * 100;
+      const chgText = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+      const chgCls  = pct >= 0 ? 'positive' : 'negative';
+      const bankChg = el('banknifty-change');
+      if (bankChg) { bankChg.textContent = chgText; bankChg.className = 'ticker-change ' + chgCls; }
+      const mBankChg = el('market-banknifty-chg');
+      if (mBankChg) { mBankChg.textContent = chgText; mBankChg.className = 'kpi-sub ' + chgCls; }
     }
   }
+
+  // Market breadth — fetch separately
+  Api.marketBreadth().then(breadth => {
+    if (!breadth) return;
+    const adv = breadth.advancing || breadth.advancers || 0;
+    const dec = breadth.declining || breadth.decliners || 0;
+    const total = adv + dec;
+    if (total > 0) {
+      const pct = Math.round(adv / total * 100);
+      _set('market-breadth-val', `${pct}%`);
+      _set('market-breadth-sub', `${adv} Adv / ${dec} Dec`);
+      const bEl = el('market-breadth-val');
+      if (bEl) bEl.className = 'kpi-value ' + (pct >= 50 ? 'positive' : 'negative');
+    }
+  });
 
   // Sector strength bar chart + detail cards
   if (sectorStrength && sectorStrength.length) {
@@ -3767,4 +3923,177 @@ document.querySelectorAll('.nav-item').forEach(item => {
     activatePage(pageId);
     renderPage(pageId);
   });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// STRATEGY TRADE LOG + REPLAY MODAL
+// ═══════════════════════════════════════════════════════════════
+
+let _stmChart = null;
+let _stmCurrentId = null;
+
+async function openStrategyTrades(strategyId) {
+  _stmCurrentId = strategyId;
+  const modal = document.getElementById('strategy-trades-modal');
+  if (!modal) return;
+  modal.style.display = 'block';
+  const _s = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  _s('stm-title', 'Loading…');
+  _s('stm-kpi-trades', '…'); _s('stm-kpi-wr', '…'); _s('stm-kpi-sharpe', '…'); _s('stm-kpi-fitness', '…');
+  document.getElementById('stm-trades-body').innerHTML =
+    '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">Fetching trades…</td></tr>';
+  document.getElementById('stm-replay-status').textContent = '';
+
+  const data = await apiFetch('/strategies/' + strategyId + '/trades');
+  if (!data) { _s('stm-title', 'Error — backend offline'); return; }
+
+  _s('stm-title', data.name || strategyId);
+  const metaEl = document.getElementById('stm-meta');
+  if (metaEl) metaEl.innerHTML =
+    '<span>Family: ' + (data.family || '—') + '</span>' +
+    '<span>Status: ' + (data.status || '').toUpperCase() + '</span>' +
+    '<span>ID: ' + strategyId + '</span>';
+  _s('stm-kpi-trades', data.trade_count || 0);
+  _s('stm-kpi-wr',     data.win_rate  != null ? data.win_rate.toFixed(1)  + '%' : '—');
+  _s('stm-kpi-sharpe', data.sharpe    != null ? data.sharpe.toFixed(2)         : '—');
+  _s('stm-kpi-fitness',data.fitness   != null ? data.fitness.toFixed(1)        : '—');
+
+  _stmDrawChart(data.equityCurve || [], (data.trades || []).map(t => t.exitDate || ''));
+
+  const tbody = document.getElementById('stm-trades-body');
+  if (data.trades && data.trades.length) {
+    tbody.innerHTML = data.trades.map((t, i) => {
+      const col  = (t.pnlPct||0) > 0 ? 'var(--positive)' : (t.pnlPct||0) < 0 ? 'var(--negative)' : 'var(--text-muted)';
+      const sign = (t.pnlPct||0) > 0 ? '+' : '';
+      return '<tr style="border-bottom:1px solid var(--border-faint)">' +
+        '<td style="padding:5px 8px;color:var(--text-muted)">' + (i+1) + '</td>' +
+        '<td style="padding:5px 8px;font-weight:600">' + t.symbol + '</td>' +
+        '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.entryDate||'—') + '</td>' +
+        '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.exitDate||'—') + '</td>' +
+        '<td style="padding:5px 8px;text-align:right">' + (t.entryPrice!=null?t.entryPrice.toFixed(2):'—') + '</td>' +
+        '<td style="padding:5px 8px;text-align:right">' + (t.exitPrice!=null?t.exitPrice.toFixed(2):'—') + '</td>' +
+        '<td style="padding:5px 8px;text-align:right;color:' + col + ';font-weight:600">' + (t.pnlPct!=null?sign+t.pnlPct.toFixed(2)+'%':'—') + '</td>' +
+        '<td style="padding:5px 8px;text-align:right;color:var(--text-muted)">' + (t.holdingDays||0) + '</td>' +
+        '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.exitReason||'—') + '</td>' +
+        '</tr>';
+    }).join('');
+  } else {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">No backtest trades yet. Click Replay Backtest to generate them.</td></tr>';
+  }
+}
+
+function _stmDrawChart(values, labels) {
+  const canvas = document.getElementById('stm-equity-chart');
+  if (!canvas) return;
+  if (_stmChart) { _stmChart.destroy(); _stmChart = null; }
+  if (!values.length) return;
+  _stmChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: 'Equity', data: values, borderColor: '#00d4aa', borderWidth: 2,
+          pointRadius: values.length > 60 ? 0 : 3, tension: 0.3, fill: true,
+          backgroundColor: function(ctx){ const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height); g.addColorStop(0,'rgba(0,212,170,0.18)'); g.addColorStop(1,'rgba(0,212,170,0.00)'); return g; } },
+        { label: 'Base', data: new Array(values.length).fill(100), borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderDash: [4,4], pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true, animation: { duration: 400 },
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, maxRotation: 0, font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+      },
+    },
+  });
+}
+
+async function runStrategyReplay() {
+  if (!_stmCurrentId) return;
+  const btn    = document.getElementById('stm-replay-btn');
+  const status = document.getElementById('stm-replay-status');
+  if (btn) { btn.disabled = true; btn.textContent = 'Replaying…'; }
+  if (status) status.textContent = 'Running backtest…';
+  try {
+    const data = await apiPost('/strategies/' + _stmCurrentId + '/replay');
+    if (!data || !data.frames) { if (status) status.textContent = 'Replay failed'; return; }
+    if (status) status.textContent = data.trade_count + ' trades · sharpe ' + (data.sharpe||0).toFixed(2) + ' · equity ' + (data.finalEquity||100).toFixed(1);
+
+    const frames = data.frames;
+    if (_stmChart) { _stmChart.destroy(); _stmChart = null; }
+    const canvas = document.getElementById('stm-equity-chart');
+    if (!canvas) return;
+    const eqData = new Array(frames.length).fill(null);
+    _stmChart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: frames.map(f => f.exitDate || '—'),
+        datasets: [
+          { label: 'Equity', data: eqData, borderColor: '#6366f1', borderWidth: 2,
+            pointRadius: frames.length > 80 ? 0 : 4,
+            pointBackgroundColor: frames.map(f => f.result==='win'?'rgba(34,197,94,0.9)':f.result==='loss'?'rgba(239,68,68,0.9)':'rgba(255,255,255,0.3)'),
+            tension: 0.2, fill: true, backgroundColor: 'rgba(99,102,241,0.08)' },
+          { label: 'Base', data: new Array(frames.length).fill(100), borderColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderDash: [4,4], pointRadius: 0 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: true, animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 10, font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          y: { ticks: { font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        },
+      },
+    });
+
+    const tbody = document.getElementById('stm-trades-body');
+    if (tbody) {
+      tbody.innerHTML = frames.map(function(f, idx) {
+        const col  = f.result==='win'?'var(--positive)':f.result==='loss'?'var(--negative)':'var(--text-muted)';
+        const sign = (f.pnlPct||0) > 0 ? '+' : '';
+        return '<tr id="stm-row-' + idx + '" style="border-bottom:1px solid var(--border-faint)">' +
+          '<td style="padding:5px 8px;color:var(--text-muted)">' + (idx+1) + '</td>' +
+          '<td style="padding:5px 8px;font-weight:600">' + f.symbol + '</td>' +
+          '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (f.entryDate||'—') + '</td>' +
+          '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (f.exitDate||'—') + '</td>' +
+          '<td style="padding:5px 8px;text-align:right">' + (f.entryPrice!=null?f.entryPrice.toFixed(2):'—') + '</td>' +
+          '<td style="padding:5px 8px;text-align:right">' + (f.exitPrice!=null?f.exitPrice.toFixed(2):'—') + '</td>' +
+          '<td style="padding:5px 8px;text-align:right;color:' + col + ';font-weight:600">' + (f.pnlPct!=null?sign+f.pnlPct.toFixed(2)+'%':'—') + '</td>' +
+          '<td style="padding:5px 8px;text-align:right;color:var(--text-muted)">' + (f.holdingDays||0) + '</td>' +
+          '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (f.exitReason||'—') + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    let i = 0;
+    const delay = Math.max(10, Math.min(80, 3000 / frames.length));
+    (function step() {
+      if (i >= frames.length) return;
+      eqData[i] = frames[i].equityAfter;
+      _stmChart.data.datasets[0].data = eqData.slice();
+      _stmChart.update('none');
+      const row = document.getElementById('stm-row-' + i);
+      if (row) {
+        row.style.background = frames[i].result==='win'?'rgba(34,197,94,0.08)':frames[i].result==='loss'?'rgba(239,68,68,0.08)':'';
+        row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+      i++;
+      setTimeout(step, delay);
+    }());
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '▶ Replay Backtest'; }
+  }
+}
+
+function closeStrategyTradesModal() {
+  const modal = document.getElementById('strategy-trades-modal');
+  if (modal) modal.style.display = 'none';
+  if (_stmChart) { _stmChart.destroy(); _stmChart = null; }
+  _stmCurrentId = null;
+}
+
+document.addEventListener('click', function(e) {
+  const modal = document.getElementById('strategy-trades-modal');
+  if (modal && e.target === modal) closeStrategyTradesModal();
 });
