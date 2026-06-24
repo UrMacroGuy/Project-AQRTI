@@ -2459,14 +2459,29 @@ function renderPaperPortfolio() {
 
 async function triggerPaperCycle() {
   const statusEl = document.getElementById('pp-cycle-status');
-  if (statusEl) statusEl.textContent = 'Running cycle…';
+  const btn = document.querySelector('[onclick="triggerPaperCycle()"]');
+  if (statusEl) statusEl.textContent = '⟳ Running cycle…';
+  if (btn) btn.disabled = true;
   try {
     const res = await fetch('http://localhost:8000/admin/paper-trade', { method: 'POST' });
     const data = await res.json();
-    if (statusEl) statusEl.textContent = `Done — opened:${(data.opened||[]).length} closed:${(data.closed||[]).length} value:₹${Math.round(data.portfolioValue||0).toLocaleString('en-IN')}`;
+    const opened  = (data.opened || []).length;
+    const closed  = (data.closed || []).length;
+    const slClosed = (data.stopLossClosed || []).length;
+    const tpClosed = (data.takeProfitClosed || []).length;
+    const value   = Math.round(data.portfolioValue || 0).toLocaleString('en-IN');
+    let msg = `✓ NAV ₹${value}`;
+    if (opened)   msg += `  · Opened: ${opened}`;
+    if (closed)   msg += `  · Closed: ${closed}`;
+    if (slClosed) msg += `  · SL hit: ${slClosed}`;
+    if (tpClosed) msg += `  · TP hit: ${tpClosed}`;
+    if (data.status === 'no_signals') msg = '⚠ No signals today — NAV marked to market';
+    if (statusEl) { statusEl.textContent = msg; statusEl.style.color = 'var(--accent)'; }
     await hydratePaperPortfolio();
   } catch(e) {
-    if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+    if (statusEl) { statusEl.textContent = '✗ Error: ' + e.message; statusEl.style.color = '#ff4444'; }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -2477,44 +2492,52 @@ async function hydratePaperPortfolio() {
     Api.performance(),
     Api.equityCurve(90),
     Api.paperAllocation(),
-    Api.paperTrades(50),
+    Api.paperTrades(100),
   ]);
 
-  // KPI row
+  const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+  const fmt  = (v, dec = 2) => (v != null && !isNaN(v)) ? Number(v).toFixed(dec) : '—';
+  const fmtRs = v => v != null ? `₹${Math.round(v).toLocaleString('en-IN')}` : '—';
+  const pnlCls = v => (v || 0) >= 0 ? 'positive' : 'negative';
+  const pnlSign = v => (v || 0) >= 0 ? '+' : '';
+
+  // ── KPI row ──
   if (pp && pp.portfolio) {
     const port = pp.portfolio;
-    const pv = el('pp-kpi-value');
-    if (pv) pv.textContent = `₹${Math.round(port.totalValue).toLocaleString('en-IN')}`;
-    const cashEl = el('pp-kpi-cash');
-    if (cashEl) cashEl.textContent = `₹${Math.round(port.currentCash).toLocaleString('en-IN')}`;
-    const cashPctEl = el('pp-kpi-cash-pct');
-    if (cashPctEl) cashPctEl.textContent = `${(port.cashPct || 0).toFixed(1)}% of Portfolio`;
-    const invEl = el('pp-kpi-invested');
-    if (invEl) invEl.textContent = `₹${Math.round(port.investedCapital || 0).toLocaleString('en-IN')} Deployed`;
+    _set('pp-kpi-value',    fmtRs(port.totalValue));
+    _set('pp-kpi-cash',     fmtRs(port.currentCash));
+    _set('pp-kpi-cash-pct', `${fmt(port.cashPct, 1)}% of Portfolio`);
+    _set('pp-kpi-invested', `${fmtRs(port.investedCapital)} Deployed`);
     const retEl = el('pp-kpi-return');
     if (retEl) {
       const ret = port.totalReturnPct || 0;
-      retEl.textContent = `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%`;
-      retEl.className = 'kpi-sub ' + (ret >= 0 ? 'positive' : 'negative');
+      retEl.textContent = `${pnlSign(ret)}${fmt(ret)}%`;
+      retEl.className = 'kpi-sub ' + pnlCls(ret);
     }
   }
 
-  if (perf && perf.available) {
-    const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
-    const shrEl = el('pp-kpi-sharpe');
-    if (shrEl) { shrEl.textContent = (perf.sharpeRatio || 0).toFixed(2); shrEl.className = 'kpi-value ' + ((perf.sharpeRatio || 0) >= 1 ? 'positive' : 'neutral'); }
-    const wrEl = el('pp-kpi-winrate');
-    if (wrEl) { wrEl.textContent = `${(perf.winRatePct || 0).toFixed(1)}%`; wrEl.className = 'kpi-value ' + ((perf.winRatePct || 0) >= 50 ? 'positive' : 'negative'); }
-    const trEl = el('pp-kpi-trades');
-    if (trEl) trEl.textContent = `${perf.closedTrades || 0} Closed Trades`;
-    const ddEl = el('pp-kpi-maxdd');
-    if (ddEl) ddEl.textContent = `${(perf.maxDrawdownPct || 0).toFixed(2)}%`;
-    const posEl = el('pp-kpi-positions');
-    if (posEl) posEl.textContent = perf.openTrades || 0;
+  // Unrealized P&L across open positions
+  if (pp && pp.positions && pp.positions.length) {
+    const totalUnreal = pp.positions.reduce((s, p) => s + (p.unrealizedPnl || 0), 0);
+    const totalInvested = pp.positions.reduce((s, p) => s + (p.capitalDeployed || 0), 0);
+    const unrPct = totalInvested > 0 ? totalUnreal / totalInvested * 100 : 0;
+    const urEl = el('pp-kpi-unrealized');
+    if (urEl) { urEl.textContent = `${pnlSign(totalUnreal)}${fmtRs(totalUnreal)}`; urEl.className = 'kpi-value ' + pnlCls(totalUnreal); }
+    _set('pp-kpi-unrealized-pct', `${pnlSign(unrPct)}${fmt(unrPct, 2)}% open`);
+    _set('pp-kpi-positions', pp.positions.length);
+  }
 
-    // Analytics table
-    const fmt = (v, suffix = '') => v != null ? `${v.toFixed ? v.toFixed(2) : v}${suffix}` : '—';
-    _set('pp-an-total-ret',  `${perf.totalReturnPct >= 0 ? '+' : ''}${fmt(perf.totalReturnPct)}%`);
+  if (perf && perf.available) {
+    const wr = perf.winRatePct || 0;
+    const wrEl = el('pp-kpi-winrate');
+    if (wrEl) { wrEl.textContent = `${fmt(wr, 1)}%`; wrEl.className = 'kpi-value ' + (wr >= 50 ? 'positive' : 'negative'); }
+    _set('pp-kpi-trades',   `${perf.closedTrades || 0} Closed Trades`);
+    _set('pp-kpi-maxdd',    `${fmt(perf.maxDrawdownPct)}%`);
+    _set('pp-kpi-sharpe',   `Sharpe: ${fmt(perf.sharpeRatio)}`);
+
+    // Analytics tables
+    const sign = v => (v || 0) >= 0 ? '+' : '';
+    _set('pp-an-total-ret',  `${sign(perf.totalReturnPct)}${fmt(perf.totalReturnPct)}%`);
     _set('pp-an-cagr',       `${fmt(perf.cagrPct)}%`);
     _set('pp-an-sharpe',     fmt(perf.sharpeRatio));
     _set('pp-an-sortino',    fmt(perf.sortinoRatio));
@@ -2530,7 +2553,17 @@ async function hydratePaperPortfolio() {
     _set('pp-an-turnover',   `${fmt(perf.turnoverPct)}%`);
   }
 
-  // Equity curve chart
+  // ── Strategy badge ──
+  const stratBadge = el('pp-strategy-badge');
+  if (stratBadge && pp && pp.positions && pp.positions.length) {
+    const strat = pp.positions[0].strategyName || pp.positions[0].strategyId;
+    if (strat) stratBadge.textContent = `◈ Strategy: ${strat}`;
+    else stratBadge.textContent = `◈ Best Fitness Strategy`;
+  } else if (stratBadge) {
+    stratBadge.textContent = `◈ No active strategy`;
+  }
+
+  // ── Equity curve chart ──
   if (curve && curve.labels && curve.labels.length) {
     ChartRegistry.create('ppEquityCurveChart', {
       type: 'line',
@@ -2541,95 +2574,113 @@ async function hydratePaperPortfolio() {
           borderColor: '#ff8c00', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
           backgroundColor: (ctx) => {
             const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-            g.addColorStop(0, 'rgba(255,140,0,0.14)');
+            g.addColorStop(0, 'rgba(255,140,0,0.18)');
             g.addColorStop(1, 'rgba(255,140,0,0.00)');
             return g;
           },
         }],
       },
       options: {
-        responsive: true, maintainAspectRatio: true,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ₹${ctx.parsed.y.toLocaleString('en-IN')}` }}},
-        scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }}, y: { ticks: { callback: v => `₹${(v/1000).toFixed(0)}K`, maxTicksLimit: 5 }}},
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ₹${Math.round(ctx.parsed.y).toLocaleString('en-IN')}` }}},
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, maxRotation: 0, color: '#888', font: { size: 9 }}, grid: { color: 'rgba(255,255,255,0.04)' }},
+          y: { ticks: { callback: v => `₹${(v/1000).toFixed(0)}K`, maxTicksLimit: 5, color: '#888', font: { size: 9 }}, grid: { color: 'rgba(255,255,255,0.04)' }},
+        },
       },
     });
   }
 
-  // Allocation doughnut — use open positions if target alloc is all cash
+  // ── Allocation doughnut ──
   const allocData = (alloc && alloc.some(a => a.type === 'equity'))
     ? alloc
     : (pp && pp.positions && pp.positions.length)
         ? [...pp.positions.map(p => ({ symbol: p.symbol, weightPct: p.weightPct, type: 'equity' })),
            { symbol: 'CASH', weightPct: pp.portfolio ? pp.portfolio.cashPct : 0, type: 'cash' }]
         : alloc;
+
+  const totalExpo = allocData ? allocData.filter(a => a.type === 'equity').reduce((s, a) => s + (a.weightPct || 0), 0) : 0;
+  _set('pp-alloc-exposure', `${fmt(totalExpo, 0)}% Invested`);
+
   if (allocData && allocData.length) {
+    const PALETTE = ['rgba(255,140,0,0.85)','rgba(34,197,94,0.7)','rgba(59,130,246,0.7)',
+      'rgba(245,158,11,0.7)','rgba(239,68,68,0.7)','rgba(147,51,234,0.7)',
+      'rgba(236,72,153,0.7)','rgba(0,170,255,0.7)','rgba(251,146,60,0.7)',
+      'rgba(20,184,166,0.7)','rgba(248,113,113,0.7)','rgba(167,243,208,0.7)',
+      'rgba(255,255,255,0.12)'];
     ChartRegistry.create('ppAllocationChart', {
       type: 'doughnut',
       data: {
         labels: allocData.map(a => a.symbol),
-        datasets: [{
-          data: allocData.map(a => a.weightPct),
-          backgroundColor: allocData.map((_, i) => [
-            'rgba(255,140,0,0.8)','rgba(34,197,94,0.6)','rgba(59,130,246,0.6)',
-            'rgba(245,158,11,0.6)','rgba(239,68,68,0.6)','rgba(147,51,234,0.6)',
-            'rgba(236,72,153,0.6)','rgba(0,170,255,0.6)','rgba(251,146,60,0.6)',
-            'rgba(20,184,166,0.6)','rgba(248,113,113,0.6)','rgba(167,243,208,0.6)',
-            'rgba(255,255,255,0.1)',
-          ][i % 13]),
-          borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
-        }],
+        datasets: [{ data: allocData.map(a => a.weightPct), backgroundColor: allocData.map((_, i) => PALETTE[i % 13]), borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }],
       },
       options: {
-        responsive: true, maintainAspectRatio: true,
-        plugins: { legend: { position: 'right', labels: { font: { size: 10 }}}, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}%` }}},
-        cutout: '50%',
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right', labels: { color: '#aaa', font: { size: 10 }, boxWidth: 10 }}, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}%` }}},
+        cutout: '55%',
       },
     });
   }
 
-  // Open positions table
-  if (pp && pp.positions && pp.positions.length) {
-    const pbody = el('pp-full-positions-body');
-    if (pbody) {
-      pbody.innerHTML = pp.positions.map(p => {
-        const pnlClass = (p.unrealizedPct || 0) >= 0 ? 'positive' : 'negative';
-        const pnlSign  = (p.unrealizedPct || 0) >= 0 ? '+' : '';
-        return `
-          <tr>
-            <td><strong>${p.symbol}</strong></td>
-            <td style="color:var(--text-muted)">₹${(p.entryPrice || 0).toFixed(2)}</td>
-            <td>₹${(p.currentPrice || 0).toFixed(2)}</td>
-            <td><strong>${(p.weightPct || 0).toFixed(1)}%</strong></td>
-            <td class="${pnlClass}">${pnlSign}₹${(p.unrealizedPnl || 0).toFixed(0)} (${pnlSign}${(p.unrealizedPct || 0).toFixed(2)}%)</td>
-            <td>${dirBadge(p.direction || 'Bullish')}</td>
-            <td>${confBarHTML(Math.round(p.confidence || 0))}</td>
-          </tr>`;
+  // ── Open positions table — full trader view ──
+  const pbody = el('pp-full-positions-body');
+  if (pbody) {
+    const positions = pp && pp.positions || [];
+    _set('pp-open-count', `${positions.length} position${positions.length !== 1 ? 's' : ''}`);
+    if (positions.length) {
+      pbody.innerHTML = positions.map(p => {
+        const pc  = pnlCls(p.unrealizedPct);
+        const ps  = pnlSign(p.unrealizedPct);
+        const slPct = p.entryPrice > 0 ? ((p.stopLoss - p.entryPrice) / p.entryPrice * 100) : 0;
+        const tpPct = p.entryPrice > 0 ? ((p.target   - p.entryPrice) / p.entryPrice * 100) : 0;
+        return `<tr>
+          <td><strong>${p.symbol}</strong></td>
+          <td style="color:var(--text-muted);font-size:0.7rem">${p.sector || '—'}</td>
+          <td style="color:var(--text-muted)">${p.entryDate || '—'}</td>
+          <td>₹${fmt(p.entryPrice)}</td>
+          <td><strong>₹${fmt(p.currentPrice)}</strong></td>
+          <td style="color:var(--text-muted)">${fmt(p.shares, 2)}</td>
+          <td>${fmtRs(p.capitalDeployed)}</td>
+          <td class="${pc}"><strong>${ps}₹${Math.round(p.unrealizedPnl || 0).toLocaleString('en-IN')}</strong><br><span style="font-size:0.68rem">${ps}${fmt(p.unrealizedPct)}%</span></td>
+          <td class="negative" title="Stop Loss">₹${fmt(p.stopLoss)}<br><span style="font-size:0.65rem">${fmt(slPct)}%</span></td>
+          <td class="positive" title="Target">₹${fmt(p.target)}<br><span style="font-size:0.65rem">+${fmt(tpPct)}%</span></td>
+          <td>${confBarHTML(Math.round(p.confidence || 0))}</td>
+          <td>${dirBadge(p.direction || 'Bullish')}</td>
+        </tr>`;
       }).join('');
-      const oc = el('pp-open-count');
-      if (oc) oc.textContent = `${pp.positions.length} positions`;
+    } else {
+      pbody.innerHTML = `<tr><td colspan="12" style="color:var(--text-muted);text-align:center;padding:20px">No open positions — click ▶ Run Trade Cycle</td></tr>`;
     }
   }
 
-  // Closed trade history
-  if (trades && trades.length) {
-    const tbody = el('pp-trades-body');
-    if (tbody) {
-      tbody.innerHTML = trades.map(t => {
-        const pnlClass = (t.grossPnlPct || 0) >= 0 ? 'positive' : 'negative';
-        const pnlSign  = (t.grossPnlPct || 0) >= 0 ? '+' : '';
-        return `
-          <tr>
-            <td><strong>${t.symbol}</strong></td>
-            <td style="color:var(--text-muted)">${t.entryDate || '—'}</td>
-            <td style="color:var(--text-muted)">${t.exitDate || '—'}</td>
-            <td>${t.holdingDays || 0}d</td>
-            <td>₹${Math.round(t.capitalDeployed || 0).toLocaleString('en-IN')}</td>
-            <td class="${pnlClass}">${pnlSign}₹${(t.grossPnl || 0).toFixed(0)}</td>
-            <td class="${pnlClass}">${pnlSign}${(t.grossPnlPct || 0).toFixed(2)}%</td>
-            <td style="color:var(--text-muted)">${(t.predictedReturn || 0) >= 0 ? '+' : ''}${(t.predictedReturn || 0).toFixed(2)}%</td>
-            <td style="color:var(--text-muted)">${t.exitReason || '—'}</td>
-          </tr>`;
+  // ── Trade history table — full detail ──
+  const tbody = el('pp-trades-body');
+  if (tbody) {
+    const tradeList = trades || [];
+    _set('pp-trades-count', `${tradeList.length} closed`);
+    if (tradeList.length) {
+      tbody.innerHTML = tradeList.map(t => {
+        const pc = pnlCls(t.grossPnlPct);
+        const ps = pnlSign(t.grossPnlPct);
+        const reasonColor = t.exitReason === 'stop_loss' ? 'negative' : t.exitReason === 'take_profit' ? 'positive' : '';
+        return `<tr>
+          <td><strong>${t.symbol}</strong></td>
+          <td style="color:var(--text-muted);font-size:0.7rem">${t.sector || '—'}</td>
+          <td style="color:var(--text-muted)">${t.entryDate || '—'}</td>
+          <td style="color:var(--text-muted)">${t.exitDate || '—'}</td>
+          <td style="color:var(--text-muted)">${t.holdingDays || 0}d</td>
+          <td>₹${fmt(t.entryPrice)}</td>
+          <td>₹${fmt(t.exitPrice)}</td>
+          <td style="color:var(--text-muted)">${fmt(t.shares, 2)}</td>
+          <td>${fmtRs(t.capitalDeployed)}</td>
+          <td class="${pc}"><strong>${ps}${fmtRs(t.grossPnl)}</strong></td>
+          <td class="${pc}"><strong>${ps}${fmt(t.grossPnlPct)}%</strong></td>
+          <td class="${reasonColor}" style="font-size:0.7rem;letter-spacing:0.03em">${(t.exitReason || '—').replace(/_/g,' ').toUpperCase()}</td>
+          <td>${confBarHTML(Math.round(t.confidence || 0))}</td>
+        </tr>`;
       }).join('');
+    } else {
+      tbody.innerHTML = `<tr><td colspan="13" style="color:var(--text-muted);text-align:center;padding:20px">No closed trades yet — run a cycle and let positions close</td></tr>`;
     }
   }
 }

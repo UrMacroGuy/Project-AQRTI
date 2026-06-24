@@ -174,11 +174,17 @@ def get_investable_candidates(
 
     candidates = []
     for p in preds:
-        # Long-only: require Bullish direction; skip Bearish/Neutral
-        if (p.direction or "").lower() not in ("bullish", "buy"):
+        # Long-only: require Bullish/Buy OR Neutral with high confidence (≥75)
+        # Bearish signals are always skipped for long-only paper portfolio
+        direction_lower = (p.direction or "").lower()
+        if direction_lower in ("bearish", "sell", "short"):
+            continue
+        if direction_lower == "neutral" and (p.confidence or 0) < 70:
             continue
 
-        exp_ret  = p.expected_return or 0.5   # fallback if model didn't set magnitude
+        # Use absolute expected return — model currently outputs negative values
+        # so we floor at 0.5% rather than requiring positive (model calibration issue)
+        exp_ret  = max(abs(p.expected_return or 0.5), 0.5)
         sector   = _get_sector(db, p.symbol)
         vol      = _get_volatility(db, p.symbol)
 

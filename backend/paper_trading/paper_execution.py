@@ -132,11 +132,39 @@ def execute_rebalance(
 def mark_to_market(db: Session) -> dict:
     """
     Recalculate current portfolio value using latest prices.
-    Call this daily after market close to update equity curve.
+    Also enforces stop-loss and take-profit rules on open positions.
     """
-    portfolio = get_or_create_portfolio(db)
-    open_pos  = get_open_positions(db)
+    from aqrti.database.models import PaperPosition
 
+    portfolio  = get_or_create_portfolio(db)
+    sl_closed  = []
+    tp_closed  = []
+
+    # Enforce stop-loss and take-profit on every open position
+    positions = db.query(PaperPosition).filter_by(portfolio_name=portfolio.portfolio_name).all()
+    for pos in positions:
+        current_price = _get_fill_price(db, pos.symbol)
+        if not current_price:
+            continue
+
+        hit_sl = pos.stop_loss_price and current_price <= pos.stop_loss_price
+        hit_tp = pos.target_price    and current_price >= pos.target_price
+
+        if hit_sl or hit_tp:
+            reason = "stop_loss" if hit_sl else "take_profit"
+            result = close_position(db, pos.symbol, exit_reason=reason)
+            if result:
+                freed_cash = (result["grossPnl"] or 0) + pos.capital_deployed
+                portfolio.current_cash += freed_cash
+                db.commit()
+                if hit_sl:
+                    sl_closed.append(pos.symbol)
+                    log.info("Stop-loss triggered: %s  price=%.2f  sl=%.2f", pos.symbol, current_price, pos.stop_loss_price)
+                else:
+                    tp_closed.append(pos.symbol)
+                    log.info("Take-profit triggered: %s  price=%.2f  tp=%.2f", pos.symbol, current_price, pos.target_price)
+
+    open_pos  = get_open_positions(db)
     invested  = sum(p["currentValue"] for p in open_pos)
     total_val = portfolio.current_cash + invested
     update_portfolio_value(db, total_val, portfolio.current_cash)
@@ -147,4 +175,6 @@ def mark_to_market(db: Session) -> dict:
         "cash":           round(portfolio.current_cash, 2),
         "invested":       round(invested, 2),
         "openPositions":  len(open_pos),
+        "stopLossClosed": sl_closed,
+        "takeProfitClosed": tp_closed,
     }

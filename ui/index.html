@@ -1344,21 +1344,22 @@
     <section class="page" id="page-paper">
 
       <!-- Action Bar -->
-      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-        <button class="panel-action-btn" style="background:var(--accent);color:#000;font-weight:700;padding:6px 16px" onclick="triggerPaperCycle()">▶ Run Paper Trade Cycle</button>
-        <button class="panel-action-btn" style="padding:6px 14px" onclick="hydratePaperPortfolio()">⟳ Refresh</button>
-        <span id="pp-cycle-status" style="font-size:0.75rem;color:var(--text-muted)"></span>
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+        <button class="panel-action-btn" style="background:var(--accent);color:#000;font-weight:700;padding:7px 18px" onclick="triggerPaperCycle()">▶ Run Trade Cycle</button>
+        <button class="panel-action-btn" style="padding:7px 14px" onclick="hydratePaperPortfolio()">⟳ Refresh</button>
+        <span id="pp-cycle-status" style="font-size:0.72rem;color:var(--text-muted);flex:1"></span>
+        <span id="pp-strategy-badge" style="font-size:0.68rem;padding:4px 10px;background:rgba(255,140,0,0.1);border:1px solid rgba(255,140,0,0.3);border-radius:4px;color:var(--accent)">Loading strategy…</span>
       </div>
 
       <!-- KPI Row -->
       <div class="kpi-row">
         <div class="kpi-card">
-          <div class="kpi-label">Portfolio Value</div>
+          <div class="kpi-label">Portfolio NAV</div>
           <div class="kpi-value" id="pp-kpi-value">₹1,00,000</div>
           <div class="kpi-sub" id="pp-kpi-return">+0.00%</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Cash Reserve</div>
+          <div class="kpi-label">Cash Available</div>
           <div class="kpi-value" id="pp-kpi-cash">₹1,00,000</div>
           <div class="kpi-sub" id="pp-kpi-cash-pct">100.0% of Portfolio</div>
         </div>
@@ -1368,9 +1369,9 @@
           <div class="kpi-sub" id="pp-kpi-invested">₹0 Deployed</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Sharpe Ratio</div>
-          <div class="kpi-value" id="pp-kpi-sharpe">—</div>
-          <div class="kpi-sub">Risk-Adjusted Return</div>
+          <div class="kpi-label">Unrealized P&amp;L</div>
+          <div class="kpi-value" id="pp-kpi-unrealized">—</div>
+          <div class="kpi-sub" id="pp-kpi-unrealized-pct">Open positions</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Win Rate</div>
@@ -1380,7 +1381,7 @@
         <div class="kpi-card">
           <div class="kpi-label">Max Drawdown</div>
           <div class="kpi-value negative" id="pp-kpi-maxdd">0.00%</div>
-          <div class="kpi-sub">All-Time Peak Loss</div>
+          <div class="kpi-sub" id="pp-kpi-sharpe">Sharpe: —</div>
         </div>
       </div>
 
@@ -1391,54 +1392,95 @@
             <span class="panel-title">Equity Curve</span>
             <span class="panel-tag">Paper Portfolio NAV</span>
           </div>
-          <div class="panel-body chart-container">
-            <canvas id="ppEquityCurveChart"></canvas>
+          <div class="panel-body" style="padding:8px">
+            <div style="position:relative;height:200px;width:100%">
+              <canvas id="ppEquityCurveChart"></canvas>
+            </div>
           </div>
         </div>
         <div class="panel">
           <div class="panel-header">
-            <span class="panel-title">Portfolio Allocation</span>
-            <span class="panel-tag">Target Weights</span>
+            <span class="panel-title">Allocation</span>
+            <span class="panel-tag" id="pp-alloc-exposure">0% Invested</span>
           </div>
-          <div class="panel-body chart-container">
-            <canvas id="ppAllocationChart"></canvas>
+          <div class="panel-body" style="padding:8px">
+            <div style="position:relative;height:200px;width:100%">
+              <canvas id="ppAllocationChart"></canvas>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Positions + Performance Metrics -->
+      <!-- Open Positions — full trader view -->
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="panel-header">
+          <span class="panel-title">Open Positions</span>
+          <span class="panel-tag live-dot" id="pp-open-count">0 positions</span>
+        </div>
+        <div class="panel-body" style="padding:0;overflow-x:auto">
+          <table class="data-table compact" style="min-width:900px">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Sector</th>
+                <th>Entry Date</th>
+                <th>Entry ₹</th>
+                <th>Current ₹</th>
+                <th>Shares</th>
+                <th>Capital</th>
+                <th>Unreal. P&amp;L</th>
+                <th>Stop Loss</th>
+                <th>Target</th>
+                <th>Conf</th>
+                <th>Dir</th>
+              </tr>
+            </thead>
+            <tbody id="pp-full-positions-body">
+              <tr><td colspan="12" style="color:var(--text-muted);text-align:center;padding:20px">No open positions — click ▶ Run Trade Cycle</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Trade History — full detail -->
+      <div class="panel" style="margin-bottom:1.5rem">
+        <div class="panel-header">
+          <span class="panel-title">Trade History</span>
+          <span class="panel-tag" id="pp-trades-count">0 closed</span>
+        </div>
+        <div class="panel-body" style="padding:0;overflow-x:auto">
+          <table class="data-table compact" style="min-width:1000px">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Sector</th>
+                <th>Entry Date</th>
+                <th>Exit Date</th>
+                <th>Days</th>
+                <th>Entry ₹</th>
+                <th>Exit ₹</th>
+                <th>Shares</th>
+                <th>Capital</th>
+                <th>Gross P&amp;L</th>
+                <th>Return</th>
+                <th>Exit Reason</th>
+                <th>Conf</th>
+              </tr>
+            </thead>
+            <tbody id="pp-trades-body">
+              <tr><td colspan="13" style="color:var(--text-muted);text-align:center;padding:20px">No closed trades yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Performance Analytics -->
       <div class="two-col">
         <div class="panel">
-          <div class="panel-header">
-            <span class="panel-title">Open Positions</span>
-            <span class="panel-tag" id="pp-open-count">0 positions</span>
-          </div>
+          <div class="panel-header"><span class="panel-title">Performance Analytics</span></div>
           <div class="panel-body">
             <table class="data-table compact">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Entry</th>
-                  <th>Current</th>
-                  <th>Weight</th>
-                  <th>Unreal. P&amp;L</th>
-                  <th>Dir</th>
-                  <th>Conf</th>
-                </tr>
-              </thead>
-              <tbody id="pp-full-positions-body">
-                <tr><td colspan="7" style="color:var(--text-muted);text-align:center">No open positions — run POST /admin/paper-trade</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div class="panel">
-          <div class="panel-header">
-            <span class="panel-title">Performance Analytics</span>
-          </div>
-          <div class="panel-body">
-            <table class="data-table compact" id="pp-analytics-table">
-              <tbody id="pp-analytics-body">
+              <tbody>
                 <tr><td style="color:var(--text-muted)">Total Return</td><td id="pp-an-total-ret">—</td></tr>
                 <tr><td style="color:var(--text-muted)">CAGR</td><td id="pp-an-cagr">—</td></tr>
                 <tr><td style="color:var(--text-muted)">Sharpe Ratio</td><td id="pp-an-sharpe">—</td></tr>
@@ -1446,6 +1488,15 @@
                 <tr><td style="color:var(--text-muted)">Max Drawdown</td><td id="pp-an-maxdd" class="negative">—</td></tr>
                 <tr><td style="color:var(--text-muted)">Volatility (Ann)</td><td id="pp-an-vol">—</td></tr>
                 <tr><td style="color:var(--text-muted)">Win Rate</td><td id="pp-an-winrate">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Trade Statistics</span></div>
+          <div class="panel-body">
+            <table class="data-table compact">
+              <tbody>
                 <tr><td style="color:var(--text-muted)">Profit Factor</td><td id="pp-an-pf">—</td></tr>
                 <tr><td style="color:var(--text-muted)">Expectancy</td><td id="pp-an-expectancy">—</td></tr>
                 <tr><td style="color:var(--text-muted)">Avg Win</td><td id="pp-an-avgwin" class="positive">—</td></tr>
@@ -1456,34 +1507,6 @@
               </tbody>
             </table>
           </div>
-        </div>
-      </div>
-
-      <!-- Trade History -->
-      <div class="panel">
-        <div class="panel-header">
-          <span class="panel-title">Trade History</span>
-          <span class="panel-tag">Closed Trades</span>
-        </div>
-        <div class="panel-body">
-          <table class="data-table compact">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Entry</th>
-                <th>Exit</th>
-                <th>Days</th>
-                <th>Capital</th>
-                <th>P&amp;L</th>
-                <th>Return</th>
-                <th>Pred Ret</th>
-                <th>Exit Reason</th>
-              </tr>
-            </thead>
-            <tbody id="pp-trades-body">
-              <tr><td colspan="9" style="color:var(--text-muted);text-align:center">No closed trades yet</td></tr>
-            </tbody>
-          </table>
         </div>
       </div>
 
