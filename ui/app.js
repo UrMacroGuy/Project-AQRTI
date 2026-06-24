@@ -1530,7 +1530,10 @@ async function renderLearning() {
   }
 
   // ── Calibration Curve ─────────────────────────────────────
-  if (calibration && calibration.buckets) {
+  const calCanvas  = el('lcCalibrationChart');
+  const calWrapper = calCanvas && calCanvas.parentElement;
+  if (calibration && calibration.buckets && calibration.buckets.some(b => b.accuracy !== null)) {
+    if (calCanvas) calCanvas.style.display = '';
     const bkts    = calibration.buckets.filter(b => b.accuracy !== null);
     const avgConfs = bkts.map(b => b.avg_confidence);
     const accs     = bkts.map(b => b.accuracy);
@@ -1575,6 +1578,15 @@ async function renderLearning() {
         },
       },
     });
+  } else if (calCanvas) {
+    calCanvas.style.display = 'none';
+    if (calWrapper) {
+      const msg = calWrapper.querySelector('#lc-cal-empty') || document.createElement('div');
+      msg.id = 'lc-cal-empty';
+      msg.style.cssText = 'color:var(--text-muted);font-size:0.72rem;padding:20px;text-align:center';
+      msg.textContent = 'No evaluated predictions yet — calibration data builds after the first predictions close.';
+      if (!calWrapper.contains(msg)) calWrapper.appendChild(msg);
+    }
   }
 
   // ── Model Drift Panel ─────────────────────────────────────
@@ -2069,6 +2081,14 @@ async function hydrateMarketRegime() {
   if (pill) {
     pill.className = 'regime-badge badge-' + (data.regime || '').toLowerCase().replace(/\s+/g, '-');
   }
+
+  // Overview page regime card
+  const rName = el('overview-regime-name');
+  if (rName) rName.textContent = data.regime || '—';
+  const rConf = el('overview-regime-conf');
+  if (rConf) rConf.textContent = data.confidence != null ? `Confidence: ${(data.confidence * 100).toFixed(0)}%` : 'Confidence: —';
+  const rDesc = el('overview-regime-desc');
+  if (rDesc) rDesc.textContent = data.description || data.regime_description || '';
 }
 
 // ── Add marketRegime endpoint to Api layer ────────────────────
@@ -2104,6 +2124,7 @@ window.addEventListener('DOMContentLoaded', () => {
   hydrateMarketRegime();
   startTopbarLivePolling(); // overwrites with real-time yfinance prices, refreshes every 30s
   hydrateNewsStrip();       // amber news ticker bar
+  refreshNavBadges();       // update sidebar counts from live data
 
   // Session restore — sidebar button is always visible, toast appears after 500ms
   _updateSidebarSessionBtn(prevSession);
@@ -2114,16 +2135,29 @@ window.addEventListener('DOMContentLoaded', () => {
 
 // ── Opportunity Rankings — live prediction hydration ─────────
 async function hydrateOpportunities() {
-  const data = await Api.predictions({ limit: 20 });
-  if (!data || !data.length) return;
+  const rawData = await Api.predictions({ limit: 50 });
+  if (!rawData || !rawData.length) return;
+
+  // Only show bullish/buy signals as investable opportunities
+  const data = rawData.filter(p => {
+    const dir = (p.direction || '').toLowerCase();
+    return dir.includes('bull') || dir.includes('buy');
+  }).slice(0, 20);
+
+  // Re-rank after filter
+  data.forEach((p, i) => { p.rank = i + 1; });
 
   const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+
+  // Update nav badge
+  const oppBadge = el('badge-opp');
+  if (oppBadge) oppBadge.textContent = data.length;
 
   // KPI cards
   const strong = data.filter(p => (p.confidence || 0) >= 80);
   _set('opp-kpi-strong', strong.length);
-  const avgConf = data.reduce((s, p) => s + (p.confidence || 0), 0) / data.length;
-  _set('opp-kpi-avg-conf', `${avgConf.toFixed(1)}%`);
+  const avgConf = data.length ? data.reduce((s, p) => s + (p.confidence || 0), 0) / data.length : 0;
+  _set('opp-kpi-avg-conf', data.length ? `${avgConf.toFixed(1)}%` : '—');
   const best = [...data].sort((a, b) => (b.expectedReturn || 0) - (a.expectedReturn || 0))[0];
   if (best) {
     const ret = best.expectedReturn;
@@ -2132,12 +2166,14 @@ async function hydrateOpportunities() {
   }
   const riskCounts = { Low: 0, Medium: 0, High: 0 };
   data.forEach(p => { const r = p.risk || 'Medium'; if (riskCounts[r] != null) riskCounts[r]++; });
-  const dominantRisk = Object.entries(riskCounts).sort((a, b) => b[1] - a[1])[0][0];
+  const dominantRisk = data.length ? Object.entries(riskCounts).sort((a, b) => b[1] - a[1])[0][0] : '—';
   _set('opp-kpi-risk', dominantRisk);
 
   const tbody = el('opportunity-body');
   if (tbody) {
-    tbody.innerHTML = data.map(p => {
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);text-align:center;padding:20px">No bullish predictions today — model sees no clear long setups.</td></tr>';
+    } else tbody.innerHTML = data.map(p => {
       const expRet = p.expectedReturn != null
         ? (p.expectedReturn >= 0 ? `+${p.expectedReturn.toFixed(2)}%` : `${p.expectedReturn.toFixed(2)}%`)
         : '—';
@@ -2463,7 +2499,7 @@ async function triggerPaperCycle() {
   if (statusEl) statusEl.textContent = '⟳ Running cycle…';
   if (btn) btn.disabled = true;
   try {
-    const res = await fetch('http://localhost:8000/admin/paper-trade', { method: 'POST' });
+    const res = await fetch(`${API_CONFIG.BASE}/admin/paper-trade`, { method: 'POST' });
     const data = await res.json();
     const opened  = (data.opened || []).length;
     const closed  = (data.closed || []).length;
@@ -2562,7 +2598,11 @@ async function hydratePaperPortfolio() {
   }
 
   // ── Equity curve chart ──
-  if (curve && curve.labels && curve.labels.length) {
+  const curveCanvas = el('ppEquityCurveChart');
+  const curveEmpty  = el('pp-equity-empty');
+  if (curve && curve.labels && curve.labels.length > 1) {
+    if (curveCanvas) curveCanvas.style.display = '';
+    if (curveEmpty)  curveEmpty.style.display  = 'none';
     ChartRegistry.create('ppEquityCurveChart', {
       type: 'line',
       data: {
@@ -2587,6 +2627,9 @@ async function hydratePaperPortfolio() {
         },
       },
     });
+  } else {
+    if (curveCanvas) curveCanvas.style.display = 'none';
+    if (curveEmpty)  { curveEmpty.style.display = ''; curveEmpty.textContent = 'No equity history yet — run paper cycles to build the curve.'; }
   }
 
   // ── Allocation doughnut ──
@@ -3152,7 +3195,17 @@ async function hydrateResearchOps() {
   const briefBody = el('roc-brief-body');
   if (briefBody && briefData) {
     const tag = el('roc-brief-date-tag');
-    if (tag) tag.textContent = briefData.brief_date || '—';
+    if (tag) {
+      const briefCreated = briefData.created_at || briefData.generated_at || briefData.brief_date;
+      let staleLabel = '';
+      if (briefCreated) {
+        const ageMs  = Date.now() - new Date(briefCreated).getTime();
+        const ageH   = ageMs / 3600000;
+        if (ageH > 4) staleLabel = ` ⚠ ${ageH >= 24 ? Math.floor(ageH/24) + 'd' : Math.round(ageH) + 'h'} ago`;
+      }
+      tag.textContent = (briefData.brief_date || '—') + staleLabel;
+      if (staleLabel) tag.style.color = 'var(--amber-dim, #cc6600)';
+    }
 
     const sec = (label, items) => {
       if (!items || !items.length) return '';
@@ -3782,6 +3835,46 @@ function renderPage(pageId) {
   if (pageId === 'live-prices')      hydrateLivePrices();
 }
 
+// ── Nav Badges — live counts from backend ────────────────────
+async function refreshNavBadges() {
+  const _b = (id, val) => { const e = el(id); if (e && val != null) e.textContent = val; };
+  try {
+    const [ov, preds, news, strats, agentData, findings] = await Promise.all([
+      Api.overview().catch(() => null),
+      Api.predictions({ limit: 50 }).catch(() => null),
+      Api.news({ limit: 10 }).catch(() => null),
+      Api.strategies().catch(() => null),
+      Api.agents().catch(() => null),
+      Api.findingsSummary().catch(() => null),
+    ]);
+    if (ov) {
+      _b('badge-overview', ov.openPositions ?? ov.activePredictions ?? '—');
+      if (ov.activeStrategies != null) _b('badge-strat', ov.activeStrategies);
+      if (ov.knowledgeScore  != null) _b('badge-intel', ov.knowledgeScore.toFixed(1));
+    }
+    if (preds) {
+      const bullish = preds.filter(p => (p.direction || '').toLowerCase().includes('bull')).length;
+      _b('badge-opp', bullish || preds.length);
+    }
+    if (news) {
+      _b('badge-news', Array.isArray(news) ? news.length : (news.total ?? news.count ?? '—'));
+    }
+    if (strats && !ov?.activeStrategies) {
+      const count = strats.total ?? (Array.isArray(strats.strategies) ? strats.strategies.length : null) ?? (Array.isArray(strats) ? strats.length : null);
+      _b('badge-strat', count ?? '—');
+    }
+    if (agentData) {
+      const arr = agentData.agents || agentData;
+      _b('badge-agents', Array.isArray(arr) ? arr.length : '—');
+    }
+    if (findings) {
+      const critical = (findings.by_urgency?.critical || 0);
+      const high     = (findings.by_urgency?.high || 0);
+      _b('badge-risk', critical + high || findings.total || '—');
+    }
+  } catch (e) { /* silently skip */ }
+}
+
 // ── Topbar Live Ticker — real-time prices every 30s ───────────
 let _topbarLiveTimer = null;
 let _learningInitDone = false;
@@ -4156,6 +4249,12 @@ async function hydrateOverview() {
     _set('topbar-regime', ov.regime);
     const pill = document.getElementById('regime-pill');
     if (pill) pill.className = 'regime-badge badge-' + ov.regime.toLowerCase().replace(/\s+/g, '-');
+  }
+
+  // Nav badge — overview shows open position count
+  if (ov.openPositions != null) {
+    const ob = el('badge-overview');
+    if (ob) ob.textContent = ov.openPositions;
   }
 
   // Equity curve

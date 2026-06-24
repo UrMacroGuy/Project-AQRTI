@@ -173,7 +173,7 @@
     <div class="topbar-right">
       <div class="regime-badge" id="regime-pill">
         <span class="regime-dot"></span>
-        <span id="topbar-regime">BULL MARKET</span>
+        <span id="topbar-regime">—</span>
       </div>
       <div class="topbar-date" id="topbar-date">24 Jun 2026</div>
     </div>
@@ -356,9 +356,9 @@
           </div>
           <div class="panel-body">
             <div class="regime-display" id="overview-regime-display">
-              <div class="regime-name">BULL MARKET</div>
-              <div class="regime-confidence">Confidence: 88%</div>
-              <div class="regime-desc">Strong upward trend across broad market. Momentum strategies favored. Sector rotation into IT and FMCG.</div>
+              <div class="regime-name" id="overview-regime-name">—</div>
+              <div class="regime-confidence" id="overview-regime-conf">Confidence: —</div>
+              <div class="regime-desc" id="overview-regime-desc">Loading market regime…</div>
               <div class="regime-indicators">
                 <div class="regime-ind positive">Breadth: 72% Advancing</div>
                 <div class="regime-ind positive">Trend: Intact</div>
@@ -1395,6 +1395,7 @@
           <div class="panel-body" style="padding:8px">
             <div style="position:relative;height:200px;width:100%">
               <canvas id="ppEquityCurveChart"></canvas>
+              <div id="pp-equity-empty" style="display:none;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.72rem;text-align:center;padding:8px"></div>
             </div>
           </div>
         </div>

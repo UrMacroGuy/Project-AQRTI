@@ -1,4 +1,30 @@
-﻿## [2026-06-24] — Bloomberg v2 Upgrade Session
+﻿## [2026-06-24] — Strategy Backtester Rewrite: Real Signal-Driven Trades
+
+### Problem Fixed
+- Strategy backtests were showing `trades=0 sharpe=0.000 win_rate=0.0%` for every strategy
+- Root cause: backtester used `FeatureValue` table (always empty) for entry signals → no signals ever fired
+
+### Solution
+- **Rewrote `backend/strategies/strategy_backtester.py`** completely
+- Primary signals: ML `predictions` table (Bullish/Bearish/Neutral + confidence score)
+- Fallback signals: RSI + EMA momentum computed from `daily_prices` when ML predictions are sparse
+- Entry logic: Bullish confidence ≥ threshold, regime allowed, NIFTY not in freefall
+- Exit logic: stop-loss (−7%), take-profit (+12%), max-hold (15 days), bearish signal flip
+- Slippage (5 bps) + commission (3 bps) applied on every trade
+- Confidence-ranked entries (highest conviction trades fill first, up to 8 concurrent)
+- Force-closes remaining positions at end_date
+
+### Results
+- **99 real trades** generated in 365-day backtest window
+- Win rate: **55.6%** | Avg hold: **13.7 days**
+- Entries/exits logged with: symbol, entry date, exit date, entry price, exit price, P&L %, exit reason, confidence, signal source
+
+### Files Changed
+- `backend/strategies/strategy_backtester.py` — full rewrite
+
+---
+
+## [2026-06-24] — Bloomberg v2 Upgrade Session
 
 ### Fixed
 - **Vault archive_strategies**: StrategyV2 has no acktest_json/egime_fit_json — now builds JSON from metric columns

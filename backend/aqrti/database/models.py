@@ -737,6 +737,20 @@ class ModelDriftHistory(Base):
     created_at      = Column(DateTime,   default=datetime.utcnow)
 
 
+class ModelWeight(Base):
+    """Stores ensemble weights per model per task, updated by weight_optimizer."""
+    __tablename__ = "model_weights"
+    __table_args__ = (
+        UniqueConstraint("model_name", "task", name="uq_mw_model_task"),
+    )
+
+    id          = Column(Integer,    primary_key=True, autoincrement=True)
+    model_name  = Column(String(20), nullable=False)
+    task        = Column(String(30), nullable=False)
+    weight      = Column(Float,      nullable=False, default=0.25)
+    updated_at  = Column(DateTime,   default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class FeatureImportanceHistory(Base):
     """Daily snapshot of feature importance scores from all active models."""
     __tablename__ = "feature_importance_history"

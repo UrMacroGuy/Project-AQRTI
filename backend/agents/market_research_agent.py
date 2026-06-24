@@ -1,25 +1,23 @@
 """
-Market Research Agent (7B)
-Monitors market breadth, sector rotation, volatility, regime changes, anomalies.
-Produces daily market intelligence findings.
+Market Research Agent
+Monitors market breadth, sector rotation, volatility, regime changes, and anomalies.
+Derives intelligence from live price data in daily_prices + index_data tables.
 
 MAY NOT: execute trades, modify strategies, retrain models.
 """
 
 from __future__ import annotations
 
-import sys, os, json, math
+import sys, os, math
 from datetime import date, timedelta
-from typing import Optional
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from aqrti.database.models import (
-    MarketRegime, DailyPrice, IndexData, Stock, SentimentRecord,
+    MarketRegime, DailyPrice, IndexData, SentimentRecord,
 )
 from aqrti.utils.logger import get_logger
 from agents.agent_base import AgentBase
@@ -27,45 +25,49 @@ from agents.agent_registry import register_agent_class
 
 log = get_logger("agent.market_research")
 
-# Sector map from STOCK_META (symbols without .NS suffix)
-SECTOR_MAP: dict[str, str] = {
-    "RELIANCE":   "Energy",
-    "TCS":        "IT",
-    "INFY":       "IT",
-    "HDFCBANK":   "Banking",
-    "ICICIBANK":  "Banking",
-    "WIPRO":      "IT",
-    "AXISBANK":   "Banking",
-    "LTIM":       "IT",
-    "NESTLEIND":  "FMCG",
+STOCK_UNIVERSE = [
+    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "WIPRO", "AXISBANK",
+    "LTIM", "NESTLEIND", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TATASTEEL",
+    "TATAMOTORS", "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
+]
+
+SECTOR_MAP = {
+    "RELIANCE": "Energy",   "ONGC": "Energy",
+    "TCS": "IT",            "INFY": "IT",      "WIPRO": "IT",      "LTIM": "IT",
+    "HDFCBANK": "Banking",  "ICICIBANK": "Banking", "AXISBANK": "Banking",
+    "KOTAKBANK": "Banking", "SBIN": "Banking",
     "BAJFINANCE": "NBFC",
-    "MARUTI":     "Auto",
-    "SUNPHARMA":  "Pharma",
-    "TATASTEEL":  "Metal",
-    "TATAMOTORS": "Auto",
-    "KOTAKBANK":  "Banking",
-    "TITAN":      "Consumer",
-    "ONGC":       "Energy",
-    "HINDALCO":   "Metal",
-    "SBIN":       "Banking",
+    "MARUTI": "Auto",       "TATAMOTORS": "Auto",
+    "SUNPHARMA": "Pharma",
+    "TATASTEEL": "Metal",   "HINDALCO": "Metal",
+    "NESTLEIND": "FMCG",
+    "TITAN": "Consumer",
     "BHARTIARTL": "Telecom",
 }
+
+
+def _pct_change(new_val, old_val):
+    if old_val and old_val != 0:
+        return (new_val - old_val) / old_val * 100
+    return None
 
 
 class MarketResearchAgent(AgentBase):
     agent_id    = "market_research"
     agent_type  = "market"
     name        = "Market Research Agent"
-    description = "Monitors market breadth, sector rotation, volatility, regime changes, and anomalies."
+    description = "Monitors market breadth, sector rotation, volatility, and regime changes using live price data."
 
     def run(self, db: Session) -> dict:
         findings        = []
         recommendations = []
+        today           = date.today()
+        cutoff_30d      = today - timedelta(days=30)
 
         current_regime = "UNKNOWN"
         current_conf   = 0.0
 
-        # ── 1. Regime Change Detection ────────────────────────────
+        # ── 1. Regime from DB (if populated) ─────────────────────
         try:
             regimes = (
                 db.query(MarketRegime)
@@ -74,43 +76,36 @@ class MarketResearchAgent(AgentBase):
                 .all()
             )
             if regimes:
-                current        = regimes[0]
-                prior          = regimes[1] if len(regimes) > 1 else None
-                current_regime = current.regime
-                current_conf   = current.confidence or 0.0
-
-                if prior and current.regime != prior.regime:
+                current_regime = regimes[0].regime
+                current_conf   = regimes[0].confidence or 0.0
+                prior = regimes[1] if len(regimes) > 1 else None
+                if prior and current_regime != prior.regime:
                     findings.append({
-                        "title":       f"Regime Change: {prior.regime} → {current.regime}",
+                        "title":       f"Regime Change: {prior.regime} → {current_regime}",
                         "description": (
-                            f"Market regime shifted from {prior.regime} to {current.regime} "
-                            f"on {current.date}. Confidence: {current_conf:.0f}%."
+                            f"Market regime shifted from {prior.regime} to {current_regime} "
+                            f"on {regimes[0].date}. Confidence: {current_conf:.0f}%."
                         ),
-                        "evidence":    f"Prior: {prior.regime} ({prior.date}). Current: {current.regime} ({current.date}).",
+                        "evidence":    f"prior={prior.regime} ({prior.date}), current={current_regime} ({regimes[0].date})",
                         "implication": "Strategy allocations and signal thresholds may need review.",
                         "urgency":     "high",
                         "subcategory": "regime_change",
-                        "regime":      current.regime,
+                        "regime":      current_regime,
                     })
-                    recommendations.append(
-                        f"Review active strategies for compatibility with {current.regime} regime."
-                    )
+                    recommendations.append(f"Review active strategies for {current_regime} regime.")
 
-                cutoff_30d     = date.today() - timedelta(days=30)
-                recent_regimes = [r for r in regimes if r.date >= cutoff_30d]
-                volatile_days  = sum(1 for r in recent_regimes if r.regime == "VOLATILE")
+                volatile_days = sum(1 for r in regimes if r.date >= cutoff_30d and r.regime == "VOLATILE")
                 if volatile_days > 10:
                     findings.append({
-                        "title":       f"Elevated Volatility: {volatile_days} VOLATILE days in 30d",
-                        "description": f"Market has been in VOLATILE regime for {volatile_days} of the last 30 days.",
+                        "title":       f"Elevated Volatility: {volatile_days} VOLATILE days (30d)",
+                        "description": f"Market has been VOLATILE for {volatile_days} of the last 30 days.",
                         "evidence":    f"volatile_days={volatile_days}/30",
                         "implication": "Reduce position sizes; prefer defensive strategies.",
                         "urgency":     "high",
                         "subcategory": "volatility",
                     })
-                    recommendations.append("Consider reducing portfolio exposure during elevated volatility.")
 
-                if current_conf < 60:
+                if 0 < current_conf < 60:
                     findings.append({
                         "title":       f"Low Regime Confidence: {current_conf:.0f}%",
                         "description": f"Current {current_regime} regime has only {current_conf:.0f}% confidence.",
@@ -119,248 +114,166 @@ class MarketResearchAgent(AgentBase):
                         "urgency":     "normal",
                         "subcategory": "regime_confidence",
                     })
-
-                if len(regimes) >= 5:
-                    same_streak = 1
-                    for i in range(1, len(regimes)):
-                        if regimes[i].regime == regimes[0].regime:
-                            same_streak += 1
-                        else:
-                            break
-                    if same_streak >= 7:
-                        findings.append({
-                            "title":       f"Extended {current_regime} Streak: {same_streak} consecutive days",
-                            "description": f"Market has been in {current_regime} for {same_streak} consecutive days.",
-                            "evidence":    f"streak={same_streak} days in {current_regime}",
-                            "implication": "Mean-reversion strategies may become more viable soon.",
-                            "urgency":     "normal",
-                            "subcategory": "anomaly",
-                        })
         except Exception as exc:
-            log.debug("Regime query failed: %s", exc)
+            log.debug("Regime query skipped: %s", exc)
 
-        # ── 2. NIFTY / BANKNIFTY price analysis ──────────────────
+        # ── 2. NIFTY Index Analysis ───────────────────────────────
         try:
             nifty_rows = (
                 db.query(IndexData)
-                .filter(IndexData.index_name == "NIFTY50")
+                .filter(IndexData.index_name == "NIFTY50", IndexData.date >= cutoff_30d)
                 .order_by(IndexData.date.desc())
-                .limit(25)
+                .limit(22)
                 .all()
             )
-            if nifty_rows:
-                latest     = nifty_rows[0]
-                ret_1d     = latest.returns or 0.0
-
-                # 5-day return
-                closes     = [r.close for r in reversed(nifty_rows) if r.close]
-                ret_5d     = ((closes[-1] / closes[-6]) - 1) * 100 if len(closes) >= 6 else None
-                ret_20d    = ((closes[-1] / closes[0]) - 1) * 100 if len(closes) >= 20 else None
-
-                move_desc  = "up" if ret_1d >= 0 else "down"
-                urgency_1d = "high" if abs(ret_1d) >= 1.5 else "normal"
-
-                findings.append({
-                    "title":       f"NIFTY50 1-day move: {ret_1d:+.2f}%",
-                    "description": (
-                        f"NIFTY50 closed at {latest.close:,.0f} on {latest.date}, "
-                        f"{move_desc} {abs(ret_1d):.2f}% today."
-                        + (f" 5d return: {ret_5d:+.2f}%." if ret_5d is not None else "")
-                        + (f" 20d return: {ret_20d:+.2f}%." if ret_20d is not None else "")
-                    ),
-                    "evidence":    (
-                        f"close={latest.close:,.0f}, ret_1d={ret_1d:+.2f}%"
-                        + (f", ret_5d={ret_5d:+.2f}%" if ret_5d is not None else "")
-                        + (f", ret_20d={ret_20d:+.2f}%" if ret_20d is not None else "")
-                    ),
-                    "implication": (
-                        "Large intraday move — verify regime classification and position sizes."
-                        if abs(ret_1d) >= 1.5 else
-                        "NIFTY50 within normal range."
-                    ),
-                    "urgency":     urgency_1d,
-                    "subcategory": "index_move",
-                })
-
-                if ret_5d is not None and abs(ret_5d) >= 3.0:
-                    direction = "bull run" if ret_5d > 0 else "sell-off"
+            if len(nifty_rows) >= 2:
+                latest = nifty_rows[0]
+                prev   = nifty_rows[1]
+                ret_1d = _pct_change(latest.close, prev.close)
+                if ret_1d is not None and abs(ret_1d) >= 1.5:
+                    direction = "surged" if ret_1d > 0 else "fell"
                     findings.append({
-                        "title":       f"NIFTY50 5-day {direction}: {ret_5d:+.2f}%",
-                        "description": f"NIFTY50 has moved {ret_5d:+.2f}% over the last 5 trading days.",
-                        "evidence":    f"ret_5d={ret_5d:+.2f}%, close={latest.close:,.0f}",
-                        "implication": "Sustained directional move — trend strategies may have an edge.",
-                        "urgency":     "normal",
-                        "subcategory": "index_trend",
+                        "title":       f"NIFTY {direction} {ret_1d:+.2f}% on {latest.date}",
+                        "description": (
+                            f"NIFTY50 closed at {latest.close:,.0f} ({ret_1d:+.2f}% vs prior close {prev.close:,.0f}). "
+                            f"{'Sharp move — check for macro trigger.' if abs(ret_1d) >= 2.5 else 'Significant single-day move.'}"
+                        ),
+                        "evidence":    f"close={latest.close:.0f}, prev={prev.close:.0f}, ret_1d={ret_1d:.2f}%",
+                        "implication": "Large index moves affect all open positions and signal quality.",
+                        "urgency":     "high" if abs(ret_1d) >= 2.5 else "normal",
+                        "subcategory": "index_move",
                     })
+
+                if len(nifty_rows) >= 20:
+                    base_20d = nifty_rows[19]
+                    ret_20d  = _pct_change(latest.close, base_20d.close)
+                    if ret_20d is not None:
+                        trend = "UPTREND" if ret_20d > 3 else ("DOWNTREND" if ret_20d < -3 else "SIDEWAYS")
+                        if current_regime == "UNKNOWN":
+                            current_regime = "BULL" if ret_20d > 5 else ("BEAR" if ret_20d < -5 else "SIDEWAYS")
+                        findings.append({
+                            "title":       f"NIFTY 20-Day Trend: {trend} ({ret_20d:+.1f}%)",
+                            "description": (
+                                f"NIFTY50 has moved {ret_20d:+.1f}% over the last 20 trading days "
+                                f"({base_20d.date} → {latest.date}, {latest.close:,.0f})."
+                            ),
+                            "evidence":    f"nifty_20d_return={ret_20d:.2f}%, from={base_20d.close:.0f} to={latest.close:.0f}",
+                            "implication": f"{'Broad rally — maintain or increase long exposure.' if ret_20d > 5 else 'Downtrend in force — defensive posture recommended.' if ret_20d < -5 else 'Sideways market — mean-reversion strategies may outperform.'}",
+                            "urgency":     "normal",
+                            "subcategory": "index_trend",
+                        })
+
+                # Annualised volatility
+                rets = [r.returns for r in nifty_rows if r.returns is not None]
+                if len(rets) >= 10:
+                    mean_r = sum(rets) / len(rets)
+                    variance = sum((r - mean_r) ** 2 for r in rets) / len(rets)
+                    vol_ann  = math.sqrt(variance) * math.sqrt(252) * 100
+                    if vol_ann > 20:
+                        findings.append({
+                            "title":       f"Elevated Market Volatility: {vol_ann:.1f}% annualised",
+                            "description": (
+                                f"NIFTY50 20-day realised volatility is {vol_ann:.1f}% (annualised). "
+                                f"Threshold is 20%."
+                            ),
+                            "evidence":    f"vol_ann={vol_ann:.1f}%, n_days={len(rets)}",
+                            "implication": "Higher volatility widens stop-loss triggers. Reduce position sizes or widen stops.",
+                            "urgency":     "high" if vol_ann > 28 else "normal",
+                            "subcategory": "volatility",
+                        })
         except Exception as exc:
-            log.debug("Index analysis failed: %s", exc)
+            log.debug("NIFTY analysis skipped: %s", exc)
 
         # ── 3. Stock Universe Breadth ─────────────────────────────
         try:
-            cutoff_5d = date.today() - timedelta(days=8)
-            price_rows = (
-                db.query(DailyPrice.symbol, DailyPrice.date, DailyPrice.close)
-                .filter(DailyPrice.date >= cutoff_5d)
-                .order_by(DailyPrice.symbol, DailyPrice.date.asc())
-                .all()
-            )
-            if price_rows:
-                from collections import defaultdict
-                sym_history: dict[str, list] = defaultdict(list)
-                for row in price_rows:
-                    sym_history[row.symbol].append((row.date, row.close))
+            advancing     = 0
+            declining     = 0
+            sector_rets: dict[str, list[float]] = {}
 
-                up_count   = 0
-                down_count = 0
-                total_ret  = []
-                for sym, history in sym_history.items():
-                    if len(history) >= 2:
-                        old_close = history[0][1]
-                        new_close = history[-1][1]
-                        if old_close and new_close and old_close > 0:
-                            ret = (new_close / old_close - 1) * 100
-                            total_ret.append(ret)
-                            if ret > 0:
-                                up_count += 1
-                            else:
-                                down_count += 1
+            for symbol in STOCK_UNIVERSE:
+                rows = (
+                    db.query(DailyPrice.close, DailyPrice.date)
+                    .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)
+                    .order_by(DailyPrice.date.desc())
+                    .limit(6)
+                    .all()
+                )
+                if len(rows) < 2:
+                    continue
+                ret_5d = _pct_change(rows[0].close, rows[min(4, len(rows) - 1)].close)
+                if ret_5d is None:
+                    continue
+                if ret_5d > 0:
+                    advancing += 1
+                else:
+                    declining += 1
+                sector = SECTOR_MAP.get(symbol, "Other")
+                sector_rets.setdefault(sector, []).append(ret_5d)
 
-                total_stocks = up_count + down_count
-                if total_stocks > 0:
-                    breadth_pct = up_count / total_stocks * 100
-                    avg_ret     = sum(total_ret) / len(total_ret) if total_ret else 0.0
-                    breadth_urgency = "high" if breadth_pct < 30 or breadth_pct > 85 else "normal"
-                    findings.append({
-                        "title":       f"Market Breadth: {up_count}/{total_stocks} stocks up (5d)",
-                        "description": (
-                            f"{up_count} of {total_stocks} tracked stocks gained over 5 days "
-                            f"({breadth_pct:.0f}% advance rate). Average return: {avg_ret:+.2f}%."
-                        ),
-                        "evidence":    f"up={up_count}, down={down_count}, breadth={breadth_pct:.1f}%, avg_ret={avg_ret:+.2f}%",
-                        "implication": (
-                            "Broad market participation — strong bull signal."
-                            if breadth_pct >= 70 else
-                            "Narrow advance — potential distribution."
-                            if breadth_pct < 40 else
-                            "Mixed breadth — selective stock picking recommended."
-                        ),
-                        "urgency":     breadth_urgency,
-                        "subcategory": "breadth",
-                    })
-        except Exception as exc:
-            log.debug("Breadth analysis failed: %s", exc)
+            total = advancing + declining
+            if total >= 8:
+                breadth_pct = advancing / total * 100
+                label = "Bullish Breadth" if breadth_pct >= 65 else ("Bearish Breadth" if breadth_pct <= 35 else "Mixed Breadth")
+                findings.append({
+                    "title":       f"{label}: {advancing}/{total} NSE stocks advancing (5d)",
+                    "description": (
+                        f"{advancing} of {total} tracked NSE stocks are positive over 5 trading days "
+                        f"({breadth_pct:.0f}% advancing, {declining} declining)."
+                    ),
+                    "evidence":    f"advancing={advancing}, declining={declining}, breadth_pct={breadth_pct:.1f}%",
+                    "implication": (
+                        "Broad rally — healthy market structure. Long bias supported." if breadth_pct >= 65 else
+                        "Narrow breadth — index move may not be sustainable." if breadth_pct <= 35 else
+                        "No strong directional edge from breadth alone."
+                    ),
+                    "urgency":     "high" if breadth_pct < 25 or breadth_pct > 90 else "normal",
+                    "subcategory": "market_breadth",
+                })
 
-        # ── 4. Sector Strength via Price Returns ──────────────────
-        try:
-            cutoff_5d = date.today() - timedelta(days=8)
-            price_rows = (
-                db.query(DailyPrice.symbol, DailyPrice.date, DailyPrice.close)
-                .filter(DailyPrice.date >= cutoff_5d)
-                .order_by(DailyPrice.symbol, DailyPrice.date.asc())
-                .all()
-            )
-            if price_rows:
-                from collections import defaultdict
-                sym_history2: dict[str, list] = defaultdict(list)
-                for row in price_rows:
-                    sym_history2[row.symbol].append((row.date, row.close))
-
-                sector_returns: dict[str, list[float]] = defaultdict(list)
-                for sym, history in sym_history2.items():
-                    if len(history) >= 2 and sym in SECTOR_MAP:
-                        old_c = history[0][1]
-                        new_c = history[-1][1]
-                        if old_c and new_c and old_c > 0:
-                            ret = (new_c / old_c - 1) * 100
-                            sector_returns[SECTOR_MAP[sym]].append(ret)
-
-                sector_avgs = {
-                    sec: sum(rets) / len(rets)
-                    for sec, rets in sector_returns.items()
-                    if rets
-                }
+            # ── 4. Sector Rotation ────────────────────────────────
+            if len(sector_rets) >= 2:
+                sector_avgs = {s: sum(v) / len(v) for s, v in sector_rets.items() if len(v) >= 2}
                 if len(sector_avgs) >= 2:
-                    best_sec  = max(sector_avgs, key=sector_avgs.get)
-                    worst_sec = min(sector_avgs, key=sector_avgs.get)
-                    best_ret  = sector_avgs[best_sec]
-                    worst_ret = sector_avgs[worst_sec]
-                    spread    = best_ret - worst_ret
-                    if spread >= 2.0:
+                    top_s = max(sector_avgs, key=sector_avgs.get)
+                    bot_s = min(sector_avgs, key=sector_avgs.get)
+                    top_r = sector_avgs[top_s]
+                    bot_r = sector_avgs[bot_s]
+                    spread = top_r - bot_r
+                    if spread >= 2.5:
                         findings.append({
-                            "title":       f"Sector Rotation: {best_sec} leading, {worst_sec} lagging",
+                            "title":       f"Sector Rotation: {top_s} leading (+{top_r:.1f}%), {bot_s} lagging ({bot_r:.1f}%)",
                             "description": (
-                                f"{best_sec} is the top-performing sector (5d avg: {best_ret:+.2f}%). "
-                                f"{worst_sec} is the worst (5d avg: {worst_ret:+.2f}%). "
-                                f"Spread: {spread:.2f}%."
+                                f"{top_s} sector avg 5d return={top_r:+.1f}% vs "
+                                f"{bot_s} avg={bot_r:+.1f}%. Spread={spread:.1f} percentage points."
                             ),
-                            "evidence":    f"best={best_sec}:{best_ret:+.2f}%, worst={worst_sec}:{worst_ret:+.2f}%, spread={spread:.2f}%",
-                            "implication": f"Overweight {best_sec} exposure; reduce {worst_sec} exposure.",
+                            "evidence":    f"top={top_s}:{top_r:+.1f}%, bottom={bot_s}:{bot_r:+.1f}%, spread={spread:.1f}pp",
+                            "implication": f"Rotate allocation towards {top_s}; reduce {bot_s} exposure.",
                             "urgency":     "normal",
                             "subcategory": "sector_rotation",
                         })
-                        recommendations.append(f"Sector rotation favors {best_sec} — review stock selection.")
+                        recommendations.append(f"Overweight {top_s}; underweight {bot_s} in next rebalance.")
         except Exception as exc:
-            log.debug("Sector analysis failed: %s", exc)
+            log.debug("Breadth/sector analysis skipped: %s", exc)
 
-        # ── 5. Sentiment-based sector rotation (if available) ────
-        try:
-            cutoff_sent = date.today() - timedelta(days=7)
-            sector_query = (
-                db.query(SentimentRecord.entity, func.avg(SentimentRecord.score).label("avg_sent"))
-                .filter(
-                    SentimentRecord.entity_type == "sector",
-                    SentimentRecord.timestamp >= cutoff_sent,
-                )
-                .group_by(SentimentRecord.entity)
-                .order_by(func.avg(SentimentRecord.score).desc())
-                .limit(5)
-                .all()
-            )
-            if sector_query:
-                top_sector    = sector_query[0][0]
-                top_score     = sector_query[0][1]
-                bottom_sector = sector_query[-1][0]
-                bottom_score  = sector_query[-1][1]
-                if top_score and bottom_score and (top_score - bottom_score) > 20:
-                    findings.append({
-                        "title":       f"Sentiment Sector Signal: {top_sector} leading",
-                        "description": (
-                            f"{top_sector} sentiment avg={top_score:.1f} vs "
-                            f"{bottom_sector} avg={bottom_score:.1f}. Spread={top_score - bottom_score:.1f}."
-                        ),
-                        "evidence":    f"top={top_sector}:{top_score:.1f}, bottom={bottom_sector}:{bottom_score:.1f}",
-                        "implication": f"Sentiment confirms overweight {top_sector}; reduce {bottom_sector} exposure.",
-                        "urgency":     "normal",
-                        "subcategory": "sector_rotation",
-                    })
-        except Exception as exc:
-            log.debug("Sector sentiment query skipped: %s", exc)
-
-        # ── Fallback: ensure at least 1 finding ───────────────────
+        # ── Fallback ──────────────────────────────────────────────
         if not findings:
             findings.append({
-                "title":       "Market Data Status: Initialising",
-                "description": "No regime data or price history is available yet. Run data ingestion first.",
-                "evidence":    "regime_rows=0, index_rows=0",
-                "implication": "Pipeline must complete at least one ingestion cycle before market analysis can begin.",
+                "title":       "Awaiting Market Data",
+                "description": "No price data found in index_data or daily_prices tables. Run the daily market data pipeline to populate.",
+                "evidence":    "index_data_rows=0, daily_prices_rows=0",
+                "implication": "Market intelligence is unavailable until data pipeline runs.",
                 "urgency":     "low",
                 "subcategory": "data_coverage",
             })
 
         summary = (
             f"Market: {current_regime} (conf={current_conf:.0f}%). "
-            f"{len(findings)} findings. "
-            f"{'Regime change detected.' if any(f.get('subcategory') == 'regime_change' for f in findings) else ''}"
+            f"{len(findings)} findings."
         ).strip()
-
-        urgency = (
-            "critical" if any(f["urgency"] == "critical" for f in findings) else
-            "high"     if any(f["urgency"] == "high"     for f in findings) else
-            "normal"
-        )
+        urgency = "high" if any(f["urgency"] == "high" for f in findings) else "normal"
 
         return {
-            "title":           f"Market Research — {date.today()}",
+            "title":           f"Market Research — {today}",
             "summary":         summary,
             "findings":        findings,
             "recommendations": recommendations,
