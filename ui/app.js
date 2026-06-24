@@ -1614,6 +1614,26 @@ async function renderLearning() {
         </div>`).join('');
     }
   }
+
+  // ── Recent Events Feed ────────────────────────────────────
+  const eventsBody = el('lc-events-body');
+  if (eventsBody) {
+    const allEvents = liveData?.recentEvents || [];
+    if (allEvents.length) {
+      const catColor = { strategy: 'var(--accent)', model: '#60a5fa', portfolio: 'var(--positive)', risk: 'var(--negative)', prediction: '#a78bfa' };
+      eventsBody.innerHTML = allEvents.slice(0, 40).map(e => {
+        const cc = catColor[e.category] || 'var(--text-muted)';
+        const desc = (e.description || e.type || '—').replace(/â/g, '—').slice(0, 120);
+        return `<tr>
+          <td style="color:var(--text-muted);font-size:0.68rem;white-space:nowrap">${e.date || '—'}</td>
+          <td><span style="color:${cc};font-size:0.68rem;font-weight:600">${e.category || '—'}</span></td>
+          <td style="font-size:0.7rem;color:var(--text-secondary);max-width:400px">${desc}</td>
+        </tr>`;
+      }).join('');
+    } else {
+      eventsBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:12px">No events recorded yet. Run pipelines to generate activity.</td></tr>';
+    }
+  }
 }
 
 // ── RISK CENTER ───────────────────────────────────────────────
@@ -2854,6 +2874,41 @@ async function hydrateStrategyResearch() {
     </tr>`).join('') || `<tr><td colspan="5" style="color:var(--text-muted);text-align:center">No resurrection candidates</td></tr>`;
   }
 
+  // ── Strategy Activity Feed ────────────────────────────────────
+  const feedEl = el('src-activity-feed');
+  if (feedEl) {
+    // Pull recent knowledge events filtered to strategy category
+    const events = await apiFetch('/knowledge?days=7').catch(() => null);
+    const evList = events ? (events.recentEvents || []) : [];
+    const stratEvts = evList.filter(e => e.category === 'strategy' || e.type?.startsWith('strategy_'));
+    if (stratEvts.length) {
+      feedEl.innerHTML = stratEvts.slice(0, 30).map(e => {
+        const isPromo  = e.type === 'strategy_promoted';
+        const isRetire = e.type === 'strategy_retired';
+        const color = isPromo ? 'var(--color-positive)' : isRetire ? 'var(--color-negative)' : 'var(--text-muted)';
+        const icon  = isPromo ? '▲' : isRetire ? '▼' : '●';
+        return `<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border-faint)">
+          <span style="color:${color};min-width:12px;margin-top:1px">${icon}</span>
+          <div>
+            <div style="color:${color};font-size:0.68rem">${e.date}</div>
+            <div style="color:var(--text-secondary);font-size:0.7rem;line-height:1.4">${e.description || e.type}</div>
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      // Fall back to showing leaderboard changes if no events
+      const lbRows = (leaders && leaders.leaderboard) ? leaders.leaderboard.slice(0, 10) : [];
+      feedEl.innerHTML = lbRows.map(r => `
+        <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border-faint)">
+          <span style="color:var(--accent);min-width:12px;margin-top:1px">▲</span>
+          <div>
+            <div style="color:var(--text-muted);font-size:0.68rem">TODAY</div>
+            <div style="color:var(--text-secondary);font-size:0.7rem;line-height:1.4">[${r.strategy_id}] ${r.status?.toUpperCase()} — Fitness=${r.fitness_score?.toFixed(1) ?? '—'} Sharpe=${r.sharpe?.toFixed(2) ?? '—'}</div>
+          </div>
+        </div>`).join('') || '<div style="padding:1rem;color:var(--text-muted)">No recent activity</div>';
+    }
+  }
+
   // ── Research Report Cards ─────────────────────────────────────
   const researchCards = el('src-research-cards');
   if (researchCards && research) {
@@ -3963,12 +4018,25 @@ async function hydrateOverview() {
     _set('kpi-positions', ov.openPositions);
     if (ov.deployedCapital != null) _set('kpi-deployed', `₹${Math.round(ov.deployedCapital).toLocaleString('en-IN')} Deployed`);
   }
-  if (ov.activePredictions != null) _set('kpi-predictions', ov.activePredictions);
+  if (ov.activePredictions != null) {
+    _set('kpi-predictions', ov.activePredictions);
+    if (ov.avgConfidence != null) _set('kpi-avg-conf', `Avg Conf: ${(ov.avgConfidence||0).toFixed(0)}%`);
+  }
   if (ov.winRate30d != null) {
     _set('kpi-winrate', `${ov.winRate30d.toFixed(1)}%`);
     if (ov.totalTrades30d != null) _set('kpi-trades-30d', `${ov.totalTrades30d} Trades`);
   }
-  if (ov.knowledgeScore != null)    _set('kpi-knowledge', `${ov.knowledgeScore.toFixed ? ov.knowledgeScore.toFixed(0) : ov.knowledgeScore} / 100`);
+  // Knowledge score: show "Computing" if 0 but system is running
+  if (ov.knowledgeScore != null) {
+    const ks = ov.knowledgeScore;
+    _set('kpi-knowledge', ks > 0 ? `${Math.round(ks)} / 100` : 'Computing…');
+    _set('kpi-knowledge-sub', ks > 0 ? `${ov.activeStrategies || 0} Active Strategies` : `${ov.activeStrategies || 0} Strategies Active`);
+  }
+  // Show strategy count on overview
+  if (ov.activeStrategies != null) {
+    const stratEl = el('kpi-strategies');
+    if (stratEl) { stratEl.textContent = ov.activeStrategies; }
+  }
   if (ov.regime) {
     _set('topbar-regime', ov.regime);
     const pill = document.getElementById('regime-pill');
@@ -4462,18 +4530,32 @@ let _stmCurrentId = null;
 
 async function openStrategyTrades(strategyId) {
   _stmCurrentId = strategyId;
+
+  // ── Inline inspector panel (strategy tab) ────────────────────
+  const inspBody = document.getElementById('src-inspector-body');
+  const inspLabel = document.getElementById('src-inspector-label');
+  if (inspBody) {
+    if (inspLabel) inspLabel.textContent = 'Loading…';
+    inspBody.innerHTML = '<div style="padding:1rem;color:var(--text-muted);font-size:0.8rem">Fetching backtest trades…</div>';
+  }
+
   const modal = document.getElementById('strategy-trades-modal');
-  if (!modal) return;
-  modal.style.display = 'block';
+  if (modal) modal.style.display = 'block';
   const _s = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
   _s('stm-title', 'Loading…');
   _s('stm-kpi-trades', '…'); _s('stm-kpi-wr', '…'); _s('stm-kpi-sharpe', '…'); _s('stm-kpi-fitness', '…');
-  document.getElementById('stm-trades-body').innerHTML =
+  const tradesBody = document.getElementById('stm-trades-body');
+  if (tradesBody) tradesBody.innerHTML =
     '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">Fetching trades…</td></tr>';
-  document.getElementById('stm-replay-status').textContent = '';
+  const replayStatus = document.getElementById('stm-replay-status');
+  if (replayStatus) replayStatus.textContent = '';
 
   const data = await apiFetch('/strategies/' + strategyId + '/trades');
-  if (!data) { _s('stm-title', 'Error — backend offline'); return; }
+  if (!data) {
+    _s('stm-title', 'Error — backend offline');
+    if (inspBody) inspBody.innerHTML = '<div style="padding:1rem;color:var(--negative)">Could not load trades — backend offline.</div>';
+    return;
+  }
 
   _s('stm-title', data.name || strategyId);
   const metaEl = document.getElementById('stm-meta');
@@ -4488,25 +4570,49 @@ async function openStrategyTrades(strategyId) {
 
   _stmDrawChart(data.equityCurve || [], (data.trades || []).map(t => t.exitDate || ''));
 
+  const tradeRowsHtml = (data.trades && data.trades.length) ? data.trades.map((t, i) => {
+    const col  = (t.pnlPct||0) > 0 ? 'var(--positive)' : (t.pnlPct||0) < 0 ? 'var(--negative)' : 'var(--text-muted)';
+    const sign = (t.pnlPct||0) > 0 ? '+' : '';
+    return '<tr style="border-bottom:1px solid var(--border-faint)">' +
+      '<td style="padding:5px 8px;color:var(--text-muted)">' + (i+1) + '</td>' +
+      '<td style="padding:5px 8px;font-weight:600">' + t.symbol + '</td>' +
+      '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.entryDate||'—') + '</td>' +
+      '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.exitDate||'—') + '</td>' +
+      '<td style="padding:5px 8px;text-align:right">' + (t.entryPrice!=null?t.entryPrice.toFixed(2):'—') + '</td>' +
+      '<td style="padding:5px 8px;text-align:right">' + (t.exitPrice!=null?t.exitPrice.toFixed(2):'—') + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;color:' + col + ';font-weight:600">' + (t.pnlPct!=null?sign+t.pnlPct.toFixed(2)+'%':'—') + '</td>' +
+      '<td style="padding:5px 8px;text-align:right;color:var(--text-muted)">' + (t.holdingDays||0) + '</td>' +
+      '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.exitReason||'—') + '</td>' +
+      '</tr>';
+  }).join('') : '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">No backtest trades yet. Click Replay Backtest to generate them.</td></tr>';
+
   const tbody = document.getElementById('stm-trades-body');
-  if (data.trades && data.trades.length) {
-    tbody.innerHTML = data.trades.map((t, i) => {
-      const col  = (t.pnlPct||0) > 0 ? 'var(--positive)' : (t.pnlPct||0) < 0 ? 'var(--negative)' : 'var(--text-muted)';
-      const sign = (t.pnlPct||0) > 0 ? '+' : '';
-      return '<tr style="border-bottom:1px solid var(--border-faint)">' +
-        '<td style="padding:5px 8px;color:var(--text-muted)">' + (i+1) + '</td>' +
-        '<td style="padding:5px 8px;font-weight:600">' + t.symbol + '</td>' +
-        '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.entryDate||'—') + '</td>' +
-        '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.exitDate||'—') + '</td>' +
-        '<td style="padding:5px 8px;text-align:right">' + (t.entryPrice!=null?t.entryPrice.toFixed(2):'—') + '</td>' +
-        '<td style="padding:5px 8px;text-align:right">' + (t.exitPrice!=null?t.exitPrice.toFixed(2):'—') + '</td>' +
-        '<td style="padding:5px 8px;text-align:right;color:' + col + ';font-weight:600">' + (t.pnlPct!=null?sign+t.pnlPct.toFixed(2)+'%':'—') + '</td>' +
-        '<td style="padding:5px 8px;text-align:right;color:var(--text-muted)">' + (t.holdingDays||0) + '</td>' +
-        '<td style="padding:5px 8px;color:var(--text-muted);font-size:0.68rem">' + (t.exitReason||'—') + '</td>' +
-        '</tr>';
-    }).join('');
-  } else {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:20px">No backtest trades yet. Click Replay Backtest to generate them.</td></tr>';
+  if (tbody) tbody.innerHTML = tradeRowsHtml;
+
+  // ── Update inline inspector panel on strategy tab ─────────────
+  if (inspBody) {
+    if (inspLabel) inspLabel.textContent = data.name || strategyId;
+    const statusColor = { active: 'var(--positive)', promoted: 'var(--accent)', shadow: 'var(--text-muted)' }[data.status] || 'var(--text-muted)';
+    const wins  = (data.trades || []).filter(t => (t.pnlPct||0) > 0).length;
+    const total = (data.trades || []).length;
+    inspBody.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 0;border-bottom:1px solid var(--border-faint);margin-bottom:8px">
+        <div style="text-align:center"><div style="font-size:0.65rem;color:var(--text-muted)">STATUS</div><div style="font-size:0.75rem;font-weight:700;color:${statusColor}">${(data.status||'—').toUpperCase()}</div></div>
+        <div style="text-align:center"><div style="font-size:0.65rem;color:var(--text-muted)">FITNESS</div><div style="font-size:0.75rem;font-weight:700;color:var(--accent)">${data.fitness!=null?data.fitness.toFixed(1):'—'}</div></div>
+        <div style="text-align:center"><div style="font-size:0.65rem;color:var(--text-muted)">SHARPE</div><div style="font-size:0.75rem;font-weight:700">${data.sharpe!=null?data.sharpe.toFixed(2):'—'}</div></div>
+        <div style="text-align:center"><div style="font-size:0.65rem;color:var(--text-muted)">WIN RATE</div><div style="font-size:0.75rem;font-weight:700;color:var(--positive)">${data.win_rate!=null?data.win_rate.toFixed(0)+'%':'—'}</div></div>
+      </div>
+      <div style="font-size:0.68rem;color:var(--text-muted);padding:0 0 8px;font-family:var(--font-mono)">${data.family||''} — Gen ${data.generation||0} — ${total} trades (${wins}W/${total-wins}L)</div>
+      <div style="max-height:200px;overflow-y:auto">
+        <table class="data-table compact" style="font-size:0.68rem">
+          <thead><tr><th>#</th><th>Symbol</th><th>Entry</th><th>Exit</th><th>P&L%</th><th>Days</th><th>Reason</th></tr></thead>
+          <tbody>${total ? (data.trades||[]).slice(0,20).map((t,i) => {
+            const c = (t.pnlPct||0)>0?'var(--positive)':(t.pnlPct||0)<0?'var(--negative)':'var(--text-muted)';
+            const s = (t.pnlPct||0)>0?'+':'';
+            return `<tr><td style="color:var(--text-muted)">${i+1}</td><td><b>${t.symbol}</b></td><td style="color:var(--text-muted)">${t.entryDate||'—'}</td><td style="color:var(--text-muted)">${t.exitDate||'—'}</td><td style="color:${c};font-weight:600">${t.pnlPct!=null?s+t.pnlPct.toFixed(2)+'%':'—'}</td><td style="color:var(--text-muted)">${t.holdingDays||0}d</td><td style="color:var(--text-muted)">${t.exitReason||'—'}</td></tr>`;
+          }).join('') : '<tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:10px">No trades</td></tr>'}</tbody>
+        </table>
+      </div>`;
   }
 }
 

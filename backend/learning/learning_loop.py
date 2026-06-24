@@ -46,35 +46,49 @@ def run_daily_learning(days: int = 7) -> dict:
     summary = {"date": str(date.today()), "steps": {}}
 
     try:
+        def _run_step(name, fn):
+            try:
+                result = fn()
+                summary["steps"][name] = result
+                return result
+            except Exception as step_exc:
+                log.warning("[Learning Loop] Step '%s' failed: %s", name, step_exc)
+                summary["steps"][name] = {"status": "error", "error": str(step_exc)}
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                return None
+
         # Step 1: Evaluate pending pattern outcomes
         log.info("[Learning Loop] Step 1: Pattern outcome evaluation")
         from learning.pattern_outcome_tracker import evaluate_pending_outcomes
-        summary["steps"]["pattern_outcomes"] = evaluate_pending_outcomes(db)
+        _run_step("pattern_outcomes", lambda: evaluate_pending_outcomes(db))
 
         # Step 2: Failure analysis
         log.info("[Learning Loop] Step 2: Failure analysis")
         from learning.root_cause_engine import run_failure_analysis
-        summary["steps"]["failure_analysis"] = run_failure_analysis(db, days=days)
+        _run_step("failure_analysis", lambda: run_failure_analysis(db, days=days))
 
         # Step 3: Model drift detection
         log.info("[Learning Loop] Step 3: Model drift detection")
         from learning.model_drift import run_drift_detection
-        summary["steps"]["drift_detection"] = run_drift_detection(db, windows=[30, 90])
+        _run_step("drift_detection", lambda: run_drift_detection(db, windows=[30, 90]))
 
         # Step 4: Confidence scaling recommendation
         log.info("[Learning Loop] Step 4: Confidence scaling")
         from learning.confidence_retrainer import record_scaling_recommendation
-        summary["steps"]["confidence_scaling"] = record_scaling_recommendation(db, days=30)
+        _run_step("confidence_scaling", lambda: record_scaling_recommendation(db, days=30))
 
         # Step 5: Feature decay detection
         log.info("[Learning Loop] Step 5: Feature decay detection")
         from learning.feature_decay_detector import run_decay_detection
-        summary["steps"]["feature_decay"] = run_decay_detection(db)
+        _run_step("feature_decay", lambda: run_decay_detection(db))
 
         # Step 6: Bulk pattern memory from recent predictions
         log.info("[Learning Loop] Step 6: Pattern memory sync")
         from learning.pattern_memory import bulk_record_from_predictions
-        summary["steps"]["pattern_memory"] = {"recorded": bulk_record_from_predictions(db, days=days)}
+        _run_step("pattern_memory", lambda: {"recorded": bulk_record_from_predictions(db, days=days)})
 
         # Step 7: Daily knowledge score
         log.info("[Learning Loop] Step 7: Knowledge score")

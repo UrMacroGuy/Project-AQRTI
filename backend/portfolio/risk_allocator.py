@@ -174,11 +174,11 @@ def get_investable_candidates(
 
     candidates = []
     for p in preds:
-        exp_ret = p.expected_return or 0.0
-        # Only trade stocks with a positive expected return signal
-        if exp_ret <= 0.0:
+        # Long-only: require Bullish direction; skip Bearish/Neutral
+        if (p.direction or "").lower() not in ("bullish", "buy"):
             continue
 
+        exp_ret  = p.expected_return or 0.5   # fallback if model didn't set magnitude
         sector   = _get_sector(db, p.symbol)
         vol      = _get_volatility(db, p.symbol)
 

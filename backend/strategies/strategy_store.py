@@ -180,21 +180,31 @@ def list_strategies(
 
 
 def get_population_stats(db: Session) -> dict:
+    from aqrti.database.models import StrategyGraveyard
     rows = db.query(StrategyV2).all()
     by_status: dict[str, int] = {}
     by_family: dict[str, int] = {}
     fitness_vals = []
+    max_gen = 0
     for r in rows:
         by_status[r.status or "unknown"] = by_status.get(r.status or "unknown", 0) + 1
         by_family[r.family or "unknown"] = by_family.get(r.family or "unknown", 0) + 1
         if r.fitness_score is not None:
             fitness_vals.append(r.fitness_score)
-
+        if (r.generation or 0) > max_gen:
+            max_gen = r.generation or 0
+    graveyard_count = db.query(StrategyGraveyard).count()
+    promoted_count = by_status.get("promoted", 0)
+    active_count = by_status.get("active", 0)
     return {
-        "total":        len(rows),
-        "by_status":    by_status,
-        "by_family":    by_family,
-        "avg_fitness":  round(sum(fitness_vals) / len(fitness_vals), 2) if fitness_vals else 0.0,
-        "max_fitness":  round(max(fitness_vals), 2) if fitness_vals else 0.0,
-        "active_count": by_status.get("active", 0) + by_status.get("promoted", 0),
+        "total":           len(rows),
+        "by_status":       by_status,
+        "by_family":       by_family,
+        "avg_fitness":     round(sum(fitness_vals) / len(fitness_vals), 2) if fitness_vals else 0.0,
+        "max_fitness":     round(max(fitness_vals), 2) if fitness_vals else 0.0,
+        "active_count":    active_count + promoted_count,
+        "promoted":        promoted_count,
+        "active":          active_count,
+        "max_generation":  max_gen,
+        "graveyard_count": graveyard_count,
     }

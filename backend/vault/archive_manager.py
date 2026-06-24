@@ -103,6 +103,18 @@ def archive_strategies(db: Session, target_date: date) -> dict:
     ).all()
 
     for s in strategies:
+        # Build backtest summary JSON from individual metric columns
+        backtest_summary = json.dumps({
+            "sharpe": s.sharpe, "sortino": s.sortino, "win_rate": s.win_rate,
+            "profit_factor": s.profit_factor, "max_drawdown": s.max_drawdown,
+            "trade_count": s.trade_count, "expectancy": s.expectancy,
+            "backtest_start": str(s.backtest_start) if s.backtest_start else None,
+            "backtest_end": str(s.backtest_end) if s.backtest_end else None,
+        })
+        regime_fit_summary = json.dumps({
+            "BULL": s.bull_sharpe, "BEAR": s.bear_sharpe,
+            "SIDEWAYS": s.sideways_sharpe, "VOLATILE": s.volatile_sharpe,
+        })
         row = StrategyArchive(
             strategy_id       = s.strategy_id,
             archive_date      = target_date,
@@ -113,8 +125,8 @@ def archive_strategies(db: Session, target_date: date) -> dict:
             status_at_archive = s.status,
             parent_ids        = s.parent_ids,
             dsl_json          = s.dsl_json,
-            backtest_json     = s.backtest_json,
-            regime_fit_json   = s.regime_fit_json,
+            backtest_json     = backtest_summary,
+            regime_fit_json   = regime_fit_summary,
         )
         db.add(row)
 

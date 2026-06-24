@@ -136,13 +136,28 @@ def get_graveyard_summary(db: Session) -> dict:
 
 def get_population_stats(db: Session) -> dict:
     """Aggregate fitness and count stats across the live strategy population."""
+    from aqrti.database.models import StrategyGraveyard
     rows = db.query(StrategyV2).all()
     fitness_vals = [r.fitness_score for r in rows if r.fitness_score is not None]
-    active = [r for r in rows if getattr(r, "status", None) == "active"]
+    by_status: dict[str, int] = {}
+    max_gen = 0
+    for r in rows:
+        s = r.status or "unknown"
+        by_status[s] = by_status.get(s, 0) + 1
+        if (r.generation or 0) > max_gen:
+            max_gen = r.generation or 0
+    graveyard_count = db.query(StrategyGraveyard).count()
+    promoted_count = by_status.get("promoted", 0)
+    active_count = by_status.get("active", 0)
     return {
-        "total":        len(rows),
-        "active_count": len(active),
-        "avg_fitness":  round(sum(fitness_vals) / len(fitness_vals), 2) if fitness_vals else 0.0,
-        "max_fitness":  round(max(fitness_vals), 2) if fitness_vals else 0.0,
-        "min_fitness":  round(min(fitness_vals), 2) if fitness_vals else 0.0,
+        "total":           len(rows),
+        "active_count":    active_count + promoted_count,
+        "promoted":        promoted_count,
+        "active":          active_count,
+        "by_status":       by_status,
+        "avg_fitness":     round(sum(fitness_vals) / len(fitness_vals), 2) if fitness_vals else 0.0,
+        "max_fitness":     round(max(fitness_vals), 2) if fitness_vals else 0.0,
+        "min_fitness":     round(min(fitness_vals), 2) if fitness_vals else 0.0,
+        "max_generation":  max_gen,
+        "graveyard_count": graveyard_count,
     }

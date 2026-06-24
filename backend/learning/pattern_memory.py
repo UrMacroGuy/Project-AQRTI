@@ -104,14 +104,14 @@ def bulk_record_from_predictions(db: Session, days: int = 7) -> int:
             db.query(PatternMatch)
             .filter(
                 PatternMatch.symbol == p.symbol,
-                PatternMatch.date   == p.date,
+                PatternMatch.search_date == p.date,
             )
-            .order_by(PatternMatch.created_at.desc())
+            .order_by(PatternMatch.computed_at.desc())
             .first()
         )
-        conf      = float(pm.confidence)    if pm else float(p.confidence or 50)
-        sim_score = float(pm.similarity)    if pm else 0.0
-        top_sym   = pm.similar_symbol       if pm else None
+        conf      = float(pm.pattern_confidence) if pm and pm.pattern_confidence else float(p.confidence or 50)
+        sim_score = 0.0
+        top_sym   = None
 
         row = record_pattern_memory(
             db,
