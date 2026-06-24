@@ -531,52 +531,63 @@ function _sessionToast(session) {
   const ageStr = age < 1 ? 'just now' : age < 60 ? `${age}m ago` : `${Math.round(age/60)}h ago`;
   const pageName = (session.page || 'overview').toUpperCase().replace(/-/g, ' ');
 
+  // Store session data on window so the resume button can access it
+  // (localStorage was already overwritten by renderPage('overview'))
+  window._pendingSession = session;
+
   const toast = document.createElement('div');
   toast.id = 'aqrti-session-toast';
   toast.style.cssText = `
-    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
-    z-index:9999; background:rgba(10,14,20,0.97);
-    border:1px solid rgba(255,140,0,0.35); border-radius:8px;
-    padding:14px 20px; display:flex; align-items:center; gap:14px;
-    font-family:'JetBrains Mono',monospace; font-size:0.72rem;
-    box-shadow:0 4px 32px rgba(0,0,0,0.6); min-width:340px;
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    z-index:9999; background:rgba(10,14,20,0.98);
+    border:1px solid rgba(255,140,0,0.6); border-radius:10px;
+    padding:16px 22px; display:flex; align-items:center; gap:16px;
+    font-family:'JetBrains Mono',monospace; font-size:0.75rem;
+    box-shadow:0 8px 40px rgba(0,0,0,0.7),0 0 0 1px rgba(255,140,0,0.15); min-width:380px;
+    animation:slideUp 0.3s ease;
   `;
   toast.innerHTML = `
-    <span style="color:var(--accent,#ff8c00);font-size:1rem">◈</span>
+    <style>@keyframes slideUp{from{transform:translateX(-50%) translateY(20px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}</style>
+    <span style="color:var(--accent,#ff8c00);font-size:1.2rem">◈</span>
     <div style="flex:1">
-      <div style="color:#e2e8f0;font-weight:600;letter-spacing:0.05em">SESSION FOUND</div>
-      <div style="color:rgba(255,255,255,0.45);margin-top:2px">
-        Last on <span style="color:var(--accent,#ff8c00)">${pageName}</span> · saved ${ageStr}
+      <div style="color:#f1f5f9;font-weight:700;letter-spacing:0.08em;font-size:0.75rem">SESSION FOUND</div>
+      <div style="color:rgba(255,255,255,0.5);margin-top:3px;font-size:0.7rem">
+        Last on <span style="color:var(--accent,#ff8c00);font-weight:600">${pageName}</span> · saved ${ageStr}
       </div>
     </div>
-    <button onclick="(function(){
-      const s=_session.load();
-      if(s){activatePage(s.page);renderPage(s.page);
-        if(s.filters){
-          const cf=document.getElementById('opp-conf-filter');
-          const df=document.getElementById('opp-dir-filter');
-          const sf=document.getElementById('str-status-filter');
-          if(cf&&s.filters.oppConf)cf.value=s.filters.oppConf;
-          if(df&&s.filters.oppDir)df.value=s.filters.oppDir;
-          if(sf&&s.filters.strStatus)sf.value=s.filters.strStatus;
-        }
-      }
-      document.getElementById('aqrti-session-toast').remove();
-    })()"
-      style="background:rgba(255,140,0,0.12);border:1px solid rgba(255,140,0,0.4);
-             color:var(--accent,#ff8c00);padding:6px 14px;border-radius:5px;
-             cursor:pointer;font-family:inherit;font-size:0.7rem;letter-spacing:0.06em;
-             white-space:nowrap">
+    <button id="aqrti-resume-btn"
+      style="background:rgba(255,140,0,0.18);border:1px solid rgba(255,140,0,0.6);
+             color:var(--accent,#ff8c00);padding:8px 18px;border-radius:6px;
+             cursor:pointer;font-family:inherit;font-size:0.72rem;font-weight:700;
+             letter-spacing:0.08em;white-space:nowrap;transition:background 0.15s">
       RESUME ›
     </button>
     <button onclick="document.getElementById('aqrti-session-toast').remove()"
-      style="background:transparent;border:none;color:rgba(255,255,255,0.3);
-             cursor:pointer;font-size:1rem;padding:0 2px;line-height:1">✕</button>
+      style="background:transparent;border:none;color:rgba(255,255,255,0.35);
+             cursor:pointer;font-size:1.1rem;padding:0 4px;line-height:1">✕</button>
   `;
   document.body.appendChild(toast);
 
-  // Auto-dismiss after 12s
-  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 12000);
+  // Wire resume button with captured session (not stale localStorage)
+  document.getElementById('aqrti-resume-btn').addEventListener('click', () => {
+    const s = window._pendingSession;
+    if (s && s.page) {
+      activatePage(s.page);
+      renderPage(s.page);
+      if (s.filters) {
+        const cf = document.getElementById('opp-conf-filter');
+        const df = document.getElementById('opp-dir-filter');
+        const sf = document.getElementById('str-status-filter');
+        if (cf && s.filters.oppConf) cf.value = s.filters.oppConf;
+        if (df && s.filters.oppDir)  df.value = s.filters.oppDir;
+        if (sf && s.filters.strStatus) sf.value = s.filters.strStatus;
+      }
+    }
+    toast.remove();
+  });
+
+  // Auto-dismiss after 30s
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 30000);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2042,6 +2053,9 @@ if (typeof Api !== 'undefined' && !Api.marketRegime) {
 
 
 window.addEventListener('DOMContentLoaded', () => {
+  // Read previous session BEFORE renderPage() overwrites it
+  const prevSession = _session.load();
+
   // Render initial page (mock data first, then live overwrites)
   renderPage('overview');
 
@@ -2062,12 +2076,10 @@ window.addEventListener('DOMContentLoaded', () => {
   startTopbarLivePolling(); // overwrites with real-time yfinance prices, refreshes every 30s
   hydrateNewsStrip();       // amber news ticker bar
 
-  // Session restore — show toast if a previous session exists and backend is live
-  const prevSession = _session.load();
-  if (prevSession && prevSession.page && prevSession.page !== 'overview') {
-    Api.checkBackend().then(alive => {
-      if (alive) _sessionToast(prevSession);
-    });
+  // Session restore — show toast for ANY previous page (including overview)
+  if (prevSession && prevSession.page) {
+    // Show toast after 500ms regardless of backend status (user saved this session locally)
+    setTimeout(() => _sessionToast(prevSession), 500);
   }
 });
 

@@ -11,10 +11,36 @@ const API_CONFIG = {
 };
 
 
+// ── Local Data Cache ─────────────────────────────────────────
+// Stores last-known API responses so panels show stale data when backend is offline
+const _cache = {
+  PREFIX: 'aqrti_cache_',
+  TTL: 24 * 60 * 60 * 1000, // 24h — stale is better than empty
+
+  set(key, data) {
+    try {
+      localStorage.setItem(this.PREFIX + key, JSON.stringify({ data, ts: Date.now() }));
+    } catch (_) {}
+  },
+
+  get(key) {
+    try {
+      const raw = localStorage.getItem(this.PREFIX + key);
+      if (!raw) return null;
+      const { data, ts } = JSON.parse(raw);
+      if (Date.now() - ts > this.TTL) return null;
+      return data;
+    } catch (_) { return null; }
+  },
+};
+
 // ── Fetch Helper ──────────────────────────────────────────────
 async function apiFetch(endpoint, params = {}) {
   const url = new URL(`${API_CONFIG.BASE}${endpoint}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+  // Cache key = endpoint + sorted params (ignore page/limit for cache hits)
+  const cacheKey = endpoint.replace(/\//g, '_');
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
@@ -23,10 +49,19 @@ async function apiFetch(endpoint, params = {}) {
     const res = await fetch(url.toString(), { signal: controller.signal });
     clearTimeout(timer);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    const data = await res.json();
+    // Cache successful responses for offline fallback
+    if (data) _cache.set(cacheKey, data);
+    return data;
   } catch (err) {
     clearTimeout(timer);
     console.warn(`[AQRTI API] ${endpoint} failed:`, err.message);
+    // Return last cached data if available
+    const cached = _cache.get(cacheKey);
+    if (cached) {
+      console.info(`[AQRTI API] Using cached data for ${endpoint}`);
+      return cached;
+    }
     return null;
   }
 }
