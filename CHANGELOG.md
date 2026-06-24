@@ -1,4 +1,42 @@
-﻿## [2026-06-25] — Strategy Leaderboard: Real Differentiated Trade Stats
+﻿## [2026-06-25] — Full Data Audit: Risk, Strategy Performance, Feature Intelligence, Portfolio Fixes
+
+### Bugs Fixed
+
+**Risk page — showed 0% exposure despite 4 open paper positions**
+- Root cause: `risk.py` was querying `Trade` table (live trading, always empty) instead of `PaperPosition`
+- Fix: now reads `PaperPosition` and `PaperPortfolio` for exposure, sector weights, position VaR
+
+**Strategy Performance — returned empty list**
+- Root cause: `StrategyPerformance` table had no rows; no fallback existed
+- Fix: falls back to aggregating `strategy_backtest_trades` — returns 50 strategies with real win rates, trade counts, avg P&L
+
+**Feature Intelligence Ranking — 500 server error**
+- Root cause: called `func.stddev_pop()` which doesn't exist in SQLite
+- Fix: removed stddev call; falls back to `feature_values` table counts/averages (30 features, 3924 samples each)
+
+**Strategy Leaderboard top_n=5 missing high-trade-count strategies**
+- Root cause: fetched `top_n * 5 = 25` rows sorted by stale fitness; 431-trade strategy wasn't in top 25 by fitness
+- Fix: fetches priority rows by `strategy_id` from live trade map first, then fills remaining slots by fitness
+
+**Portfolio cash leak on drift rebalance**
+- Root cause: `execute_rebalance` closed positions but didn't add freed capital back to `portfolio.current_cash` before reopening
+- Fix: captures `capital_deployed` before close, adds `deployed + grossPnl` back to cash, then `db.refresh(portfolio)` before opens
+
+**RELIANCE 50% concentration (breaching 25% limit)**
+- Root cause: opened when only 1 bullish candidate existed; rebalancer marked it `to_hold` and never resized
+- Fix: added drift-rebalance in `execute_rebalance` — positions >5% off target are closed and reopened at correct size
+- Portfolio reset to ₹1,00,000, all 4 positions reopened at ~12.5% each
+
+### Files Changed
+- `backend/aqrti/api/routes/risk.py`
+- `backend/aqrti/api/routes/strategy_performance.py`
+- `backend/aqrti/api/routes/feature_intelligence.py`
+- `backend/strategies/strategy_registry.py`
+- `backend/paper_trading/paper_execution.py`
+
+---
+
+## [2026-06-25] — Strategy Leaderboard: Real Differentiated Trade Stats
 
 ### Problem Fixed
 - Leaderboard showed all 952 strategies with identical fitness (54.32), sharpe (12.77), win_rate (50%) — all clones from same parent

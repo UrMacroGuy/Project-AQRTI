@@ -26,31 +26,85 @@ def list_performance(
     days:        int        = Query(default=30, ge=7, le=365),
     db: Session = Depends(get_db_dependency),
 ):
+    from sqlalchemy import func, case
+    from aqrti.database.models import StrategyBacktestTrade
+
     cutoff = date.today() - timedelta(days=days)
+
+    # Try StrategyPerformance table first (live trading records)
     q = db.query(StrategyPerformance).filter(StrategyPerformance.date >= cutoff)
     if strategy_id:
         q = q.filter(StrategyPerformance.strategy_id == strategy_id)
     rows = q.order_by(StrategyPerformance.date.desc()).limit(500).all()
 
-    return {
-        "performance": [
-            {
-                "strategy_id":    r.strategy_id,
-                "date":           str(r.date),
-                "signals_fired":  r.signals_fired,
-                "trades_opened":  r.trades_opened,
-                "trades_closed":  r.trades_closed,
-                "daily_pnl":      r.daily_pnl,
-                "daily_pnl_pct":  r.daily_pnl_pct,
-                "cumulative_pnl": r.cumulative_pnl,
-                "win_count":      r.win_count,
-                "loss_count":     r.loss_count,
-                "regime_at":      r.regime_at,
-            }
-            for r in rows
-        ],
-        "total": len(rows),
+    if rows:
+        return {
+            "performance": [
+                {
+                    "strategy_id":    r.strategy_id,
+                    "date":           str(r.date),
+                    "signals_fired":  r.signals_fired,
+                    "trades_opened":  r.trades_opened,
+                    "trades_closed":  r.trades_closed,
+                    "daily_pnl":      r.daily_pnl,
+                    "daily_pnl_pct":  r.daily_pnl_pct,
+                    "cumulative_pnl": r.cumulative_pnl,
+                    "win_count":      r.win_count,
+                    "loss_count":     r.loss_count,
+                    "regime_at":      r.regime_at,
+                }
+                for r in rows
+            ],
+            "total": len(rows),
+            "source": "live",
+        }
+
+    # Fall back: aggregate stats from strategy_backtest_trades
+    bt_q = (
+        db.query(
+            StrategyBacktestTrade.strategy_id,
+            func.count(StrategyBacktestTrade.id).label("tc"),
+            func.avg(StrategyBacktestTrade.pnl_pct).label("avg_pnl"),
+            func.sum(StrategyBacktestTrade.pnl_pct).label("total_pnl"),
+            func.sum(case((StrategyBacktestTrade.pnl_pct > 0, 1), else_=0)).label("wins"),
+        )
+        .group_by(StrategyBacktestTrade.strategy_id)
+        .order_by(func.count(StrategyBacktestTrade.id).desc())
+        .limit(50)
+    )
+    if strategy_id:
+        bt_q = bt_q.filter(StrategyBacktestTrade.strategy_id == strategy_id)
+    bt_rows = bt_q.all()
+
+    # Enrich with strategy names
+    sid_list = [r.strategy_id for r in bt_rows]
+    strat_map = {
+        s.strategy_id: s.name
+        for s in db.query(StrategyV2).filter(StrategyV2.strategy_id.in_(sid_list)).all()
     }
+
+    perf = []
+    for r in bt_rows:
+        tc = r.tc or 0
+        wins = r.wins or 0
+        losses = tc - wins
+        avg_pnl = round(r.avg_pnl or 0, 4)
+        total_pnl = round(r.total_pnl or 0, 4)
+        wr = round(wins * 100.0 / tc, 1) if tc > 0 else 0.0
+        perf.append({
+            "strategy_id":    r.strategy_id,
+            "name":           strat_map.get(r.strategy_id, r.strategy_id),
+            "date":           str(date.today()),
+            "trade_count":    tc,
+            "win_count":      wins,
+            "loss_count":     losses,
+            "win_rate":       wr,
+            "avg_pnl_pct":    avg_pnl,
+            "total_pnl_pct":  total_pnl,
+            "source":         "backtest",
+        })
+
+    return {"performance": perf, "total": len(perf), "source": "backtest"}
 
 
 @router.get("/{strategy_id}/metrics")

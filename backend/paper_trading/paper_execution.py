@@ -48,12 +48,31 @@ def execute_rebalance(
 
     Returns execution report dict.
     """
+    DRIFT_REBALANCE_THRESHOLD = 5.0   # close+reopen if weight drifts > 5 pct points
+
     portfolio  = get_or_create_portfolio(db)
-    current    = {p["symbol"] for p in get_open_positions(db)}
+    current_positions = get_open_positions(db)
+    current    = {p["symbol"] for p in current_positions}
     target_set = set(target_weights.keys())
 
     to_close = current - target_set
     to_open  = target_set - current
+
+    # Also close positions whose weight has drifted far from target (force resize)
+    for pos in current_positions:
+        sym = pos["symbol"]
+        if sym not in target_set:
+            continue
+        current_weight = pos["weightPct"] or 0.0
+        target_weight  = target_weights[sym]
+        drift = abs(current_weight - target_weight)
+        if drift > DRIFT_REBALANCE_THRESHOLD:
+            log.info(
+                "Drift rebalance: %s  current=%.1f%%  target=%.1f%%  drift=%.1f%%",
+                sym, current_weight, target_weight, drift,
+            )
+            to_close.add(sym)
+            to_open.add(sym)
 
     closed_pnl  = 0.0
     closed_list = []
@@ -64,14 +83,21 @@ def execute_rebalance(
     cand_map = {c["symbol"]: c for c in (candidates or [])}
 
     # ── Close exits first to free up cash ────────────────────────
+    # Look up capital_deployed before closing (position gets deleted by close_position)
+    pos_capital = {p["symbol"]: p["capitalDeployed"] for p in current_positions}
+
     for symbol in sorted(to_close):
+        deployed = pos_capital.get(symbol, 0.0)
         result = close_position(db, symbol, exit_reason=reason)
         if result:
-            closed_pnl  += result["grossPnl"]
+            freed_cash = deployed + (result["grossPnl"] or 0.0)
+            portfolio.current_cash += freed_cash
+            db.commit()
+            closed_pnl += result["grossPnl"]
             closed_list.append(result["symbol"])
 
     # ── Refresh portfolio after closes ────────────────────────────
-    portfolio = get_or_create_portfolio(db)
+    db.refresh(portfolio)
 
     # ── Open new positions ────────────────────────────────────────
     for symbol in sorted(to_open):

@@ -95,12 +95,33 @@ def get_leaderboard(db: Session, top_n: int = 20, status: str | None = None) -> 
             "live_win_rate": round(wins * 100.0 / tc, 1) if tc > 0 else 0.0,
         }
 
+    # Build a set of strategy_ids that have real trade data — only fetch those + extras
+    # Sorted by trade count desc so the high-trade-count strategies always appear
+    live_by_tc = sorted(live_map.items(), key=lambda x: x[1]["real_trade_count"], reverse=True)
+    priority_ids = [sid for sid, _ in live_by_tc[:top_n * 3]]
+
     q = db.query(StrategyV2).filter(StrategyV2.fitness_score.isnot(None))
     if status:
         q = q.filter(StrategyV2.status == status)
 
-    # Fetch more rows than top_n so we can sort by real trade quality
-    rows = q.order_by(StrategyV2.fitness_score.desc()).limit(min(top_n * 5, 500)).all()
+    # First: pull strategies with most real trades (guaranteed to have them)
+    # Then fall back to top by fitness for any remaining slots
+    if priority_ids:
+        priority_rows = (
+            db.query(StrategyV2)
+            .filter(StrategyV2.strategy_id.in_(priority_ids))
+            .all()
+        )
+        seen = {r.strategy_id for r in priority_rows}
+        extra_rows = (
+            q.filter(~StrategyV2.strategy_id.in_(seen))
+            .order_by(StrategyV2.fitness_score.desc())
+            .limit(top_n)
+            .all()
+        )
+        rows = priority_rows + extra_rows
+    else:
+        rows = q.order_by(StrategyV2.fitness_score.desc()).limit(top_n * 3).all()
 
     # Enrich each row with live stats
     enriched = []

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from aqrti.database.engine import get_db_dependency
-from aqrti.database.models import DailyPrice, PortfolioSnapshot, Trade
+from aqrti.database.models import DailyPrice, PortfolioSnapshot, Trade, PaperPosition, PaperPortfolio
 from aqrti.data.market_data import STOCK_META
 from aqrti.config.settings import get_settings
 
@@ -45,18 +45,22 @@ def get_risk(db: Session = Depends(get_db_dependency)):
 
     # Latest portfolio snapshot
     snap = db.query(PortfolioSnapshot).order_by(PortfolioSnapshot.date.desc()).first()
-    total_value  = snap.total_value if snap else capital
-    drawdown     = snap.drawdown   if snap else 0.0
+    drawdown = snap.drawdown if snap else 0.0
 
-    # Open positions → sector exposure
-    open_trades  = db.query(Trade).filter(Trade.is_open == True).all()
-    total_deploy = sum(t.position_size for t in open_trades)
+    # Use paper portfolio for positions and value
+    paper_port = db.query(PaperPortfolio).filter_by(portfolio_name="default").first()
+    total_value  = paper_port.total_value if paper_port else capital
+    current_cash = paper_port.current_cash if paper_port else capital
+
+    # Open paper positions → sector exposure
+    open_trades = db.query(PaperPosition).filter_by(portfolio_name="default").all()
+    total_deploy = sum(p.capital_deployed for p in open_trades)
     exposure_pct = total_deploy / total_value * 100 if total_value else 0.0
 
     sector_exposure: dict[str, float] = {}
-    for t in open_trades:
-        sector = STOCK_META.get(t.symbol, {}).get("sector", "Other")
-        sector_exposure[sector] = sector_exposure.get(sector, 0) + (t.position_size or 0)
+    for p in open_trades:
+        sector = p.sector or STOCK_META.get(p.symbol, {}).get("sector", "Other")
+        sector_exposure[sector] = sector_exposure.get(sector, 0) + (p.capital_deployed or 0)
 
     sector_list = [
         {
@@ -89,23 +93,24 @@ def get_risk(db: Session = Depends(get_db_dependency)):
         for s in snaps_30
     ]
 
-    # Position risk table
+    # Position risk table (from paper positions)
     positions = []
-    for t in open_trades:
+    for p in open_trades:
         price_rows = (
             db.query(DailyPrice.daily_return)
-            .filter(DailyPrice.symbol == t.symbol, DailyPrice.date >= cutoff)
+            .filter(DailyPrice.symbol == p.symbol, DailyPrice.date >= cutoff)
             .order_by(DailyPrice.date.asc())
             .all()
         )
         sym_returns = [r[0] for r in price_rows if r[0] is not None]
         sym_vol     = float(np.std(sym_returns) * (252 ** 0.5)) if len(sym_returns) >= 5 else 0.0
-        sym_var     = _compute_var(sym_returns, t.position_size or 0)
+        sym_var     = _compute_var(sym_returns, p.capital_deployed or 0)
         risk_level  = "Low" if sym_vol < 20 else "Medium" if sym_vol < 30 else "High"
+        weight_pct  = round(p.capital_deployed / total_value * 100, 1) if total_value else 0.0
 
         positions.append({
-            "symbol":     t.symbol,
-            "weight":     f"{t.position_pct:.1f}%" if t.position_pct else "—",
+            "symbol":     p.symbol,
+            "weight":     f"{weight_pct:.1f}%",
             "var":        sym_var,
             "volatility": round(sym_vol, 1),
             "riskLevel":  risk_level,

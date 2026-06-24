@@ -46,7 +46,37 @@ def get_ranking(
     db: Session = Depends(get_db_dependency),
 ):
     from learning.feature_ranker import rank_features
-    return {"features": rank_features(db, model_name=model_name, task=task, days=days), "days": days}
+    features = rank_features(db, model_name=model_name, task=task, days=days)
+
+    if not features:
+        # Fall back: compute feature statistics from feature_values table
+        from aqrti.database.models import FeatureValue
+        from sqlalchemy import func
+        stats = (
+            db.query(
+                FeatureValue.feature_name,
+                func.count(FeatureValue.id).label("n"),
+                func.avg(FeatureValue.value).label("avg_val"),
+            )
+            .group_by(FeatureValue.feature_name)
+            .order_by(func.count(FeatureValue.id).desc())
+            .limit(30)
+            .all()
+        )
+        features = [
+            {
+                "featureName": r.feature_name,
+                "importanceScore": None,
+                "decaySeverity": "none",
+                "recommendation": "keep",
+                "sampleCount": r.n,
+                "avgValue": round(float(r.avg_val), 4) if r.avg_val is not None else None,
+                "source": "feature_values",
+            }
+            for r in stats
+        ]
+
+    return {"features": features, "days": days}
 
 
 @router.get("/decay")
