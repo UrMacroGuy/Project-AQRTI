@@ -89,8 +89,12 @@ def mutate(
     rng  = rng or random.Random()
     dsl  = copy.deepcopy(parent)
     ops  = [
-        "threshold_shift", "operator_flip", "feature_swap",
-        "rule_add", "rule_remove", "regime_expand", "regime_restrict", "param_adjust",
+        "threshold_shift", "threshold_shift",   # double weight — most impactful
+        "operator_flip", "feature_swap",
+        "rule_add", "rule_remove",
+        "regime_expand", "regime_restrict",
+        "param_adjust", "param_adjust",          # double weight
+        "confidence_adjust",                     # new: tune entry confidence threshold
     ]
     op   = operation or rng.choice(ops)
     desc = ""
@@ -165,8 +169,27 @@ def mutate(
         setattr(dsl, attr, new_val)
         desc = f"param_adjust: {attr} {val} → {new_val}"
 
+    elif op == "confidence_adjust":
+        # Nudge min_confidence — high threshold means fewer signals; lower it to fire more
+        old_conf = dsl.min_confidence or 65.0
+        # Bias toward lowering (more signal opportunities) but allow tightening too
+        direction = rng.choice([-1, -1, -1, 1])   # 3:1 bias toward lowering
+        delta = rng.uniform(3.0, 12.0) * direction
+        new_conf = round(max(45.0, min(85.0, old_conf + delta)), 1)
+        dsl.min_confidence = new_conf
+        desc = f"confidence_adjust: min_confidence {old_conf} → {new_conf}"
+
     if not desc:
-        desc = f"{op}: no change applied"
+        # Fallback: always apply a small threshold_shift so child ID is never identical to parent
+        all_conds2 = _collect_conditions(dsl.entry_conditions)
+        if all_conds2:
+            target = rng.choice(all_conds2)
+            if isinstance(target.threshold, (int, float)):
+                tiny = target.threshold * rng.uniform(0.02, 0.08)
+                new_thresh = round(target.threshold + tiny, 4)
+                new_cond   = Condition(target.feature, target.operator, new_thresh, target.weight)
+                dsl.entry_conditions = _replace_condition_in_group(dsl.entry_conditions, target, new_cond)
+        desc = f"{op}: minor threshold nudge applied"
 
     # Update name and recompute ID
     dsl.name = f"{parent.name}_mut"

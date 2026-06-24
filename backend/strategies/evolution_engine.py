@@ -36,10 +36,10 @@ from strategies.strategy_lifecycle import run_lifecycle_sweep
 
 log = get_logger("evolution_engine")
 
-TOURNAMENT_SIZE    = 3      # tournament selection pool size
-MUTATION_RATE      = 0.70   # 70% of offspring are mutations
-CROSSOVER_RATE     = 0.30   # 30% are crossovers
-MIN_PARENT_FITNESS = 40.0   # only evolve strategies above this threshold
+TOURNAMENT_SIZE    = 5      # tournament selection pool size (larger = more selection pressure)
+MUTATION_RATE      = 0.65   # 65% of offspring are mutations
+CROSSOVER_RATE     = 0.35   # 35% are crossovers
+MIN_PARENT_FITNESS = 15.0   # lowered to match realistic fitness range
 BACKTEST_DAYS      = 365    # 1 year backtest window for offspring
 
 
@@ -89,19 +89,28 @@ def evolve_population(
     regime    = _current_regime(db)
     next_gen  = _get_next_generation(db)
 
-    # Select parent pool (strategies with backtest data and decent fitness)
+    # Select parent pool — diversified across families for genetic variety
     parents = (
         db.query(StrategyV2)
         .filter(
-            StrategyV2.trade_count    > 5,
-            StrategyV2.fitness_score >= MIN_PARENT_FITNESS,
+            StrategyV2.trade_count    >= 3,
+            StrategyV2.fitness_score  >= MIN_PARENT_FITNESS,
             StrategyV2.dsl_json.isnot(None),
             StrategyV2.family.isnot(None),
         )
         .order_by(StrategyV2.fitness_score.desc())
-        .limit(50)
+        .limit(200)
         .all()
     )
+    # De-duplicate by family — ensure diverse gene pool (up to 30 per family)
+    family_counts: dict[str, int] = {}
+    diverse_parents = []
+    for p in parents:
+        fam = p.family or "hybrid"
+        if family_counts.get(fam, 0) < 30:
+            diverse_parents.append(p)
+            family_counts[fam] = family_counts.get(fam, 0) + 1
+    parents = diverse_parents
 
     if not parents:
         log.info("No eligible parents found for evolution")

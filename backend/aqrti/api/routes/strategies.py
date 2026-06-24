@@ -181,7 +181,7 @@ def lifecycle_sweep(db: Session = Depends(get_db_dependency)):
 
 @router.post("/admin/generate")
 def generate_candidates(
-    n: int = Query(default=50, ge=10, le=200),
+    n: int = Query(default=100, ge=10, le=500),
     db: Session = Depends(get_db_dependency),
 ):
     return run_generation_cycle(db, n=n, generation=0)
@@ -189,10 +189,57 @@ def generate_candidates(
 
 @router.post("/admin/evolve")
 def evolve(
-    n_offspring: int = Query(default=20, ge=5, le=100),
+    n_offspring: int = Query(default=40, ge=5, le=200),
     db: Session = Depends(get_db_dependency),
 ):
     return evolve_population(db, n_offspring=n_offspring)
+
+
+@router.post("/admin/bulk-backtest")
+def bulk_backtest(
+    batch_size: int = Query(default=200, ge=10, le=500),
+    db: Session = Depends(get_db_dependency),
+):
+    """Backtest up to batch_size unscored candidate strategies."""
+    from strategies.strategy_research_loop import _backtest_unscored
+    return _backtest_unscored(db, max_stocks=batch_size)
+
+
+@router.post("/admin/rescore")
+def rescore(db: Session = Depends(get_db_dependency)):
+    """Recompute fitness scores for all strategies with backtest data."""
+    from strategies.fitness_engine import rescore_all
+    from strategies.strategy_lifecycle import run_lifecycle_sweep
+    rescore_result = rescore_all(db)
+    lifecycle = run_lifecycle_sweep(db)
+    return {**rescore_result, "promoted": len(lifecycle["promoted"]), "retired": len(lifecycle["retired"])}
+
+
+@router.post("/admin/full-research-cycle")
+def full_research_cycle(
+    generate_n:  int = Query(default=100, ge=10, le=500),
+    evolve_n:    int = Query(default=40,  ge=5,  le=200),
+    batch_size:  int = Query(default=200, ge=10, le=500),
+    db: Session = Depends(get_db_dependency),
+):
+    """Run a full strategy research cycle: generate → backtest → score → lifecycle → evolve."""
+    from strategies.strategy_research_loop import _backtest_unscored
+    from strategies.fitness_engine import rescore_all
+    from strategies.strategy_lifecycle import run_lifecycle_sweep
+
+    gen    = run_generation_cycle(db, n=generate_n, generation=0)
+    bt     = _backtest_unscored(db, max_stocks=batch_size)
+    rescore = rescore_all(db)
+    lc     = run_lifecycle_sweep(db)
+    evo    = evolve_population(db, n_offspring=evolve_n)
+
+    return {
+        "generate":  gen,
+        "backtest":  bt,
+        "rescore":   rescore,
+        "lifecycle": {"promoted": len(lc["promoted"]), "retired": len(lc["retired"])},
+        "evolution": {"created": evo.get("created", 0), "generation": evo.get("generation")},
+    }
 
 
 @router.get("/{strategy_id}/trades")

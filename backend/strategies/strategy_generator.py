@@ -78,21 +78,28 @@ def _make_condition(feature: str, op: str, threshold: float, weight: float = 1.0
     return Condition(feature=feature, operator=op, threshold=threshold, weight=weight)
 
 
+def _rand_confidence(rng: random.Random, lo: float = 50.0, hi: float = 68.0) -> float:
+    """Generate a realistic min_confidence — biased toward lower values that fire more signals."""
+    return round(rng.uniform(lo, hi), 1)
+
+
 def _generate_momentum(rng: random.Random) -> StrategyDSL:
     feat   = rng.choice(["return_5d", "return_21d", "momentum_10d", "momentum_20d"])
-    thresh = rng.uniform(2.0, 8.0)
-    rsi_th = rng.uniform(50, 65)
-    trend  = rng.choice(TREND_FEATURES[:4])
-    t_val  = rng.uniform(55, 75)
-    regime = rng.choice(["bull_only", "bull_sideways"])
-    entry  = ConditionGroup(conditions=[
-        _make_condition(feat, ">", round(thresh, 2)),
-        _make_condition("rsi_14", ">", round(rsi_th, 1)),
-        _make_condition(trend, ">", round(t_val, 1)),
-    ])
+    # Wider threshold ranges so some strategies fire on smaller moves
+    thresh = rng.uniform(1.0, 6.0)
+    rsi_th = rng.uniform(45, 60)       # was 50-65, lowered to catch more entries
+    regime = rng.choice(["bull_only", "bull_sideways", "all_weather"])
+    n_conds = rng.randint(2, 3)        # allow 2-condition strategies (less restrictive)
+    conds = [_make_condition(feat, ">", round(thresh, 2))]
+    if n_conds >= 2:
+        conds.append(_make_condition("rsi_14", ">", round(rsi_th, 1)))
+    if n_conds >= 3:
+        trend = rng.choice(["macd_signal", "adx_14", "ema20_above_ema50"])
+        t_val = rng.uniform(45, 65)
+        conds.append(_make_condition(trend, ">", round(t_val, 1)))
+    entry  = ConditionGroup(conditions=conds)
     exit_  = ConditionGroup(conditions=[
-        _make_condition("rsi_14", ">", round(rng.uniform(70, 85), 1)),
-        _make_condition(feat, "<", round(-rng.uniform(1, 3), 2)),
+        _make_condition("rsi_14", ">", round(rng.uniform(68, 80), 1)),
     ], logic="OR")
     return StrategyDSL(
         entry_conditions = entry,
@@ -100,167 +107,186 @@ def _generate_momentum(rng: random.Random) -> StrategyDSL:
         allowed_regimes  = REGIME_SETS[regime],
         family           = "momentum",
         name             = f"Momentum_{feat}_{round(thresh,1)}",
-        min_confidence   = round(rng.uniform(60, 75), 1),
-        max_holding_days = rng.randint(5, 15),
-        stop_loss_pct    = round(-rng.uniform(6, 12), 1),
-        take_profit_pct  = round(rng.uniform(10, 20), 1),
+        min_confidence   = _rand_confidence(rng, 50.0, 68.0),
+        max_holding_days = rng.randint(5, 20),
+        stop_loss_pct    = round(-rng.uniform(5, 10), 1),
+        take_profit_pct  = round(rng.uniform(8, 18), 1),
     )
 
 
 def _generate_mean_reversion(rng: random.Random) -> StrategyDSL:
-    rsi_lo = round(rng.uniform(25, 40), 1)
-    bb_lo  = round(-rng.uniform(1.5, 3.0), 2)
-    entry  = ConditionGroup(conditions=[
-        _make_condition("rsi_14", "<", rsi_lo),
-        _make_condition("bb_width_20", ">", round(rng.uniform(0.03, 0.08), 3)),
-        _make_condition("return_5d", "<", bb_lo),
-    ])
+    rsi_lo = round(rng.uniform(28, 42), 1)
+    n_conds = rng.randint(2, 3)
+    conds = [_make_condition("rsi_14", "<", rsi_lo)]
+    if n_conds >= 2:
+        conds.append(_make_condition("return_5d", "<", round(-rng.uniform(1.0, 3.5), 2)))
+    if n_conds >= 3:
+        conds.append(_make_condition("bb_width_20", ">", round(rng.uniform(0.02, 0.07), 3)))
+    entry  = ConditionGroup(conditions=conds)
     exit_  = ConditionGroup(conditions=[
-        _make_condition("rsi_14", ">", round(rng.uniform(50, 60), 1)),
+        _make_condition("rsi_14", ">", round(rng.uniform(48, 58), 1)),
     ])
     return StrategyDSL(
         entry_conditions = entry,
         exit_conditions  = exit_,
-        allowed_regimes  = REGIME_SETS["bull_sideways"],
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
         family           = "mean_reversion",
         name             = f"MeanRev_RSI{rsi_lo}",
-        min_confidence   = round(rng.uniform(55, 70), 1),
-        max_holding_days = rng.randint(3, 10),
-        stop_loss_pct    = round(-rng.uniform(5, 10), 1),
-        take_profit_pct  = round(rng.uniform(6, 14), 1),
+        min_confidence   = _rand_confidence(rng, 48.0, 65.0),
+        max_holding_days = rng.randint(3, 12),
+        stop_loss_pct    = round(-rng.uniform(4, 9), 1),
+        take_profit_pct  = round(rng.uniform(5, 13), 1),
     )
 
 
 def _generate_breakout(rng: random.Random) -> StrategyDSL:
-    brk_th = round(rng.uniform(-3, 3), 2)
-    vol_th = round(rng.uniform(1.3, 2.5), 2)
-    adx_th = round(rng.uniform(20, 35), 1)
-    entry  = ConditionGroup(conditions=[
-        _make_condition("breakout_distance_52w", ">", brk_th),
-        _make_condition("volume_ratio_20d", ">", vol_th),
-        _make_condition("adx_14", ">", adx_th),
-        _make_condition("price_above_ema50", "==", 1.0),
-    ])
+    brk_th = round(rng.uniform(-5, 2), 2)   # wider range — can enter at -5% from 52w high
+    vol_th = round(rng.uniform(1.2, 2.2), 2)
+    n_conds = rng.randint(2, 4)
+    conds = [_make_condition("breakout_distance_52w", ">", brk_th)]
+    if n_conds >= 2:
+        conds.append(_make_condition("volume_ratio_20d", ">", vol_th))
+    if n_conds >= 3:
+        adx_th = round(rng.uniform(18, 32), 1)
+        conds.append(_make_condition("adx_14", ">", adx_th))
+    if n_conds >= 4:
+        conds.append(_make_condition("price_above_ema50", "==", 1.0))
+    regime = rng.choice(["bull_only", "bull_sideways"])
     return StrategyDSL(
-        entry_conditions = entry,
-        allowed_regimes  = REGIME_SETS["bull_only"],
+        entry_conditions = ConditionGroup(conditions=conds),
+        allowed_regimes  = REGIME_SETS[regime],
         family           = "breakout",
-        name             = f"Breakout_52w_ADX{adx_th}",
-        min_confidence   = round(rng.uniform(65, 80), 1),
-        max_holding_days = rng.randint(10, 20),
-        stop_loss_pct    = round(-rng.uniform(7, 14), 1),
-        take_profit_pct  = round(rng.uniform(15, 30), 1),
+        name             = f"Breakout_52w_{round(brk_th,1)}",
+        min_confidence   = _rand_confidence(rng, 52.0, 68.0),
+        max_holding_days = rng.randint(8, 22),
+        stop_loss_pct    = round(-rng.uniform(6, 12), 1),
+        take_profit_pct  = round(rng.uniform(12, 28), 1),
     )
 
 
 def _generate_sentiment_driven(rng: random.Random) -> StrategyDSL:
-    sent_th = round(rng.uniform(60, 80), 1)
-    vel_th  = round(rng.uniform(5, 20), 1)
-    tech_f  = rng.choice(["rsi_14", "momentum_10d", "return_5d"])
-    tech_v  = round(rng.uniform(45, 60), 1)
-    entry   = ConditionGroup(conditions=[
-        _make_condition("sentiment_score", ">", sent_th),
-        _make_condition("sentiment_velocity", ">", vel_th),
-        _make_condition(tech_f, ">", tech_v),
-    ])
+    sent_th = round(rng.uniform(55, 75), 1)
+    n_conds = rng.randint(2, 3)
+    conds = [_make_condition("sentiment_score", ">", sent_th)]
+    if n_conds >= 2:
+        tech_f  = rng.choice(["rsi_14", "momentum_10d", "return_5d", "adx_14"])
+        tech_v  = round(rng.uniform(40, 58), 1)
+        conds.append(_make_condition(tech_f, ">", tech_v))
+    if n_conds >= 3:
+        vel_th = round(rng.uniform(3, 15), 1)
+        conds.append(_make_condition("sentiment_velocity", ">", vel_th))
+    entry   = ConditionGroup(conditions=conds)
     return StrategyDSL(
         entry_conditions = entry,
-        allowed_regimes  = REGIME_SETS["bull_sideways"],
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
         family           = "sentiment_driven",
         name             = f"Sentiment_GT{sent_th}",
-        min_confidence   = round(rng.uniform(60, 75), 1),
-        max_holding_days = rng.randint(5, 12),
-        stop_loss_pct    = round(-rng.uniform(6, 10), 1),
-        take_profit_pct  = round(rng.uniform(8, 18), 1),
+        min_confidence   = _rand_confidence(rng, 50.0, 65.0),
+        max_holding_days = rng.randint(4, 14),
+        stop_loss_pct    = round(-rng.uniform(5, 9), 1),
+        take_profit_pct  = round(rng.uniform(7, 16), 1),
     )
 
 
 def _generate_regime_adaptive(rng: random.Random) -> StrategyDSL:
     regime_set = rng.choice(list(REGIME_SETS.keys()))
-    feat1 = rng.choice(PRICE_FEATURES)
-    v1    = round(rng.uniform(-2, 5), 2)
-    feat2 = rng.choice(TREND_FEATURES)
-    v2    = round(rng.uniform(40, 65), 1)
-    entry  = ConditionGroup(conditions=[
-        _make_condition(feat1, ">", v1),
-        _make_condition(feat2, ">", v2),
-        _make_condition("regime_confidence", ">", round(rng.uniform(60, 80), 1)),
-    ])
+    feat1 = rng.choice(PRICE_FEATURES + TREND_FEATURES[:4])
+    v1    = round(rng.uniform(-3, 5), 2)
+    n_conds = rng.randint(2, 3)
+    conds = [_make_condition(feat1, ">", v1)]
+    if n_conds >= 2:
+        feat2 = rng.choice(TREND_FEATURES)
+        v2    = round(rng.uniform(38, 62), 1)
+        conds.append(_make_condition(feat2, ">", v2))
+    if n_conds >= 3:
+        conds.append(_make_condition("regime_confidence", ">", round(rng.uniform(55, 75), 1)))
+    entry  = ConditionGroup(conditions=conds)
     return StrategyDSL(
         entry_conditions = entry,
         allowed_regimes  = REGIME_SETS[regime_set],
         family           = "regime_adaptive",
         name             = f"Regime_{regime_set}_{feat1[:6]}",
-        min_confidence   = round(rng.uniform(60, 75), 1),
-        max_holding_days = rng.randint(7, 18),
-        stop_loss_pct    = round(-rng.uniform(7, 12), 1),
-        take_profit_pct  = round(rng.uniform(10, 22), 1),
+        min_confidence   = _rand_confidence(rng, 50.0, 66.0),
+        max_holding_days = rng.randint(6, 20),
+        stop_loss_pct    = round(-rng.uniform(6, 11), 1),
+        take_profit_pct  = round(rng.uniform(9, 22), 1),
     )
 
 
 def _generate_volume_surge(rng: random.Random) -> StrategyDSL:
-    vol_th  = round(rng.uniform(1.5, 3.0), 2)
-    del_th  = round(rng.uniform(55, 75), 1)
-    rsi_th  = round(rng.uniform(45, 65), 1)
-    entry   = ConditionGroup(conditions=[
-        _make_condition("volume_ratio_20d", ">", vol_th),
-        _make_condition("delivery_pct", ">", del_th),
-        _make_condition("rsi_14", ">", rsi_th),
-        _make_condition("return_1d", ">", round(rng.uniform(0.5, 2.0), 2)),
-    ])
+    vol_th  = round(rng.uniform(1.3, 2.8), 2)
+    n_conds = rng.randint(2, 4)
+    conds   = [_make_condition("volume_ratio_20d", ">", vol_th)]
+    if n_conds >= 2:
+        rsi_th  = round(rng.uniform(42, 62), 1)
+        conds.append(_make_condition("rsi_14", ">", rsi_th))
+    if n_conds >= 3:
+        conds.append(_make_condition("return_1d", ">", round(rng.uniform(0.3, 1.8), 2)))
+    if n_conds >= 4:
+        del_th = round(rng.uniform(50, 72), 1)
+        conds.append(_make_condition("delivery_pct", ">", del_th))
     return StrategyDSL(
-        entry_conditions = entry,
-        allowed_regimes  = REGIME_SETS["bull_sideways"],
+        entry_conditions = ConditionGroup(conditions=conds),
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "bull_only", "all_weather"])],
         family           = "volume_surge",
-        name             = f"VolSurge_{vol_th}x_Del{del_th}",
-        min_confidence   = round(rng.uniform(65, 78), 1),
-        max_holding_days = rng.randint(3, 8),
-        stop_loss_pct    = round(-rng.uniform(5, 9), 1),
-        take_profit_pct  = round(rng.uniform(7, 15), 1),
-    )
-
-
-def _generate_volatility_play(rng: random.Random) -> StrategyDSL:
-    atr_th  = round(rng.uniform(1.5, 4.0), 2)
-    hv_th   = round(rng.uniform(40, 70), 1)
-    rsi_th  = round(rng.uniform(35, 55), 1)
-    entry   = ConditionGroup(conditions=[
-        _make_condition("atr_14", ">", atr_th),
-        _make_condition("hv_percentile_252d", "<", hv_th),
-        _make_condition("rsi_14", "<", rsi_th),
-        _make_condition("bb_width_20", ">", round(rng.uniform(0.02, 0.06), 3)),
-    ])
-    return StrategyDSL(
-        entry_conditions = entry,
-        allowed_regimes  = REGIME_SETS["high_vol"],
-        family           = "volatility_play",
-        name             = f"VolPlay_ATR{atr_th}",
-        min_confidence   = round(rng.uniform(55, 70), 1),
-        max_holding_days = rng.randint(3, 7),
+        name             = f"VolSurge_{vol_th}x",
+        min_confidence   = _rand_confidence(rng, 52.0, 67.0),
+        max_holding_days = rng.randint(3, 10),
         stop_loss_pct    = round(-rng.uniform(4, 8), 1),
         take_profit_pct  = round(rng.uniform(6, 14), 1),
     )
 
 
+def _generate_volatility_play(rng: random.Random) -> StrategyDSL:
+    atr_th  = round(rng.uniform(1.2, 3.5), 2)
+    n_conds = rng.randint(2, 3)
+    conds   = [_make_condition("atr_14", ">", atr_th)]
+    if n_conds >= 2:
+        rsi_th  = round(rng.uniform(32, 52), 1)
+        conds.append(_make_condition("rsi_14", "<", rsi_th))
+    if n_conds >= 3:
+        hv_th = round(rng.uniform(35, 65), 1)
+        conds.append(_make_condition("hv_percentile_252d", "<", hv_th))
+    # Volatility plays work in all markets including volatile regimes
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        allowed_regimes  = REGIME_SETS[rng.choice(["high_vol", "all_weather", "bull_sideways"])],
+        family           = "volatility_play",
+        name             = f"VolPlay_ATR{atr_th}",
+        min_confidence   = _rand_confidence(rng, 48.0, 64.0),
+        max_holding_days = rng.randint(3, 8),
+        stop_loss_pct    = round(-rng.uniform(3, 7), 1),
+        take_profit_pct  = round(rng.uniform(5, 13), 1),
+    )
+
+
 def _generate_hybrid(rng: random.Random) -> StrategyDSL:
-    # Pick 2-3 features from different categories
-    cats  = [PRICE_FEATURES, TREND_FEATURES, SENTIMENT_FEATURES, VOLUME_FEATURES]
-    rng.shuffle(cats)
+    # Pick 2-3 features from different categories — wider feature space
+    all_cats = [PRICE_FEATURES, TREND_FEATURES, VOLUME_FEATURES, VOLATILITY_FEATURES]
+    rng.shuffle(all_cats)
+    n_conds = rng.randint(2, 3)
     conds = []
-    for pool in cats[:3]:
-        feat  = rng.choice(pool)
-        thresh = round(rng.uniform(40, 75), 2)
-        conds.append(_make_condition(feat, ">", thresh))
+    for pool in all_cats[:n_conds]:
+        feat   = rng.choice(pool)
+        # Use feature-appropriate threshold ranges
+        if feat in VOLATILITY_FEATURES:
+            thresh = round(rng.uniform(0.02, 3.0), 3)
+        elif feat in VOLUME_FEATURES:
+            thresh = round(rng.uniform(1.0, 2.5), 2)
+        else:
+            thresh = round(rng.uniform(40, 70), 2)
+        op = rng.choice([">", ">", ">="])   # bias toward greater-than
+        conds.append(_make_condition(feat, op, thresh))
     entry = ConditionGroup(conditions=conds)
     return StrategyDSL(
         entry_conditions = entry,
-        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather", "bull_only"])],
         family           = "hybrid",
         name             = f"Hybrid_{conds[0].feature[:6]}_{conds[1].feature[:6]}",
-        min_confidence   = round(rng.uniform(60, 72), 1),
-        max_holding_days = rng.randint(7, 15),
-        stop_loss_pct    = round(-rng.uniform(6, 11), 1),
-        take_profit_pct  = round(rng.uniform(10, 20), 1),
+        min_confidence   = _rand_confidence(rng, 50.0, 66.0),
+        max_holding_days = rng.randint(6, 18),
+        stop_loss_pct    = round(-rng.uniform(5, 10), 1),
+        take_profit_pct  = round(rng.uniform(8, 18), 1),
     )
 
 

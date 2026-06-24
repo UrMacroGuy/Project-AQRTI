@@ -41,7 +41,7 @@ from aqrti.database.models import StrategyV2
 log = get_logger("strategy_research_loop")
 
 
-def _backtest_unscored(db, max_stocks: int = 50) -> dict:
+def _backtest_unscored(db, max_stocks: int = 200) -> dict:
     """Backtest all candidates that have no fitness score yet."""
     rows = (
         db.query(StrategyV2)
@@ -51,7 +51,7 @@ def _backtest_unscored(db, max_stocks: int = 50) -> dict:
             StrategyV2.dsl_json.isnot(None),
             StrategyV2.family.isnot(None),
         )
-        .limit(50)
+        .limit(max_stocks)
         .all()
     )
     tested = 0
@@ -73,8 +73,8 @@ def _backtest_unscored(db, max_stocks: int = 50) -> dict:
 
 
 def run_daily_strategy_research(
-    generate_n:    int = 50,
-    evolve_n:      int = 20,
+    generate_n:    int = 100,
+    evolve_n:      int = 40,
     skip_generate: bool = False,
     skip_evolve:   bool = False,
 ) -> dict:

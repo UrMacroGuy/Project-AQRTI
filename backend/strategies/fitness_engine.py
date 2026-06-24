@@ -35,24 +35,27 @@ W_ROBUSTNESS       = 0.20
 W_REGIME_ADAPT     = 0.15
 W_LONGEVITY        = 0.10
 
-# ── Normalization targets ─────────────────────────────────────
-TARGET_SHARPE       = 2.0      # sharpe = 2.0 → 100% of profitability
-TARGET_PROFIT_FACTOR = 2.5
-TARGET_WIN_RATE     = 65.0
-TARGET_TRADES       = 50       # 50+ trades = full longevity score
-MIN_TRADES          = 5        # below this, longevity = 0
+# ── Normalization targets (calibrated for Indian equity strategies) ──
+TARGET_SHARPE        = 1.0     # 1.0 is excellent for Indian equities (vs 2.0 overshoot)
+TARGET_PROFIT_FACTOR = 1.8     # 1.8 profit factor is strong
+TARGET_WIN_RATE      = 55.0    # 55% win rate is realistic for trend-following
+TARGET_TRADES        = 30      # 30+ trades = full longevity (365-day window, 20 stocks)
+MIN_TRADES           = 3       # below this, longevity = 0
 
 
 def profitability_score(sharpe: float, profit_factor: float, total_return: float) -> float:
-    s1 = min(max(sharpe, 0.0) / TARGET_SHARPE, 1.0) * 50
-    s2 = min(max(profit_factor - 1.0, 0.0) / (TARGET_PROFIT_FACTOR - 1.0), 1.0) * 30
-    s3 = min(max(total_return, 0.0) / 50.0, 1.0) * 20    # 50% total return → full mark
+    # Sharpe: full credit at 1.0, partial below, 0 below -0.5 (soft floor, not cliff)
+    sharpe_norm = max(sharpe + 0.5, 0.0) / (TARGET_SHARPE + 0.5)   # shift so -0.5 → 0
+    s1 = min(sharpe_norm, 1.0) * 45
+    s2 = min(max(profit_factor - 1.0, 0.0) / (TARGET_PROFIT_FACTOR - 1.0), 1.0) * 35
+    s3 = min(max(total_return, 0.0) / 30.0, 1.0) * 20    # 30% total return → full mark
     return round(s1 + s2 + s3, 2)
 
 
 def consistency_score(win_rate: float, expectancy: float) -> float:
-    s1 = min(max(win_rate, 0.0) / TARGET_WIN_RATE, 1.0) * 60
-    s2 = min(max(expectancy, 0.0) / 3.0, 1.0) * 40       # 3% expectancy → full mark
+    # Win rate: 55% = full score, partial below 55
+    s1 = min(max(win_rate, 0.0) / TARGET_WIN_RATE, 1.0) * 65
+    s2 = min(max(expectancy, 0.0) / 1.5, 1.0) * 35       # 1.5% expectancy → full mark
     return round(s1 + s2, 2)
 
 
@@ -100,6 +103,9 @@ def regime_adaptability_score(
 def longevity_score(trade_count: int) -> float:
     if trade_count < MIN_TRADES:
         return 0.0
+    # Tiered: quick partial credit for 3-10 trades, full at 30+
+    if trade_count < 10:
+        return round((trade_count / 10) * 50, 2)
     return round(min(trade_count / TARGET_TRADES, 1.0) * 100, 2)
 
 
@@ -192,7 +198,7 @@ def score_strategy(db: Session, strategy: StrategyV2) -> float:
 
 
 def score_all_strategies(db: Session) -> dict:
-    """Score every unscored or backtested strategy. Commits to DB."""
+    """Score every strategy that has backtest results. Commits to DB."""
     rows = (
         db.query(StrategyV2)
         .filter(StrategyV2.trade_count > 0)
@@ -205,3 +211,17 @@ def score_all_strategies(db: Session) -> dict:
     db.commit()
     log.info("Scored %d strategies", scored)
     return {"scored": scored}
+
+
+def rescore_all(db: Session) -> dict:
+    """Force-rescore ALL strategies that have trade data (recalculates with current weights)."""
+    rows = db.query(StrategyV2).filter(StrategyV2.trade_count > 0).all()
+    updated = 0
+    for r in rows:
+        old = r.fitness_score
+        score_strategy(db, r)
+        if r.fitness_score != old:
+            updated += 1
+    db.commit()
+    log.info("Rescored %d strategies (%d changed)", len(rows), updated)
+    return {"total": len(rows), "updated": updated}

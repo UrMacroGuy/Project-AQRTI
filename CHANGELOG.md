@@ -1,4 +1,72 @@
-﻿## [2026-06-25] — Full Data Audit: Risk, Strategy Performance, Feature Intelligence, Portfolio Fixes
+﻿## [2026-06-25] — Strategy Engine Overhaul: Better Scoring, More Diverse Strategies
+
+### Problems Fixed
+- **All strategies scoring identically** — fitness was calibrated for Sharpe ≥ 2.0 (unrealistic); all Indian equity strategies scored 8–54 regardless of actual performance
+- **Evolution stuck in local optimum** — `MIN_PARENT_FITNESS = 40.0` excluded all real strategies; evolution had no parents
+- **Too many duplicate offspring** — mutation fallback produced identical DSL hashes; 42/50 offspring skipped per cycle
+- **Too few signals fired** — `min_confidence` range 60–75 too high; technical fallback rarely exceeded threshold → 0 trades per backtest
+- **Backtest backlog never cleared** — daily loop backtested 50 but generated 50 new ones; 2,448 candidates never evaluated
+
+### Fixes
+**`backend/strategies/fitness_engine.py`**
+- `TARGET_SHARPE` 2.0 → 1.0 (calibrated for Indian equity)
+- `TARGET_PROFIT_FACTOR` 2.5 → 1.8
+- `TARGET_WIN_RATE` 65% → 55%
+- `TARGET_TRADES` 50 → 30
+- Sharpe normalized with soft floor (−0.5 maps to 0 instead of cliff at 0)
+- Win rate expectancy threshold 3% → 1.5% (realistic)
+- Tiered longevity score: partial credit for 3–10 trades
+- Added `rescore_all()` for bulk recalibration
+
+**`backend/strategies/evolution_engine.py`**
+- `MIN_PARENT_FITNESS` 40.0 → 15.0 (real strategies now qualify as parents)
+- `TOURNAMENT_SIZE` 3 → 5 (stronger selection pressure)
+- Parent pool 50 → 200 rows, capped at 30 per family for diversity
+- Mutation/crossover rates adjusted: 65/35
+
+**`backend/strategies/mutation_engine.py`**
+- Added `confidence_adjust` mutation: lowers `min_confidence` 3:1 bias (more signals → more trades)
+- Weighted `threshold_shift` and `param_adjust` 2× (most impactful mutations)
+- Fallback micro-nudge ensures every mutation produces a unique DSL hash
+
+**`backend/strategies/strategy_generator.py`**
+- `min_confidence` range 60–75 → 50–68 (allows more signals to fire in backtests)
+- All families now support 2–4 conditions (not always 3–4) — less restrictive strategies
+- Breakout: threshold widened −5 to +2 (was −3 to +3)
+- Added `_rand_confidence()` helper biased toward lower values
+- Hybrid generator uses feature-appropriate threshold ranges per category
+
+**`backend/strategies/strategy_research_loop.py`**
+- `_backtest_unscored` batch 50 → 200 per cycle (clears backlog 4× faster)
+- Default `generate_n` 50 → 100, `evolve_n` 20 → 40
+
+**`backend/aqrti/api/routes/strategies.py`**
+- New endpoints: `/admin/bulk-backtest`, `/admin/rescore`, `/admin/full-research-cycle`
+- Default `generate` n 50 → 100, `evolve` n 20 → 40
+
+### Results (after immediate rescore + evolution run)
+- 421/427 strategies rescored with differentiated fitness values
+- 200 new diverse candidates generated (gen 95)
+- Evolution gen 97: 8 new offspring, 8 immediately promoted
+- Fitness range now spans 12–66 (was all 54.32 for old stale clones)
+
+---
+
+## [2026-06-25] — Remove All Mock Data: Real Backend Data Across All Pages
+
+### Changes
+- **Removed entire `DataStore` object** (~340 lines of hardcoded mock data from `ui/app.js`)
+- **Converted all render functions to loading stubs**: `renderOverview`, `renderMarket`, `renderOpportunities`, `renderNews`, `renderSentiment`, `renderStrategy`, `renderModel`, `renderRisk`, `renderPaperPortfolio` — each now shows a "Loading…" placeholder and immediately delegates to its `hydrate*()` counterpart
+- **Removed `MOCK_STRATEGY_DATA`** and the `useMock` fallback in `hydrateStrategyResearch`
+- **Cleaned `renderLearning` DataStore fallbacks**: empty arrays instead of hardcoded score/failure/lesson data
+- Real data now shown on: Overview KPIs, equity curve, top predictions, sector strength chart, top movers, derivatives signals, opportunity rankings, news feed, sentiment charts, strategy leaderboard, model registry, learning center, paper portfolio
+
+### Files Changed
+- `ui/app.js` — DataStore removed, all render functions converted to stubs
+
+---
+
+## [2026-06-25] — Full Data Audit: Risk, Strategy Performance, Feature Intelligence, Portfolio Fixes
 
 ### Bugs Fixed
 
