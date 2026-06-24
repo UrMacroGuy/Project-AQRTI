@@ -32,11 +32,16 @@ log = get_logger("strategy_store")
 def upsert_strategy(db: Session, data: dict) -> StrategyV2:
     """
     Create or update a StrategyV2 row.
-    data must contain 'strategy_id' and 'dsl_json'.
+    data must contain 'strategy_id'. For inserts, 'family' and 'dsl_json' are required.
+    If the row doesn't exist and required fields are missing, the insert is skipped.
     """
     sid = data["strategy_id"]
     row = db.query(StrategyV2).filter(StrategyV2.strategy_id == sid).first()
     if row is None:
+        # Only insert if we have the minimum required fields
+        if not data.get("family") or not data.get("dsl_json"):
+            log.warning("upsert_strategy: skipping insert for %s — missing family/dsl_json", sid)
+            return None
         row = StrategyV2(strategy_id=sid)
         db.add(row)
 

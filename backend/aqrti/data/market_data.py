@@ -96,7 +96,7 @@ def _latest_index_date(db: Session, index_name: str) -> Optional[date]:
 
 def _compute_returns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.sort_values("Date")
-    df["daily_return"] = df["Close"].pct_change() * 100
+    df["daily_return"] = df["Close"].pct_change(fill_method=None) * 100
     return df
 
 
@@ -153,6 +153,9 @@ def download_stock_prices(
             rows_inserted = 0
 
             for _, row in df.iterrows():
+                close_val = _safe_float(row.get("Close"))
+                if close_val is None:
+                    continue  # skip incomplete/in-progress trading day
                 row_date = row["Date"].date() if hasattr(row["Date"], "date") else row["Date"]
                 stmt = sqlite_insert(DailyPrice).values(
                     symbol       = symbol,
@@ -160,8 +163,8 @@ def download_stock_prices(
                     open         = _safe_float(row.get("Open")),
                     high         = _safe_float(row.get("High")),
                     low          = _safe_float(row.get("Low")),
-                    close        = _safe_float(row.get("Close")),
-                    adj_close    = _safe_float(row.get("Close")),
+                    close        = close_val,
+                    adj_close    = close_val,
                     volume       = _safe_float(row.get("Volume")),
                     daily_return = _safe_float(row.get("daily_return")),
                 ).on_conflict_do_update(
@@ -170,8 +173,8 @@ def download_stock_prices(
                         "open":         _safe_float(row.get("Open")),
                         "high":         _safe_float(row.get("High")),
                         "low":          _safe_float(row.get("Low")),
-                        "close":        _safe_float(row.get("Close")),
-                        "adj_close":    _safe_float(row.get("Close")),
+                        "close":        close_val,
+                        "adj_close":    close_val,
                         "volume":       _safe_float(row.get("Volume")),
                         "daily_return": _safe_float(row.get("daily_return")),
                     }
@@ -232,6 +235,9 @@ def download_index_data(db: Session, start_override: Optional[date] = None) -> d
             rows_inserted = 0
 
             for _, row in df.iterrows():
+                close_val = _safe_float(row.get("Close"))
+                if close_val is None:
+                    continue  # skip incomplete day
                 row_date = row["Date"].date() if hasattr(row["Date"], "date") else row["Date"]
                 from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
                 stmt = _sqlite_insert(IndexData).values(
@@ -240,7 +246,7 @@ def download_index_data(db: Session, start_override: Optional[date] = None) -> d
                     open       = _safe_float(row.get("Open")),
                     high       = _safe_float(row.get("High")),
                     low        = _safe_float(row.get("Low")),
-                    close      = _safe_float(row.get("Close")),
+                    close      = close_val,
                     volume     = _safe_float(row.get("Volume")),
                     returns    = _safe_float(row.get("daily_return")),
                 ).on_conflict_do_update(
@@ -249,7 +255,7 @@ def download_index_data(db: Session, start_override: Optional[date] = None) -> d
                         "open":    _safe_float(row.get("Open")),
                         "high":    _safe_float(row.get("High")),
                         "low":     _safe_float(row.get("Low")),
-                        "close":   _safe_float(row.get("Close")),
+                        "close":   close_val,
                         "volume":  _safe_float(row.get("Volume")),
                         "returns": _safe_float(row.get("daily_return")),
                     }

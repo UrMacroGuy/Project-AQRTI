@@ -29,10 +29,10 @@ log = get_logger("training_dataset")
 # Gap between train end and test start (trading days approximated as calendar days)
 TRAIN_TEST_GAP_DAYS = 14
 
-# Default walk-forward fold configuration
-WF_TRAIN_YEARS = 1       # minimum training window in years (reduced to fit available history)
-WF_TEST_MONTHS = 3       # test window per fold in months
-WF_STEP_MONTHS = 3       # slide step per fold
+# Default walk-forward fold configuration — tuned for ~1 year of available history
+WF_TRAIN_YEARS = 0.5     # minimum training window (6 months) — fits 1-year history
+WF_TEST_MONTHS = 2       # test window per fold in months
+WF_STEP_MONTHS = 2       # slide step per fold
 
 
 @dataclass

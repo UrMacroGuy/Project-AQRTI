@@ -85,6 +85,12 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def on_shutdown():
         stop_scheduler()
+        # Force WAL checkpoint so all committed data is flushed to the main DB file
+        try:
+            from aqrti.database.engine import get_engine
+            get_engine().execute("PRAGMA wal_checkpoint(FULL)")
+        except Exception:
+            pass
         api_logger.info("AQRTI Backend shut down.")
 
     # ── Routes ───────────────────────────────────────────────────

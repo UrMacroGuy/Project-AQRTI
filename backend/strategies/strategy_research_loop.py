@@ -48,6 +48,8 @@ def _backtest_unscored(db, max_stocks: int = 50) -> dict:
         .filter(
             StrategyV2.fitness_score.is_(None),
             StrategyV2.status.in_(["candidate", "shadow"]),
+            StrategyV2.dsl_json.isnot(None),
+            StrategyV2.family.isnot(None),
         )
         .limit(50)
         .all()
@@ -91,97 +93,104 @@ def run_daily_strategy_research(
     log.info("Daily strategy research loop starting — %s", date.today())
     report = {"date": str(date.today()), "steps": {}}
 
-    with get_db_session() as db:
-        # Step 1: Generate new candidates
-        if not skip_generate:
-            try:
+    # Step 1: Generate new candidates
+    if not skip_generate:
+        try:
+            with get_db_session() as db:
                 gen_result = run_generation_cycle(db, n=generate_n, generation=0)
-                report["steps"]["generate"] = gen_result
-                log.info("Step 1 — Generated: %d new candidates", gen_result.get("persisted", 0))
-            except Exception as exc:
-                log.error("Step 1 — Generation failed: %s", exc)
-                report["steps"]["generate"] = {"error": str(exc)}
-        else:
-            report["steps"]["generate"] = {"skipped": True}
+            report["steps"]["generate"] = gen_result
+            log.info("Step 1 — Generated: %d new candidates", gen_result.get("persisted", 0))
+        except Exception as exc:
+            log.error("Step 1 — Generation failed: %s", exc)
+            report["steps"]["generate"] = {"error": str(exc)}
+    else:
+        report["steps"]["generate"] = {"skipped": True}
 
-        # Step 2: Backtest unscored strategies
-        try:
+    # Step 2: Backtest unscored strategies
+    try:
+        with get_db_session() as db:
             bt_result = _backtest_unscored(db)
-            report["steps"]["backtest"] = bt_result
-            log.info("Step 2 — Backtested: %d strategies", bt_result["backtested"])
-        except Exception as exc:
-            log.error("Step 2 — Backtest sweep failed: %s", exc)
-            report["steps"]["backtest"] = {"error": str(exc)}
+        report["steps"]["backtest"] = bt_result
+        log.info("Step 2 — Backtested: %d strategies", bt_result["backtested"])
+    except Exception as exc:
+        log.error("Step 2 — Backtest sweep failed: %s", exc)
+        report["steps"]["backtest"] = {"error": str(exc)}
 
-        # Step 3: Score all strategies
-        try:
+    # Step 3: Score all strategies
+    try:
+        with get_db_session() as db:
             score_result = score_all_strategies(db)
-            report["steps"]["scoring"] = score_result
-            log.info("Step 3 — Scored: %d strategies", score_result.get("scored", 0))
-        except Exception as exc:
-            log.error("Step 3 — Scoring failed: %s", exc)
-            report["steps"]["scoring"] = {"error": str(exc)}
+        report["steps"]["scoring"] = score_result
+        log.info("Step 3 — Scored: %d strategies", score_result.get("scored", 0))
+    except Exception as exc:
+        log.error("Step 3 — Scoring failed: %s", exc)
+        report["steps"]["scoring"] = {"error": str(exc)}
 
-        # Step 4: Lifecycle sweep
-        try:
+    # Step 4: Lifecycle sweep
+    try:
+        with get_db_session() as db:
             lifecycle = run_lifecycle_sweep(db)
-            report["steps"]["lifecycle"] = lifecycle
-            log.info(
-                "Step 4 — Lifecycle: promoted=%d retired=%d",
-                len(lifecycle.get("promoted", [])),
-                len(lifecycle.get("retired", [])),
-            )
-        except Exception as exc:
-            log.error("Step 4 — Lifecycle sweep failed: %s", exc)
-            report["steps"]["lifecycle"] = {"error": str(exc)}
+        report["steps"]["lifecycle"] = lifecycle
+        log.info(
+            "Step 4 — Lifecycle: promoted=%d retired=%d",
+            len(lifecycle.get("promoted", [])),
+            len(lifecycle.get("retired", [])),
+        )
+    except Exception as exc:
+        log.error("Step 4 — Lifecycle sweep failed: %s", exc)
+        report["steps"]["lifecycle"] = {"error": str(exc)}
 
-        # Step 5: Evolve population
-        if not skip_evolve:
-            try:
+    # Step 5: Evolve population
+    if not skip_evolve:
+        try:
+            with get_db_session() as db:
                 evo_result = evolve_population(db, n_offspring=evolve_n)
-                report["steps"]["evolution"] = evo_result
-                log.info(
-                    "Step 5 — Evolution gen=%s: created=%d",
-                    evo_result.get("generation", "?"),
-                    evo_result.get("created", 0),
-                )
-            except Exception as exc:
-                log.error("Step 5 — Evolution failed: %s", exc)
-                report["steps"]["evolution"] = {"error": str(exc)}
-        else:
-            report["steps"]["evolution"] = {"skipped": True}
-
-        # Step 6: Graveyard knowledge
-        try:
-            patterns = failure_pattern_analysis(db)
-            report["steps"]["graveyard"] = patterns
-            log.info("Step 6 — Graveyard: total=%d", patterns.get("total", 0))
-        except Exception as exc:
-            log.error("Step 6 — Graveyard analysis failed: %s", exc)
-            report["steps"]["graveyard"] = {"error": str(exc)}
-
-        # Step 7: Research reports
-        try:
-            research = run_full_research(db)
-            report["steps"]["research"] = research
-            log.info("Step 7 — Research: %d reports generated", len(research.get("reports", [])))
-        except Exception as exc:
-            log.error("Step 7 — Research reports failed: %s", exc)
-            report["steps"]["research"] = {"error": str(exc)}
-
-        # Step 8: Population snapshot
-        try:
-            snapshot = record_knowledge_snapshot(db)
-            report["steps"]["snapshot"] = snapshot
+            report["steps"]["evolution"] = evo_result
             log.info(
-                "Step 8 — Snapshot: total=%d active=%d avg_fitness=%.1f",
-                snapshot.get("total", 0),
-                snapshot.get("active_count", 0),
-                snapshot.get("avg_fitness", 0),
+                "Step 5 — Evolution gen=%s: created=%d",
+                evo_result.get("generation", "?"),
+                evo_result.get("created", 0),
             )
         except Exception as exc:
-            log.error("Step 8 — Snapshot failed: %s", exc)
-            report["steps"]["snapshot"] = {"error": str(exc)}
+            log.error("Step 5 — Evolution failed: %s", exc)
+            report["steps"]["evolution"] = {"error": str(exc)}
+    else:
+        report["steps"]["evolution"] = {"skipped": True}
+
+    # Step 6: Graveyard knowledge
+    try:
+        with get_db_session() as db:
+            patterns = failure_pattern_analysis(db)
+        report["steps"]["graveyard"] = patterns
+        log.info("Step 6 — Graveyard: total=%d", patterns.get("total", 0))
+    except Exception as exc:
+        log.error("Step 6 — Graveyard analysis failed: %s", exc)
+        report["steps"]["graveyard"] = {"error": str(exc)}
+
+    # Step 7: Research reports
+    try:
+        with get_db_session() as db:
+            research = run_full_research(db)
+        report["steps"]["research"] = research
+        log.info("Step 7 — Research: %d reports generated", len(research.get("reports", [])))
+    except Exception as exc:
+        log.error("Step 7 — Research reports failed: %s", exc)
+        report["steps"]["research"] = {"error": str(exc)}
+
+    # Step 8: Population snapshot
+    try:
+        with get_db_session() as db:
+            snapshot = record_knowledge_snapshot(db)
+        report["steps"]["snapshot"] = snapshot
+        log.info(
+            "Step 8 — Snapshot: total=%d active=%d avg_fitness=%.1f",
+            snapshot.get("total", 0),
+            snapshot.get("active_count", 0),
+            snapshot.get("avg_fitness", 0),
+        )
+    except Exception as exc:
+        log.error("Step 8 — Snapshot failed: %s", exc)
+        report["steps"]["snapshot"] = {"error": str(exc)}
 
     log.info("Daily strategy research loop complete")
     return report

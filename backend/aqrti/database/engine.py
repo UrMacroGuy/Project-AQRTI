@@ -23,13 +23,14 @@ def _build_engine():
         connect_args={"check_same_thread": False},
         echo=False,
     )
-    # Enable WAL mode for better concurrent read performance
+    # Enable WAL mode; FULL synchronous ensures WAL frames are flushed to disk
     @event.listens_for(engine, "connect")
     def set_wal(dbapi_conn, _):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA synchronous=FULL")
+        cursor.execute("PRAGMA wal_autocheckpoint=100")
         cursor.close()
 
     return engine
@@ -75,10 +76,14 @@ def init_db() -> None:
 
 
 def get_db_dependency():
-    """FastAPI dependency that yields a DB session."""
+    """FastAPI dependency that yields a DB session and commits on clean exit."""
     factory = get_session_factory()
     db = factory()
     try:
         yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

@@ -95,6 +95,8 @@ def evolve_population(
         .filter(
             StrategyV2.trade_count    > 5,
             StrategyV2.fitness_score >= MIN_PARENT_FITNESS,
+            StrategyV2.dsl_json.isnot(None),
+            StrategyV2.family.isnot(None),
         )
         .order_by(StrategyV2.fitness_score.desc())
         .limit(50)
@@ -145,21 +147,30 @@ def evolve_population(
                 skipped += 1
                 continue
 
-            # Persist child as candidate
-            upsert_strategy(db, {
-                "strategy_id":  child_id,
-                "name":         child_dsl.name,
-                "family":       child_dsl.family,
-                "generation":   next_gen,
-                "parent_ids":   json.dumps(parent_ids),
-                "dsl_json":     child_dsl.to_json(),
-                "allowed_regimes": json.dumps(child_dsl.allowed_regimes),
-                "status":       "candidate",
-            })
-            save_version(db, child_id, child_dsl.to_json(), version=1,
-                         change_type=operation, change_desc=desc)
+            # Use a savepoint so a failure on this offspring doesn't corrupt the whole session
+            sp = db.begin_nested()
+            try:
+                # Persist child as candidate
+                upsert_strategy(db, {
+                    "strategy_id":  child_id,
+                    "name":         child_dsl.name,
+                    "family":       child_dsl.family,
+                    "generation":   next_gen,
+                    "parent_ids":   json.dumps(parent_ids),
+                    "dsl_json":     child_dsl.to_json(),
+                    "allowed_regimes": json.dumps(child_dsl.allowed_regimes),
+                    "status":       "candidate",
+                })
+                save_version(db, child_id, child_dsl.to_json(), version=1,
+                             change_type=operation, change_desc=desc)
+                sp.commit()
+            except Exception as sp_exc:
+                sp.rollback()
+                log.error("Evolution: failed to persist offspring %d (%s): %s", i, child_id, sp_exc)
+                errors.append(str(sp_exc))
+                continue
 
-            # Backtest
+            # Backtest (has its own db.commit inside)
             bt_result = backtest_and_update(
                 db, child_dsl, start_date=start_date, end_date=end_date
             )
@@ -190,6 +201,10 @@ def evolve_population(
         except Exception as exc:
             log.error("Evolution error on offspring %d: %s", i, exc)
             errors.append(str(exc))
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
     db.commit()
 
