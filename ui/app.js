@@ -523,6 +523,35 @@ const _session = {
   },
 };
 
+function resumeLastSession() {
+  const s = window._pendingSession || _session.load();
+  if (!s || !s.page) return;
+  activatePage(s.page);
+  renderPage(s.page);
+  if (s.filters) {
+    const cf = document.getElementById('opp-conf-filter');
+    const df = document.getElementById('opp-dir-filter');
+    const sf = document.getElementById('str-status-filter');
+    if (cf && s.filters.oppConf)    cf.value = s.filters.oppConf;
+    if (df && s.filters.oppDir)     df.value = s.filters.oppDir;
+    if (sf && s.filters.strStatus)  sf.value = s.filters.strStatus;
+  }
+  const toast = document.getElementById('aqrti-session-toast');
+  if (toast) toast.remove();
+}
+
+function _updateSidebarSessionBtn(session) {
+  const btn  = document.getElementById('sidebar-session-btn');
+  const info = document.getElementById('sidebar-session-info');
+  if (!btn) return;
+  if (!session || !session.page) { btn.style.display = 'none'; return; }
+  const age = Math.round((Date.now() - session.savedAt) / 60000);
+  const ageStr = age < 1 ? 'just now' : age < 60 ? `${age}m ago` : `${Math.round(age/60)}h ago`;
+  const pageName = session.page.toUpperCase().replace(/-/g, ' ');
+  if (info) info.textContent = `${pageName} · ${ageStr}`;
+  btn.style.display = 'block';
+}
+
 function _sessionToast(session) {
   const existing = document.getElementById('aqrti-session-toast');
   if (existing) existing.remove();
@@ -2076,9 +2105,9 @@ window.addEventListener('DOMContentLoaded', () => {
   startTopbarLivePolling(); // overwrites with real-time yfinance prices, refreshes every 30s
   hydrateNewsStrip();       // amber news ticker bar
 
-  // Session restore — show toast for ANY previous page (including overview)
+  // Session restore — sidebar button is always visible, toast appears after 500ms
+  _updateSidebarSessionBtn(prevSession);
   if (prevSession && prevSession.page) {
-    // Show toast after 500ms regardless of backend status (user saved this session locally)
     setTimeout(() => _sessionToast(prevSession), 500);
   }
 });
