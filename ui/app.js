@@ -2553,14 +2553,12 @@ async function hydratePaperPortfolio() {
     _set('pp-an-turnover',   `${fmt(perf.turnoverPct)}%`);
   }
 
-  // ── Strategy badge ──
+  // ── Strategy badge — show which strategy is driving trades ──
   const stratBadge = el('pp-strategy-badge');
-  if (stratBadge && pp && pp.positions && pp.positions.length) {
-    const strat = pp.positions[0].strategyName || pp.positions[0].strategyId;
-    if (strat) stratBadge.textContent = `◈ Strategy: ${strat}`;
-    else stratBadge.textContent = `◈ Best Fitness Strategy`;
-  } else if (stratBadge) {
-    stratBadge.textContent = `◈ No active strategy`;
+  if (stratBadge) {
+    const pos0 = pp && pp.positions && pp.positions[0];
+    const stratName = pos0 && (pos0.strategyName || pos0.strategyId);
+    stratBadge.textContent = stratName ? `◈ Strategy: ${stratName}` : `◈ Best Fitness Strategy (auto-selected)`;
   }
 
   // ── Equity curve chart ──
@@ -2644,6 +2642,7 @@ async function hydratePaperPortfolio() {
           <td class="${pc}"><strong>${ps}₹${Math.round(p.unrealizedPnl || 0).toLocaleString('en-IN')}</strong><br><span style="font-size:0.68rem">${ps}${fmt(p.unrealizedPct)}%</span></td>
           <td class="negative" title="Stop Loss">₹${fmt(p.stopLoss)}<br><span style="font-size:0.65rem">${fmt(slPct)}%</span></td>
           <td class="positive" title="Target">₹${fmt(p.target)}<br><span style="font-size:0.65rem">+${fmt(tpPct)}%</span></td>
+          <td style="font-size:0.68rem;color:var(--accent);white-space:nowrap" title="${p.strategyId || ''}">${p.strategyName || p.strategyId || '<span style="color:var(--text-muted)">—</span>'}</td>
           <td>${confBarHTML(Math.round(p.confidence || 0))}</td>
           <td>${dirBadge(p.direction || 'Bullish')}</td>
         </tr>`;
@@ -2676,6 +2675,7 @@ async function hydratePaperPortfolio() {
           <td class="${pc}"><strong>${ps}${fmtRs(t.grossPnl)}</strong></td>
           <td class="${pc}"><strong>${ps}${fmt(t.grossPnlPct)}%</strong></td>
           <td class="${reasonColor}" style="font-size:0.7rem;letter-spacing:0.03em">${(t.exitReason || '—').replace(/_/g,' ').toUpperCase()}</td>
+          <td style="font-size:0.68rem;color:var(--accent);white-space:nowrap" title="${t.strategyId || ''}">${t.strategyName || t.strategyId || '<span style="color:var(--text-muted)">—</span>'}</td>
           <td>${confBarHTML(Math.round(t.confidence || 0))}</td>
         </tr>`;
       }).join('');

@@ -40,6 +40,8 @@ def open_position(
     expected_return: float = 0.0,
     sector:          str  = None,
     prediction_id:   int  = None,
+    strategy_id:     str  = None,
+    strategy_name:   str  = None,
 ) -> Optional[PaperPosition]:
     """
     Open a new paper position. Idempotent — no-op if symbol already open.
@@ -78,6 +80,8 @@ def open_position(
         stop_loss_price  = round(stop_loss, 4),
         target_price     = round(target, 4),
         prediction_id    = prediction_id,
+        strategy_id      = strategy_id,
+        strategy_name    = strategy_name,
     )
     db.add(pos)
 
@@ -95,6 +99,8 @@ def open_position(
         predicted_return = expected_return,
         is_open          = True,
         prediction_id    = prediction_id,
+        strategy_id      = strategy_id,
+        strategy_name    = strategy_name,
     )
     db.add(trade)
     db.commit()
@@ -194,6 +200,8 @@ def get_open_positions(db: Session) -> list[dict]:
             "expectedReturn":  round(pos.expected_return or 0.0, 4),
             "stopLoss":        round(pos.stop_loss_price or 0.0, 4),
             "target":          round(pos.target_price or 0.0, 4),
+            "strategyId":      pos.strategy_id,
+            "strategyName":    pos.strategy_name,
         })
     return result
 
@@ -227,6 +235,8 @@ def get_trade_history(db: Session, limit: int = 100, symbol: str = None) -> list
             "actualReturn":    round(t.actual_return or 0, 4),
             "exitReason":      t.exit_reason or "—",
             "holdingDays":     t.holding_days or 0,
+            "strategyId":      t.strategy_id,
+            "strategyName":    t.strategy_name,
         }
         for t in trades
     ]

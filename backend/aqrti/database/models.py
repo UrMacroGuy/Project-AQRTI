@@ -554,6 +554,8 @@ class PaperPosition(Base):
     stop_loss_price  = Column(Float,      nullable=True)
     target_price     = Column(Float,      nullable=True)
     prediction_id    = Column(Integer,    ForeignKey("predictions.id"), nullable=True)
+    strategy_id      = Column(String(80), nullable=True)
+    strategy_name    = Column(String(120),nullable=True)
     opened_at        = Column(DateTime,   default=datetime.utcnow)
 
 
@@ -587,6 +589,8 @@ class PaperTrade(Base):
     is_open          = Column(Boolean,    default=True)
     holding_days     = Column(Integer,    nullable=True)
     prediction_id    = Column(Integer,    ForeignKey("predictions.id"), nullable=True)
+    strategy_id      = Column(String(80), nullable=True)
+    strategy_name    = Column(String(120),nullable=True)
     created_at       = Column(DateTime,   default=datetime.utcnow)
 
 

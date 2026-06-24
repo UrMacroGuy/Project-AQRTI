@@ -104,6 +104,8 @@ def execute_rebalance(
             expected_return = cand.get("expectedReturn", 0.0),
             sector          = cand.get("sector"),
             prediction_id   = cand.get("predictionId"),
+            strategy_id     = cand.get("strategyId"),
+            strategy_name   = cand.get("strategyName"),
         )
         if pos:
             portfolio.current_cash -= capital
