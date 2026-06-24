@@ -2951,6 +2951,29 @@ async function activateStrategy(strategyId) {
   }
 }
 
+async function bulkActivateTop5() {
+  try {
+    const data = await apiFetch('/strategies/leaderboard?top_n=10&status=promoted');
+    if (!data || !data.leaderboard) { alert('No promoted strategies to activate.'); return; }
+    const top5 = data.leaderboard.filter(r => r.status === 'promoted').slice(0, 5);
+    if (!top5.length) { alert('No promoted strategies found in top 10.'); return; }
+    if (!confirm(`Activate top ${top5.length} promoted strategies?\n\n${top5.map(r => `  ${r.name} (fitness ${r.fitness_score?.toFixed(1)})`).join('\n')}`)) return;
+    let activated = 0, errors = 0;
+    for (const r of top5) {
+      try {
+        const res = await fetch(`${API_CONFIG.BASE}/strategies/${r.strategy_id}/activate`, { method: 'POST' });
+        if (res.ok) activated++;
+        else errors++;
+      } catch { errors++; }
+    }
+    alert(`Activated ${activated} strategies.${errors ? ` (${errors} failed)` : ''}`);
+    _liveHydrated.delete('strategy');
+    await hydrateStrategyResearch();
+  } catch (e) {
+    alert(`Error: ${e.message}`);
+  }
+}
+
 async function triggerStrategyResearch() {
   const btn = document.getElementById('src-run-research-btn');
   if (btn) { btn.textContent = 'Running…'; btn.disabled = true; }
