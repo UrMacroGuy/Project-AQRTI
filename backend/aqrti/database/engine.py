@@ -8,7 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from aqrti.config.settings import get_settings
@@ -23,14 +23,16 @@ def _build_engine():
         connect_args={"check_same_thread": False},
         echo=False,
     )
-    # Enable WAL mode; FULL synchronous ensures WAL frames are flushed to disk
+
     @event.listens_for(engine, "connect")
     def set_wal(dbapi_conn, _):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA synchronous=FULL")
-        cursor.execute("PRAGMA wal_autocheckpoint=100")
+        # NORMAL is safe with WAL and much faster than FULL
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        # Checkpoint every 50 pages (~200 KB) so the WAL stays small
+        cursor.execute("PRAGMA wal_autocheckpoint=50")
         cursor.close()
 
     return engine
@@ -66,6 +68,15 @@ def get_db() -> Generator[Session, None, None]:
         raise
     finally:
         db.close()
+
+
+def checkpoint_wal() -> None:
+    """Force a full WAL checkpoint — flush all WAL writes into the main DB file."""
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("PRAGMA wal_checkpoint(TRUNCATE)"))
+    except Exception as exc:
+        db_logger.warning("WAL checkpoint failed: %s", exc)
 
 
 def init_db() -> None:

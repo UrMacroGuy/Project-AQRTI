@@ -176,6 +176,75 @@ def _daily_job():
     scheduler_logger.info("=== DAILY PIPELINE COMPLETE ===")
 
 
+def _strategy_loop_job():
+    """
+    Continuous strategy research micro-loop — runs every 5 minutes.
+    Generates new candidates, backtests unscored ones, scores, evolves.
+    Keeps the strategy population growing between daily pipeline runs.
+    """
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+
+    try:
+        from aqrti.database.session import get_db_session
+        from aqrti.database.models import StrategyV2
+        from strategies.strategy_generator import run_generation_cycle
+        from strategies.strategy_backtester import backtest_and_update
+        from strategies.fitness_engine import score_all_strategies
+        from strategies.evolution_engine import evolve_population
+        from strategies.strategy_dsl import StrategyDSL
+        from datetime import date, timedelta
+
+        # Step 1: Generate 20 new candidates
+        with get_db_session() as db:
+            gen = run_generation_cycle(db, n=20, generation=0)
+        new_count = gen.get("persisted", 0)
+
+        # Step 2: Backtest up to 30 unscored strategies
+        end_date   = date.today()
+        start_date = end_date - timedelta(days=365)
+        backtested = 0
+        errors = 0
+        with get_db_session() as db:
+            rows = (
+                db.query(StrategyV2)
+                .filter(
+                    StrategyV2.fitness_score.is_(None),
+                    StrategyV2.status.in_(["candidate", "shadow"]),
+                    StrategyV2.dsl_json.isnot(None),
+                )
+                .limit(30)
+                .all()
+            )
+            for row in rows:
+                try:
+                    dsl = StrategyDSL.from_json(row.dsl_json)
+                    backtest_and_update(db, dsl, start_date=start_date, end_date=end_date)
+                    backtested += 1
+                except Exception as exc:
+                    errors += 1
+                    scheduler_logger.debug("Backtest skip %s: %s", row.strategy_id, exc)
+
+        # Step 3: Score everything
+        with get_db_session() as db:
+            scored = score_all_strategies(db)
+
+        # Step 4: Evolve 10 offspring
+        with get_db_session() as db:
+            evo = evolve_population(db, n_offspring=10)
+
+        scheduler_logger.info(
+            "Strategy loop — generated=%d backtested=%d scored=%d evolved=%d",
+            new_count, backtested,
+            scored.get("scored", 0),
+            evo.get("created", 0),
+        )
+    except Exception as exc:
+        scheduler_logger.error("Strategy loop failed: %s", exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler and _scheduler.running:
@@ -190,6 +259,8 @@ def start_scheduler() -> BackgroundScheduler:
         minute, hour, day, month, day_of_week = "30", "15", "*", "*", "1-5"
 
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
+
+    # Daily full pipeline — runs once after NSE close
     _scheduler.add_job(
         _daily_job,
         trigger=CronTrigger(
@@ -205,9 +276,23 @@ def start_scheduler() -> BackgroundScheduler:
         replace_existing=True,
         misfire_grace_time=3600,
     )
+
+    # Continuous strategy loop — runs every 5 minutes, always
+    _scheduler.add_job(
+        _strategy_loop_job,
+        trigger="interval",
+        minutes=5,
+        id="strategy_loop",
+        name="Strategy Research Loop",
+        replace_existing=True,
+        misfire_grace_time=300,
+        max_instances=1,
+    )
+
     _scheduler.start()
     scheduler_logger.info(
-        "Scheduler started. Daily ingestion cron: %s (IST)", settings.ingest_cron
+        "Scheduler started. Daily cron: %s IST | Strategy loop: every 5 min",
+        settings.ingest_cron,
     )
     return _scheduler
 

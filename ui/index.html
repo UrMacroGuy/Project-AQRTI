@@ -136,18 +136,18 @@
   ═══════════════════════════════════════════════════ -->
   <header class="topbar">
     <div class="topbar-left">
-      <span class="page-breadcrumb" id="page-breadcrumb">Overview</span>
+      <span class="page-breadcrumb" id="page-breadcrumb">OVERVIEW</span>
       <span class="topbar-separator">›</span>
       <span class="topbar-subtitle" id="topbar-subtitle">Command Center</span>
     </div>
     <div class="topbar-center">
       <div class="index-ticker" id="nifty-ticker">
-        <span class="ticker-name">NIFTY 50</span>
+        <span class="ticker-name">NIFTY</span>
         <span class="ticker-value" id="nifty-value">—</span>
         <span class="ticker-change" id="nifty-change">—</span>
       </div>
       <div class="index-ticker" id="banknifty-ticker">
-        <span class="ticker-name">BANKNIFTY</span>
+        <span class="ticker-name">BNKN</span>
         <span class="ticker-value" id="banknifty-value">—</span>
         <span class="ticker-change" id="banknifty-change">—</span>
       </div>
@@ -161,15 +161,49 @@
         <span class="ticker-value" id="usdinr-value">—</span>
         <span class="ticker-change" id="usdinr-change">—</span>
       </div>
+      <button class="cmd-palette-btn" onclick="openCmdPalette()" title="Command Palette (Ctrl+K)">
+        <span>⌘ GO</span>
+        <kbd>Ctrl+K</kbd>
+      </button>
     </div>
     <div class="topbar-right">
       <div class="regime-badge" id="regime-pill">
         <span class="regime-dot"></span>
         <span id="topbar-regime">BULL MARKET</span>
       </div>
-      <div class="topbar-date" id="topbar-date">22 Jun 2026</div>
+      <div class="topbar-date" id="topbar-date">24 Jun 2026</div>
     </div>
   </header>
+
+  <!-- ═══════════════════════════════════════════════════
+       NEWS TICKER STRIP (Bloomberg-style amber bar)
+  ═══════════════════════════════════════════════════ -->
+  <div class="news-strip" id="news-strip">
+    <div class="news-strip-label">◈ HEADLINES</div>
+    <div class="news-strip-scroll">
+      <div class="news-strip-inner" id="news-strip-inner">
+        <span class="news-strip-item"><span class="strip-sym">AQRTI</span><span class="strip-sep">·</span>Intelligence Terminal Active — fetching live data…</span>
+        <span class="news-strip-item"><span class="strip-sym">NSE</span><span class="strip-sep">·</span>Market data loading…</span>
+        <span class="news-strip-item"><span class="strip-sym">AQRTI</span><span class="strip-sep">·</span>Intelligence Terminal Active — fetching live data…</span>
+        <span class="news-strip-item"><span class="strip-sym">NSE</span><span class="strip-sep">·</span>Market data loading…</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════
+       COMMAND PALETTE OVERLAY
+  ═══════════════════════════════════════════════════ -->
+  <div id="cmd-palette-overlay" onclick="closeCmdPalette(event)">
+    <div id="cmd-palette-box" onclick="event.stopPropagation()">
+      <input id="cmd-palette-input" type="text" placeholder="Go to page, run function, search…" autocomplete="off" spellcheck="false" />
+      <div id="cmd-palette-results"></div>
+      <div class="cmd-palette-footer">
+        <span><kbd>↑↓</kbd> navigate</span>
+        <span><kbd>Enter</kbd> select</span>
+        <span><kbd>Esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
 
   <!-- ═══════════════════════════════════════════════════
        MAIN CONTENT AREA
@@ -1129,7 +1163,7 @@
             <span class="panel-title">Confidence Calibration Curve</span>
           </div>
           <div class="panel-body chart-container">
-            <canvas id="calibrationChart"></canvas>
+            <canvas id="lcCalibrationChart"></canvas>
           </div>
         </div>
         <div class="panel">
@@ -2038,12 +2072,12 @@
 
       <!-- Action Buttons -->
       <div class="action-bar" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
-        <button class="btn btn-primary" onclick="runDataSupremacyPipeline()">Run Data Pipeline</button>
-        <button class="btn btn-secondary" onclick="scrapeCorpFilings()">Scrape Corp Filings</button>
-        <button class="btn btn-secondary" onclick="scrapeFiiDii()">Scrape FII/DII</button>
-        <button class="btn btn-secondary" onclick="computeBreadth()">Compute Breadth</button>
-        <button class="btn btn-secondary" onclick="computeSectorRotation()">Compute Sectors</button>
-        <button class="btn btn-secondary" onclick="runQualityChecks()">Run Quality Checks</button>
+        <button class="btn btn-primary" onclick="runDataSupremacyPipeline(this)">Run Data Pipeline</button>
+        <button class="btn btn-secondary" onclick="scrapeCorpFilings(this)">Scrape Corp Filings</button>
+        <button class="btn btn-secondary" onclick="scrapeFiiDii(this)">Scrape FII/DII</button>
+        <button class="btn btn-secondary" onclick="computeBreadth(this)">Compute Breadth</button>
+        <button class="btn btn-secondary" onclick="computeSectorRotation(this)">Compute Sectors</button>
+        <button class="btn btn-secondary" onclick="runQualityChecks(this)">Run Quality Checks</button>
       </div>
 
       <div class="grid-2col">

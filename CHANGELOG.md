@@ -10,6 +10,69 @@
 
 ---
 
+## 2026-06-24 — Blank Page Fixes: Sentiment, Model Center, Opportunities, Data Intelligence
+
+### Files Changed
+- `ui/app.js` — Fixed 5 bugs across 3 hydrator functions + DI action buttons
+- `ui/index.html` — DI action buttons now pass `this` for loading state
+
+### Bug Fixes
+
+**`hydrateSentiment()` — blank when DB has no sentiment data:**
+- Was: KPI cards only populated when `companies.length > 0`. Empty DB = all KPIs stay `—`, charts show nothing
+- Fix: Now reads `data.market.label/score/fearGreed` directly from API response first; falls back to company-derived values only if market object missing
+- Fix: Added empty-state message (`No sentiment data in database`) to company chart, velocity table, and sector chart containers when arrays are empty (instead of silently leaving mock HTML)
+
+**`hydrateModelCenter()` — crash when model task field is null:**
+- Was: `m.task.slice(0,3)` throws TypeError if task is null
+- Fix: `(m.task || 'unk').slice(0,3)` and `m.task || 'model'` in table row
+
+**`hydrateOpportunities()` — null horizon rendered as literal "null":**
+- Was: `${best.horizon || '10d'}` — but `p.horizon` is `null` from DB, `|| '10d'` fallback wasn't used in all places
+- Fix: Best symbol KPI now conditionally appends horizon only if non-null
+
+**Data Intelligence action buttons — no visual feedback:**
+- Was: buttons had no disabled/loading state during async fetch → appeared broken
+- Fix: `_withBtnLoading(btn, fn)` helper added; all 6 DI buttons (Run Pipeline, Scrape Corp Filings, Scrape FII/DII, Compute Breadth, Compute Sectors, Run Quality Checks) now show "Running…" + disabled state while POST is in flight
+
+### What's Still Blank (Data Issue, Not Code)
+- News Intelligence: `news_events` table has 0 rows. Shows "No news articles in database" message. To populate: run ingestion from Research Ops page.
+- Sentiment Center charts: `sentiment_records` table has 0 rows. Shows empty-state message. To populate: run ingestion pipeline.
+
+---
+
+## 2026-06-24 — Bloomberg Terminal Redesign + Bug Fixes
+
+### Files Changed
+- `ui/style.css` — Full Bloomberg-inspired redesign
+- `ui/index.html` — Topbar, news strip, command palette overlay
+- `ui/app.js` — News strip hydration, command palette, chart colors, VIX/USDINR live tickers
+- `backend/aqrti/api/routes/market.py` — Added HTTPException import, India VIX to live map, improved yfinance fallback
+
+### Design Changes (Bloomberg-Inspired)
+- **Color system:** Pure black (`#000`) background, amber (`#ff8c00`) as primary accent — replaces dark navy + teal
+- **Typography:** Full monospace everywhere (JetBrains Mono), tighter font sizes (13px base vs 14px)
+- **Spacing:** Reduced all padding/gaps by ~25% — more information per screen
+- **KPI cards:** No border-radius (2px), no hover lift — flat Bloomberg terminal style
+- **Panel headers:** Amber uppercase labels instead of white mixed-weight
+- **Sidebar:** Compact 210px, amber active state with left border, reduced nav-item height
+- **Topbar:** Black background, amber breadcrumb in uppercase, tighter tickers
+- **Scrollbars:** 3px, amber on hover
+
+### New Features
+- **Bloomberg amber news ticker strip:** 26px amber bar below topbar — scrolls live headlines continuously; hydrated from `/news` API; pauses on hover
+- **Command Palette (Ctrl+K / Cmd+K):** Bloomberg-style "GO" function — type to filter all 15 pages, arrow keys + Enter to navigate; amber overlay
+- **VIX live price:** Added `^INDIAVIX` to `/market/live` backend map — now shows in topbar VIX ticker
+- **USDINR/VIX topbar:** `hydrateTopbarLive()` now populates all 4 topbar tickers (NIFTY, BANKNIFTY, VIX, USDINR) from real-time `/live` endpoint
+
+### Bug Fixes
+- `market.py`: Missing `HTTPException` import added (would crash `/live` on yfinance ImportError)
+- `app.js`: Breadcrumb now uppercase (Bloomberg style)
+- `app.js`: Chart.js global tooltip colors updated to black/amber
+- All chart colors: teal (`#00d4aa`) → amber (`#ff8c00`), indigo → blue (`#00aaff`)
+
+---
+
 ## 2026-06-24 — Git Agent: Auto Commit + Push on File Changes
 
 ### Files Added

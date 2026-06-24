@@ -48,7 +48,7 @@ from aqrti.api.routes import sector_rotation as sector_rotation_router
 from aqrti.api.routes import earnings as earnings_router
 from aqrti.api.routes import data_quality as data_quality_router
 from aqrti.config.settings import get_settings
-from aqrti.database.engine import init_db
+from aqrti.database.engine import init_db, checkpoint_wal
 from aqrti.data.market_data import run_daily_ingestion
 from aqrti.data.scheduler import start_scheduler, stop_scheduler
 from aqrti.utils.logger import api_logger
@@ -79,18 +79,16 @@ def create_app() -> FastAPI:
     async def on_startup():
         api_logger.info("AQRTI Backend starting up …")
         init_db()
+        # Checkpoint any WAL left over from a previous unclean shutdown
+        checkpoint_wal()
         start_scheduler()
         api_logger.info("AQRTI Backend ready on port %d", settings.port)
 
     @app.on_event("shutdown")
     async def on_shutdown():
         stop_scheduler()
-        # Force WAL checkpoint so all committed data is flushed to the main DB file
-        try:
-            from aqrti.database.engine import get_engine
-            get_engine().execute("PRAGMA wal_checkpoint(FULL)")
-        except Exception:
-            pass
+        # Flush all WAL writes into the main DB file before exiting
+        checkpoint_wal()
         api_logger.info("AQRTI Backend shut down.")
 
     # ── Routes ───────────────────────────────────────────────────

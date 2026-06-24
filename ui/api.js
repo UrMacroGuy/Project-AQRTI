@@ -69,8 +69,20 @@ const Api = {
 
   async overview()                      { return apiFetch('/overview'); },
   async market()                        { return apiFetch('/market'); },
+  async topbarPrices() {
+    // Fast: only 4 symbols, server-side cached 4s — ideal for 5s polling
+    const url = `${API_CONFIG.BASE}/market/topbar`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/topbar failed:', e.message); return null; }
+  },
   async livePrices() {
-    // yfinance parallel fetch — give 20s for network latency
+    // Full 8-symbol fetch — used by live-prices page
     const url = `${API_CONFIG.BASE}/market/live`;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 20000);

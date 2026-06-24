@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from aqrti.database.engine import get_db_dependency
@@ -128,52 +128,115 @@ _LIVE_INDEX_MAP = {
     "sensex":    ("^BSESN",   "Sensex"),
     "banknifty": ("^NSEBANK", "Bank Nifty"),
     "niftyit":   ("^CNXIT",   "Nifty IT"),
+    "vix":       ("^INDIAVIX","India VIX"),
     "usdinr":    ("USDINR=X", "USD/INR"),
     "gold":      ("GC=F",     "Gold (USD)"),
     "crude":     ("CL=F",     "Crude Oil"),
 }
 
+# Topbar needs only these 4 — fetched fast, cached for 4 seconds
+_TOPBAR_MAP = {
+    "nifty50":   ("^NSEI",    "Nifty 50"),
+    "banknifty": ("^NSEBANK", "Bank Nifty"),
+    "vix":       ("^INDIAVIX","India VIX"),
+    "usdinr":    ("USDINR=X", "USD/INR"),
+}
 
-@router.get("/live")
-def get_live_prices():
-    """Fetch real-time index/commodity prices via yfinance (parallel)."""
+import time as _time
+_topbar_cache: dict = {"ts": 0, "data": None}
+_TOPBAR_TTL = 4  # seconds — matches 5s frontend poll with 1s buffer
+
+
+def _fetch_price(key: str, sym: str, label: str) -> dict:
+    """Fetch a single live price with fast_info → 1m history fallback."""
     try:
         import yfinance as yf
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        ticker = yf.Ticker(sym)
+        price, prev = None, None
+
+        try:
+            fi = ticker.fast_info
+            price = getattr(fi, "last_price", None)
+            prev  = getattr(fi, "previous_close", None)
+            if price is not None:
+                price = float(price)
+            if prev is not None:
+                prev = float(prev)
+        except Exception:
+            pass
+
+        if price is None:
+            hist = ticker.history(period="2d", interval="1m", auto_adjust=True)
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+                today = hist.index[-1].date()
+                prior = hist[hist.index.date < today]
+                prev = float(prior["Close"].iloc[-1]) if not prior.empty else None
+
+        if price is None:
+            raise ValueError("no price")
+
+        if prev is None:
+            daily = ticker.history(period="5d", interval="1d", auto_adjust=True)
+            if len(daily) >= 2:
+                prev = float(daily["Close"].iloc[-2])
+            elif len(daily) == 1:
+                prev = float(daily["Open"].iloc[-1])
+
+        change     = (price - prev) if prev else 0.0
+        change_pct = (change / prev * 100) if prev else 0.0
+        return {
+            "key":       key,
+            "label":     label,
+            "price":     round(price, 2),
+            "prev":      round(prev, 2) if prev else None,
+            "change":    round(change, 2),
+            "changePct": round(change_pct, 2),
+        }
+    except Exception:
+        return {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None}
+
+
+def _fetch_parallel(index_map: dict, timeout: int = 12) -> list:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    items = list(index_map.items())
+    results_by_key = {}
+    with ThreadPoolExecutor(max_workers=len(items)) as pool:
+        futures = {pool.submit(_fetch_price, key, sym, label): key for key, (sym, label) in items}
+        for fut in as_completed(futures, timeout=timeout):
+            r = fut.result()
+            results_by_key[r["key"]] = r
+    return [results_by_key.get(key, {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None})
+            for key, (sym, label) in items]
+
+
+@router.get("/topbar")
+def get_topbar_prices():
+    """Fast endpoint: only the 4 topbar symbols, server-side cached for 4s."""
+    global _topbar_cache
+    try:
+        import yfinance  # noqa — confirm installed
     except ImportError:
         raise HTTPException(status_code=503, detail="yfinance not installed")
 
-    def _fetch_one(key: str, sym: str, label: str) -> dict:
-        try:
-            info   = yf.Ticker(sym).fast_info
-            price  = getattr(info, "last_price", None)
-            prev   = getattr(info, "previous_close", None)
-            if price is None or prev is None:
-                raise ValueError("no price")
-            change     = price - prev
-            change_pct = (change / prev) * 100 if prev else 0.0
-            return {
-                "key":       key,
-                "label":     label,
-                "price":     round(float(price), 2),
-                "prev":      round(float(prev), 2),
-                "change":    round(float(change), 2),
-                "changePct": round(float(change_pct), 2),
-            }
-        except Exception:
-            return {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None}
+    now = _time.time()
+    if _topbar_cache["data"] and (now - _topbar_cache["ts"]) < _TOPBAR_TTL:
+        return _topbar_cache["data"]
 
-    items = list(_LIVE_INDEX_MAP.items())
-    results_by_key = {}
-    with ThreadPoolExecutor(max_workers=len(items)) as pool:
-        futures = {pool.submit(_fetch_one, key, sym, label): key for key, (sym, label) in items}
-        for fut in as_completed(futures, timeout=12):
-            r = fut.result()
-            results_by_key[r["key"]] = r
+    data = _fetch_parallel(_TOPBAR_MAP, timeout=12)
+    _topbar_cache = {"ts": now, "data": data}
+    return data
 
-    # Return in original order
-    return [results_by_key.get(key, {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None})
-            for key, (sym, label) in items]
+
+@router.get("/live")
+def get_live_prices():
+    """Fetch real-time prices for all 8 symbols via yfinance (parallel)."""
+    try:
+        import yfinance  # noqa
+    except ImportError:
+        raise HTTPException(status_code=503, detail="yfinance not installed")
+
+    return _fetch_parallel(_LIVE_INDEX_MAP, timeout=20)
 
 
 @router.get("/history/{index_name}")

@@ -90,6 +90,61 @@ class CROAgent(AgentBase):
         lessons_learned   = self._extract_lessons(db)
         action_items      = self._build_action_items(critical_findings + high_findings)
 
+        # ── Startup finding when pipeline hasn't run yet ─────────
+        if not today_reports:
+            findings.append({
+                "title":       "Pipeline Not Yet Run Today",
+                "description": (
+                    "No specialist agent reports exist for today. "
+                    "The daily research pipeline has not been triggered yet."
+                ),
+                "evidence":    f"today_reports=0, date={today}",
+                "implication": "Trigger the daily pipeline to generate today's intelligence brief.",
+                "urgency":     "normal",
+                "subcategory": "pipeline_status",
+            })
+
+        # ── Data coverage summary ─────────────────────────────────
+        try:
+            from aqrti.database.models import DailyPrice, IndexData, StrategyV2, ModelVersion, Prediction
+            price_count     = db.query(DailyPrice).count()
+            index_count     = db.query(IndexData).count()
+            strategy_count  = db.query(StrategyV2).count()
+            model_count     = db.query(ModelVersion).count()
+            pred_count      = db.query(Prediction).count()
+
+            tables_with_data = sum([
+                price_count > 0,
+                index_count > 0,
+                strategy_count > 0,
+                model_count > 0,
+                pred_count > 0,
+            ])
+            coverage_urgency = "high" if price_count == 0 else "low"
+            findings.append({
+                "title":       f"Data Coverage: {tables_with_data}/5 core tables populated",
+                "description": (
+                    f"daily_prices={price_count:,} rows, "
+                    f"index_data={index_count:,} rows, "
+                    f"strategies_v2={strategy_count}, "
+                    f"model_versions={model_count}, "
+                    f"predictions={pred_count}."
+                ),
+                "evidence":    (
+                    f"prices={price_count}, index={index_count}, "
+                    f"strategies={strategy_count}, models={model_count}, predictions={pred_count}"
+                ),
+                "implication": (
+                    "Core price data is populated — analysis pipeline is operational."
+                    if price_count > 0 else
+                    "No price data — run data ingestion before analysis can proceed."
+                ),
+                "urgency":     coverage_urgency,
+                "subcategory": "data_coverage",
+            })
+        except Exception as exc:
+            log.debug("Data coverage check failed: %s", exc)
+
         # ── Recurring themes (cross-agent) ───────────────────────
         themes = get_recurring_themes(db, days=3)
         if themes:
@@ -179,9 +234,14 @@ class CROAgent(AgentBase):
             parts.append(market_rep.summary)
         if news_rep and news_rep.summary:
             parts.append(news_rep.summary)
-        regime_changes = [f for f in findings if "regime" in f.subcategory.lower() if f.subcategory]
+        regime_changes = [
+            f for f in findings
+            if f.subcategory and "regime" in f.subcategory.lower()
+        ]
         if regime_changes:
             parts.append(f"[!] Regime change detected: {regime_changes[0].title}")
+        if not reports:
+            parts.append("No specialist agent reports available — pipeline has not run today.")
         return " ".join(parts)
 
     def _extract_opportunities(self, findings) -> list[str]:

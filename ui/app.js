@@ -9,10 +9,17 @@
 // ═══════════════════════════════════════════════════════════════
 // CHART.JS GLOBAL DEFAULTS — Dark Terminal Theme
 // ═══════════════════════════════════════════════════════════════
-Chart.defaults.color          = '#94a3b8';
-Chart.defaults.borderColor    = 'rgba(255,255,255,0.08)';
+// Bloomberg black/amber palette
+Chart.defaults.color          = '#444444';
+Chart.defaults.borderColor    = '#1a1a1a';
 Chart.defaults.font.family    = "'JetBrains Mono', monospace";
-Chart.defaults.font.size      = 11;
+Chart.defaults.font.size      = 10;
+Chart.defaults.plugins.tooltip.backgroundColor = '#0d0d0d';
+Chart.defaults.plugins.tooltip.borderColor     = '#2a2a2a';
+Chart.defaults.plugins.tooltip.borderWidth     = 1;
+Chart.defaults.plugins.tooltip.titleColor      = '#ff8c00';
+Chart.defaults.plugins.tooltip.bodyColor       = '#888888';
+Chart.defaults.plugins.legend.labels.color     = '#444444';
 
 // ═══════════════════════════════════════════════════════════════
 // CHART REGISTRY — prevents "Canvas already in use" errors
@@ -447,17 +454,21 @@ updateClock();
 // NAVIGATION
 // ═══════════════════════════════════════════════════════════════
 const pageSubtitles = {
-  overview:         'Command Center',
-  market:           'Market Intelligence',
-  'live-prices':    'Live Market Prices',
-  opportunity:      'Opportunity Rankings',
-  news:             'News Intelligence',
-  sentiment:        'Sentiment Center',
-  strategy:         'Strategy Lab',
-  model:            'Model Center',
-  learning:         'Learning Center',
-  risk:             'Risk Center',
-  paper:            'Paper Portfolio',
+  overview:            'Command Center',
+  market:              'Market Intelligence',
+  'live-prices':       'Live Market Prices',
+  opportunity:         'Opportunity Rankings',
+  news:                'News Intelligence',
+  sentiment:           'Sentiment Center',
+  strategy:            'Strategy Lab',
+  model:               'Model Center',
+  learning:            'Learning Center',
+  risk:                'Risk Center',
+  paper:               'Paper Portfolio',
+  agents:              'Research Operations',
+  vault:               'Intelligence Vault',
+  'intelligence-lab':  'Historical Intelligence',
+  'data-intelligence': 'Data Intelligence',
 };
 
 function activatePage(pageId) {
@@ -467,9 +478,241 @@ function activatePage(pageId) {
   document.querySelectorAll('.page').forEach(page => {
     page.classList.toggle('active', page.id === `page-${pageId}`);
   });
-  const name = pageId.charAt(0).toUpperCase() + pageId.slice(1);
+  // Bloomberg-style: breadcrumb in uppercase
+  const name = pageId.toUpperCase().replace(/-/g, ' ');
   if (el('page-breadcrumb')) el('page-breadcrumb').textContent = name;
   if (el('topbar-subtitle')) el('topbar-subtitle').textContent = pageSubtitles[pageId] || '';
+
+  // Persist current page to session
+  _session.save(pageId);
+}
+
+// ══════════════════════════════════════════════════════════════
+// SESSION PERSISTENCE — survive dev server restarts
+// ══════════════════════════════════════════════════════════════
+const _session = {
+  KEY: 'aqrti_session',
+
+  save(pageId) {
+    const filters = {};
+    const confF = document.getElementById('opp-conf-filter');
+    const dirF  = document.getElementById('opp-dir-filter');
+    if (confF) filters.oppConf = confF.value;
+    if (dirF)  filters.oppDir  = dirF.value;
+    const strF = document.getElementById('str-status-filter');
+    if (strF)  filters.strStatus = strF.value;
+
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify({
+        page:      pageId,
+        filters,
+        savedAt:   Date.now(),
+      }));
+    } catch (_) {}
+  },
+
+  load() {
+    try {
+      const raw = localStorage.getItem(this.KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  },
+
+  clear() {
+    try { localStorage.removeItem(this.KEY); } catch (_) {}
+  },
+};
+
+function _sessionToast(session) {
+  const existing = document.getElementById('aqrti-session-toast');
+  if (existing) existing.remove();
+
+  const age = Math.round((Date.now() - session.savedAt) / 60000);
+  const ageStr = age < 1 ? 'just now' : age < 60 ? `${age}m ago` : `${Math.round(age/60)}h ago`;
+  const pageName = (session.page || 'overview').toUpperCase().replace(/-/g, ' ');
+
+  const toast = document.createElement('div');
+  toast.id = 'aqrti-session-toast';
+  toast.style.cssText = `
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    z-index:9999; background:rgba(10,14,20,0.97);
+    border:1px solid rgba(255,140,0,0.35); border-radius:8px;
+    padding:14px 20px; display:flex; align-items:center; gap:14px;
+    font-family:'JetBrains Mono',monospace; font-size:0.72rem;
+    box-shadow:0 4px 32px rgba(0,0,0,0.6); min-width:340px;
+  `;
+  toast.innerHTML = `
+    <span style="color:var(--accent,#ff8c00);font-size:1rem">◈</span>
+    <div style="flex:1">
+      <div style="color:#e2e8f0;font-weight:600;letter-spacing:0.05em">SESSION FOUND</div>
+      <div style="color:rgba(255,255,255,0.45);margin-top:2px">
+        Last on <span style="color:var(--accent,#ff8c00)">${pageName}</span> · saved ${ageStr}
+      </div>
+    </div>
+    <button onclick="(function(){
+      const s=_session.load();
+      if(s){activatePage(s.page);renderPage(s.page);
+        if(s.filters){
+          const cf=document.getElementById('opp-conf-filter');
+          const df=document.getElementById('opp-dir-filter');
+          const sf=document.getElementById('str-status-filter');
+          if(cf&&s.filters.oppConf)cf.value=s.filters.oppConf;
+          if(df&&s.filters.oppDir)df.value=s.filters.oppDir;
+          if(sf&&s.filters.strStatus)sf.value=s.filters.strStatus;
+        }
+      }
+      document.getElementById('aqrti-session-toast').remove();
+    })()"
+      style="background:rgba(255,140,0,0.12);border:1px solid rgba(255,140,0,0.4);
+             color:var(--accent,#ff8c00);padding:6px 14px;border-radius:5px;
+             cursor:pointer;font-family:inherit;font-size:0.7rem;letter-spacing:0.06em;
+             white-space:nowrap">
+      RESUME ›
+    </button>
+    <button onclick="document.getElementById('aqrti-session-toast').remove()"
+      style="background:transparent;border:none;color:rgba(255,255,255,0.3);
+             cursor:pointer;font-size:1rem;padding:0 2px;line-height:1">✕</button>
+  `;
+  document.body.appendChild(toast);
+
+  // Auto-dismiss after 12s
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 12000);
+}
+
+// ══════════════════════════════════════════════════════════════
+// COMMAND PALETTE — Bloomberg-style GO function
+// ══════════════════════════════════════════════════════════════
+const CMD_PAGES = [
+  { icon: '◈', label: 'Overview',              hint: 'Command Center',        page: 'overview' },
+  { icon: '◎', label: 'Market Intelligence',   hint: 'Indices · Sectors',     page: 'market' },
+  { icon: '◉', label: 'Live Prices',           hint: 'Real-time quotes',      page: 'live-prices' },
+  { icon: '◆', label: 'Opportunity Rankings',  hint: 'Signals · Confidence',  page: 'opportunity' },
+  { icon: '◉', label: 'News Intelligence',     hint: 'Headlines · Sentiment', page: 'news' },
+  { icon: '◐', label: 'Sentiment Center',      hint: 'Fear/Greed · Scores',   page: 'sentiment' },
+  { icon: '▣', label: 'Strategy Research',     hint: 'Leaderboard · Replay',  page: 'strategy' },
+  { icon: '▦', label: 'Model Center',          hint: 'ML Registry · AUC',     page: 'model' },
+  { icon: '▷', label: 'Learning Center',       hint: 'Knowledge · Failures',  page: 'learning' },
+  { icon: '◎', label: 'Research Ops',          hint: '7 Agents · Daily Brief',page: 'agents' },
+  { icon: '▩', label: 'Intelligence Vault',    hint: 'Replay · Archive',      page: 'vault' },
+  { icon: '⬟', label: 'Historical Intelligence',hint: 'Regimes · Meta-Learn', page: 'intelligence-lab' },
+  { icon: '◫', label: 'Data Intelligence',     hint: 'FII/DII · Options',     page: 'data-intelligence' },
+  { icon: '◈', label: 'Paper Portfolio',       hint: 'Positions · P&L',       page: 'paper' },
+  { icon: '⬡', label: 'Risk Center',           hint: 'VaR · Drawdown · CB',   page: 'risk' },
+];
+
+let _cmdSelectedIdx = 0;
+let _cmdFiltered = [...CMD_PAGES];
+
+function openCmdPalette() {
+  const overlay = document.getElementById('cmd-palette-overlay');
+  const input   = document.getElementById('cmd-palette-input');
+  if (!overlay) return;
+  _cmdFiltered = [...CMD_PAGES];
+  _cmdSelectedIdx = 0;
+  overlay.classList.add('active');
+  renderCmdResults('');
+  setTimeout(() => input && input.focus(), 50);
+}
+
+function closeCmdPalette(e) {
+  const overlay = document.getElementById('cmd-palette-overlay');
+  if (overlay) overlay.classList.remove('active');
+}
+
+function renderCmdResults(query) {
+  const container = document.getElementById('cmd-palette-results');
+  if (!container) return;
+  const q = query.trim().toLowerCase();
+  _cmdFiltered = q
+    ? CMD_PAGES.filter(p => p.label.toLowerCase().includes(q) || p.hint.toLowerCase().includes(q) || p.page.includes(q))
+    : [...CMD_PAGES];
+  if (_cmdSelectedIdx >= _cmdFiltered.length) _cmdSelectedIdx = 0;
+  container.innerHTML = _cmdFiltered.map((p, i) => `
+    <div class="cmd-result-item${i === _cmdSelectedIdx ? ' selected' : ''}" data-idx="${i}" onclick="cmdSelectIdx(${i})">
+      <span class="cmd-result-icon">${p.icon}</span>
+      <span class="cmd-result-label">${p.label}</span>
+      <span class="cmd-result-hint">${p.hint}</span>
+    </div>`).join('');
+}
+
+function cmdSelectIdx(idx) {
+  _cmdSelectedIdx = idx;
+  const item = _cmdFiltered[idx];
+  if (item) {
+    closeCmdPalette();
+    renderPage(item.page);
+  }
+}
+
+// Keyboard wiring for command palette
+document.addEventListener('keydown', (e) => {
+  const overlay = document.getElementById('cmd-palette-overlay');
+  const isOpen  = overlay && overlay.classList.contains('active');
+
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    isOpen ? closeCmdPalette() : openCmdPalette();
+    return;
+  }
+  if (!isOpen) return;
+
+  if (e.key === 'Escape') { closeCmdPalette(); return; }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _cmdSelectedIdx = Math.min(_cmdSelectedIdx + 1, _cmdFiltered.length - 1);
+    renderCmdResults(document.getElementById('cmd-palette-input')?.value || '');
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _cmdSelectedIdx = Math.max(_cmdSelectedIdx - 1, 0);
+    renderCmdResults(document.getElementById('cmd-palette-input')?.value || '');
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    cmdSelectIdx(_cmdSelectedIdx);
+    return;
+  }
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('cmd-palette-input');
+  if (input) {
+    input.addEventListener('input', (e) => {
+      _cmdSelectedIdx = 0;
+      renderCmdResults(e.target.value);
+    });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+// NEWS TICKER STRIP — Bloomberg amber bar hydration
+// ══════════════════════════════════════════════════════════════
+async function hydrateNewsStrip() {
+  const inner = document.getElementById('news-strip-inner');
+  if (!inner) return;
+
+  const data = await Api.news({ limit: 20, hours: 48 });
+  if (!data || !Array.isArray(data) || !data.length) return;
+
+  // Build items from live news headlines
+  const items = data.slice(0, 16).map(n => {
+    const sym  = n.symbol || n.entities?.[0] || 'NSE';
+    const headline = (n.headline || n.title || '').slice(0, 90);
+    const sent = n.sentiment_label || n.sentimentLabel || '';
+    const sentIcon = sent === 'positive' ? '▲' : sent === 'negative' ? '▼' : '◆';
+    return `<span class="news-strip-item"><span class="strip-sym">${sym}</span><span class="strip-sep">·</span>${sentIcon} ${headline}</span>`;
+  });
+
+  // Double for seamless loop
+  const html = items.join('') + items.join('');
+  inner.innerHTML = html;
+
+  // Adjust animation speed based on content length
+  const totalLen = data.slice(0, 16).reduce((a, n) => a + (n.headline || '').length, 0);
+  const duration = Math.max(40, Math.min(90, totalLen / 3));
+  inner.style.animationDuration = `${duration}s`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -498,15 +741,15 @@ function renderOverview() {
       labels: DataStore.equityCurve.labels,
       datasets: [{
         data: DataStore.equityCurve.values,
-        borderColor: '#00d4aa',
+        borderColor: '#ff8c00',
         borderWidth: 2,
         pointRadius: 0,
         tension: 0.3,
         fill: true,
         backgroundColor: (ctx) => {
           const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-          gradient.addColorStop(0, 'rgba(0,212,170,0.18)');
-          gradient.addColorStop(1, 'rgba(0,212,170,0.00)');
+          gradient.addColorStop(0, 'rgba(255,140,0,0.14)');
+          gradient.addColorStop(1, 'rgba(255,140,0,0.00)');
           return gradient;
         },
       }],
@@ -558,7 +801,7 @@ function renderMarket() {
         data: sect.map(s => s.score),
         backgroundColor: sect.map(s =>
           s.score >= 80 ? 'rgba(34,197,94,0.7)'
-          : s.score >= 60 ? 'rgba(0,212,170,0.6)'
+          : s.score >= 60 ? 'rgba(255,140,0,0.7)'
           : s.score >= 45 ? 'rgba(245,158,11,0.6)'
           : 'rgba(239,68,68,0.6)'
         ),
@@ -660,7 +903,7 @@ function renderOpportunities() {
       labels: ['< 60 (Ignore)', '60–69 (Weak)', '70–79 (Good)', '80+ (Strong)'],
       datasets: [{
         data: confBuckets,
-        backgroundColor: ['rgba(239,68,68,0.7)', 'rgba(245,158,11,0.7)', 'rgba(0,212,170,0.6)', 'rgba(34,197,94,0.7)'],
+        backgroundColor: ['rgba(239,68,68,0.7)', 'rgba(245,158,11,0.7)', 'rgba(255,140,0,0.7)', 'rgba(34,197,94,0.7)'],
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
       }],
@@ -686,7 +929,7 @@ function renderOpportunities() {
       labels: Object.keys(stratCount),
       datasets: [{
         data: Object.values(stratCount),
-        backgroundColor: ['rgba(0,212,170,0.7)','rgba(59,130,246,0.7)','rgba(34,197,94,0.7)','rgba(245,158,11,0.7)','rgba(239,68,68,0.6)'],
+        backgroundColor: ['rgba(255,140,0,0.8)','rgba(0,170,255,0.7)','rgba(34,197,94,0.7)','rgba(245,158,11,0.7)','rgba(239,68,68,0.6)'],
         borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.08)',
       }],
@@ -773,13 +1016,13 @@ function renderNews() {
       datasets: [{
         label: 'Avg Sentiment',
         data: sentValues,
-        borderColor: '#00d4aa',
+        borderColor: '#ff8c00',
         borderWidth: 2,
         pointRadius: 2,
-        pointBackgroundColor: '#00d4aa',
+        pointBackgroundColor: '#ff8c00',
         tension: 0.4,
         fill: true,
-        backgroundColor: 'rgba(0,212,170,0.08)',
+        backgroundColor: 'rgba(255,140,0,0.06)',
       }],
     },
     options: {
@@ -808,7 +1051,7 @@ function renderSentiment() {
         data: top.map(s => s.score),
         backgroundColor: top.map(s =>
           s.score >= 70 ? 'rgba(34,197,94,0.7)'
-          : s.score >= 50 ? 'rgba(0,212,170,0.6)'
+          : s.score >= 50 ? 'rgba(255,140,0,0.7)'
           : 'rgba(239,68,68,0.6)'
         ),
         borderRadius: 4,
@@ -832,9 +1075,9 @@ function renderSentiment() {
       datasets: [{
         label: 'Sector Sentiment',
         data: DataStore.sentimentSector.map(s => s.score),
-        borderColor: '#00d4aa',
-        backgroundColor: 'rgba(0,212,170,0.12)',
-        pointBackgroundColor: '#00d4aa',
+        borderColor: '#ff8c00',
+        backgroundColor: 'rgba(255,140,0,0.08)',
+        pointBackgroundColor: '#ff8c00',
         borderWidth: 1.5,
         pointRadius: 3,
       }],
@@ -912,7 +1155,7 @@ function renderStrategy() {
   const popCounts = {};
   DataStore.strategies.forEach(s => { popCounts[s.status] = (popCounts[s.status] || 0) + 1; });
   const popLabels = { institutional: '★ Institutional', production: 'Production', paper: 'Paper', shadow: 'Shadow' };
-  const popColors = ['rgba(0,212,170,0.8)', 'rgba(34,197,94,0.7)', 'rgba(245,158,11,0.7)', 'rgba(59,130,246,0.7)'];
+  const popColors = ['rgba(255,140,0,0.85)', 'rgba(34,197,94,0.7)', 'rgba(245,158,11,0.7)', 'rgba(0,170,255,0.7)'];
 
   ChartRegistry.create('strategyPopChart', {
     type: 'doughnut',
@@ -943,10 +1186,10 @@ function renderStrategy() {
         data: scatter,
         backgroundColor: scatter.map((_, i) => {
           const st = DataStore.strategies[i].status;
-          return st === 'institutional' ? 'rgba(0,212,170,0.9)'
+          return st === 'institutional' ? 'rgba(255,140,0,0.9)'
             : st === 'production'  ? 'rgba(34,197,94,0.7)'
             : st === 'paper'       ? 'rgba(245,158,11,0.7)'
-            : 'rgba(59,130,246,0.7)';
+            : 'rgba(0,170,255,0.7)';
         }),
         pointRadius: 7,
         pointHoverRadius: 10,
@@ -987,7 +1230,7 @@ function renderModel() {
         data: prodModels.map(m => m.accuracy),
         backgroundColor: prodModels.map(m =>
           m.accuracy >= 70 ? 'rgba(34,197,94,0.7)'
-          : m.accuracy >= 60 ? 'rgba(0,212,170,0.6)'
+          : m.accuracy >= 60 ? 'rgba(255,140,0,0.7)'
           : 'rgba(245,158,11,0.6)'
         ),
         borderRadius: 4,
@@ -1025,10 +1268,10 @@ function renderModel() {
         {
           label: 'AQRTI Ensemble',
           data: actualCalib,
-          borderColor: '#00d4aa',
+          borderColor: '#ff8c00',
           borderWidth: 2,
           pointRadius: 4,
-          pointBackgroundColor: '#00d4aa',
+          pointBackgroundColor: '#ff8c00',
           tension: 0.2,
           fill: false,
         },
@@ -1119,12 +1362,12 @@ async function renderLearning() {
       datasets: [{
         label: 'Intelligence Score',
         data: growthVals.length ? growthVals : DataStore.learning.knowledgeHistory.values,
-        borderColor: '#00d4aa',
+        borderColor: '#ff8c00',
         borderWidth: 2,
         pointRadius: 0,
         tension: 0.4,
         fill: true,
-        backgroundColor: 'rgba(0,212,170,0.10)',
+        backgroundColor: 'rgba(255,140,0,0.08)',
       }],
     },
     options: {
@@ -1154,9 +1397,9 @@ async function renderLearning() {
           comp.calibrationQuality ?? 50,
           comp.featureQuality     ?? 50,
         ],
-        borderColor: '#00d4aa',
-        backgroundColor: 'rgba(0,212,170,0.15)',
-        pointBackgroundColor: '#00d4aa',
+        borderColor: '#ff8c00',
+        backgroundColor: 'rgba(255,140,0,0.10)',
+        pointBackgroundColor: '#ff8c00',
         borderWidth: 1.5,
       }],
     },
@@ -1251,7 +1494,7 @@ async function renderLearning() {
     const bkts    = calibration.buckets.filter(b => b.accuracy !== null);
     const avgConfs = bkts.map(b => b.avg_confidence);
     const accs     = bkts.map(b => b.accuracy);
-    ChartRegistry.create('calibrationChart', {
+    ChartRegistry.create('lcCalibrationChart', {
       type: 'line',
       data: {
         labels: bkts.map(b => b.bucket),
@@ -1267,7 +1510,7 @@ async function renderLearning() {
           {
             label: 'Actual Accuracy',
             data: accs,
-            borderColor: '#00d4aa',
+            borderColor: '#ff8c00',
             borderWidth: 1.5,
             pointRadius: 4,
             borderDash: [4, 3],
@@ -1301,12 +1544,12 @@ async function renderLearning() {
     const models  = Object.entries(drift.by_model || {});
     driftBody.innerHTML = `
       <div style="margin-bottom:0.75rem">
-        <span style="color:#f59e0b;font-weight:600">${flagged} model(s) flagged</span>
+        <span style="color:#ff8c00;font-weight:600">${flagged} model(s) flagged</span>
         <span style="color:rgba(255,255,255,0.4);font-size:0.75rem;margin-left:0.5rem">${drift.total_snapshots || 0} snapshots over ${drift.days}d</span>
       </div>` +
       models.slice(0, 6).map(([key, snaps]) => {
         const latest = snaps[0] || {};
-        const dc     = latest.drift_flag ? '#ef4444' : '#00d4aa';
+        const dc     = latest.drift_flag ? '#ff3333' : '#00cc66';
         return `<div class="improvement-item">
           <div class="improvement-dot" style="background:${dc}"></div>
           <div>
@@ -1315,7 +1558,7 @@ async function renderLearning() {
               Acc: ${latest.accuracy?.toFixed(1) ?? '—'}%
               IC: ${latest.ic?.toFixed(4) ?? '—'}
               Drift: ${latest.drift_pct?.toFixed(1) ?? '0'}%
-              ${latest.drift_flag ? ' <span style="color:#ef4444">DRIFT FLAGGED</span>' : ''}
+              ${latest.drift_flag ? ' <span style="color:#ff3333">DRIFT FLAGGED</span>' : ''}
             </div>
           </div>
         </div>`;
@@ -1330,7 +1573,7 @@ async function renderLearning() {
     const features = featIntel?.features || [];
     if (features.length) {
       featureBody.innerHTML = features.slice(0, 10).map(f => {
-        const decColor = { none: '#00d4aa', mild: '#f59e0b', moderate: '#f97316', severe: '#ef4444' };
+        const decColor = { none: '#00cc66', mild: '#ffcc00', moderate: '#ff8c00', severe: '#ff3333' };
         return `<tr>
           <td>${f.rank}</td>
           <td><strong>${f.feature_name}</strong></td>
@@ -1384,7 +1627,7 @@ function renderRisk() {
       datasets: [{
         data: exp.map(e => e.weight),
         backgroundColor: [
-          'rgba(0,212,170,0.7)', 'rgba(34,197,94,0.6)', 'rgba(59,130,246,0.6)',
+          'rgba(255,140,0,0.8)', 'rgba(34,197,94,0.6)', 'rgba(59,130,246,0.6)',
           'rgba(245,158,11,0.6)', 'rgba(239,68,68,0.6)', 'rgba(147,51,234,0.6)',
           'rgba(236,72,153,0.6)', 'rgba(255,255,255,0.1)',
         ],
@@ -1505,8 +1748,18 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
 
 // ── News Intelligence — live hydration ───────────────────────
 async function hydrateNews() {
-  const data = await Api.news({ limit: 50, hours: 72 });
-  if (!data || !Array.isArray(data)) return;
+  const data = await Api.news({ limit: 50, hours: 168 });
+  const _setKpi = (id, val) => { const e = el(id); if (e) e.textContent = val; };
+
+  if (!data || !Array.isArray(data) || !data.length) {
+    _setKpi('news-kpi-count', '0');
+    _setKpi('news-kpi-high-impact', '0');
+    _setKpi('news-kpi-entities', '0');
+    const msg = '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">No news articles in database.<br>Run pipeline from Research Ops → trigger ingestion.</div>';
+    const hi = el('news-high-impact'); if (hi) hi.innerHTML = msg;
+    const feed = el('news-feed'); if (feed) feed.innerHTML = msg;
+    return;
+  }
 
   // KPI cards
   const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
@@ -1603,13 +1856,13 @@ async function hydrateNews() {
         datasets: [{
           label: 'Avg Sentiment',
           data: sentVals,
-          borderColor: '#00d4aa',
+          borderColor: '#ff8c00',
           borderWidth: 2,
           pointRadius: 2,
-          pointBackgroundColor: '#00d4aa',
+          pointBackgroundColor: '#ff8c00',
           tension: 0.4,
           fill: true,
-          backgroundColor: 'rgba(0,212,170,0.08)',
+          backgroundColor: 'rgba(255,140,0,0.06)',
           spanGaps: true,
         }],
       },
@@ -1630,33 +1883,42 @@ async function hydrateSentiment() {
   const data = await Api.sentiment();
   if (!data) return;
 
-  const { companies, sectors } = data;
+  const { companies = [], sectors = [], market } = data;
   const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
 
-  // KPI cards
-  if (companies && companies.length) {
-    const sorted = [...companies].sort((a, b) => (b.score || 0) - (a.score || 0));
+  // KPI cards — prefer data.market fields, fall back to deriving from companies
+  if (market && market.label) {
+    _set('sent-kpi-market', market.label);
+    const score = market.score != null ? market.score : '—';
+    _set('sent-kpi-market-sub', score !== '—' ? `Score: ${Math.round(score)} / 100` : 'No data yet');
+    const fg = market.fearGreed != null ? market.fearGreed : (market.score != null ? Math.round(market.score) : null);
+    if (fg != null) {
+      const zone = fg >= 75 ? 'Extreme Greed' : fg >= 60 ? 'Greed Zone' : fg >= 40 ? 'Neutral Zone' : fg >= 25 ? 'Fear Zone' : 'Extreme Fear';
+      _set('sent-kpi-fear-greed', fg);
+      _set('sent-kpi-fear-greed-sub', zone);
+    }
+  } else if (companies.length) {
     const avgScore = companies.reduce((s, c) => s + (c.score || 0), 0) / companies.length;
-
-    // Market sentiment — derive from avg score
     const sentiment = avgScore >= 70 ? 'Optimistic' : avgScore >= 50 ? 'Neutral' : 'Pessimistic';
     _set('sent-kpi-market', sentiment);
     _set('sent-kpi-market-sub', `Score: ${avgScore.toFixed(0)} / 100`);
-
-    // Fear & greed proxy from avg score
     const fearGreed = Math.round(avgScore);
     const zone = fearGreed >= 75 ? 'Extreme Greed' : fearGreed >= 60 ? 'Greed Zone' : fearGreed >= 40 ? 'Neutral Zone' : fearGreed >= 25 ? 'Fear Zone' : 'Extreme Fear';
     _set('sent-kpi-fear-greed', fearGreed);
     _set('sent-kpi-fear-greed-sub', zone);
+  }
 
-    // Strongest & weakest
+  if (companies.length) {
+    const sorted = [...companies].sort((a, b) => (b.score || 0) - (a.score || 0));
     const best = sorted[0];
     const worst = sorted[sorted.length - 1];
     if (best) { _set('sent-kpi-best', best.entity || '—'); _set('sent-kpi-best-score', `Score: ${Math.round(best.score || 0)}`); }
     if (worst) { _set('sent-kpi-worst', worst.entity || '—'); _set('sent-kpi-worst-score', `Score: ${Math.round(worst.score || 0)}`); }
   }
 
-  if (companies && companies.length) {
+  const emptyMsg = '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">No sentiment data in database.<br>Run pipeline from Research Ops → trigger ingestion.</div>';
+
+  if (companies.length) {
     const top = companies.slice(0, 10);
     ChartRegistry.create('companySentimentChart', {
       type: 'bar',
@@ -1667,7 +1929,7 @@ async function hydrateSentiment() {
           data: top.map(s => s.score),
           backgroundColor: top.map(s =>
             s.score >= 70 ? 'rgba(34,197,94,0.7)'
-            : s.score >= 50 ? 'rgba(0,212,170,0.6)'
+            : s.score >= 50 ? 'rgba(255,140,0,0.7)'
             : 'rgba(239,68,68,0.6)'
           ),
           borderRadius: 4,
@@ -1700,6 +1962,11 @@ async function hydrateSentiment() {
           </div>`;
       }).join('');
     }
+  } else {
+    const compCanvas = el('companySentimentChart');
+    if (compCanvas && compCanvas.parentElement) compCanvas.parentElement.innerHTML = emptyMsg;
+    const velBody = el('sentiment-velocity-body');
+    if (velBody) velBody.innerHTML = emptyMsg;
   }
 
   if (sectors && sectors.length) {
@@ -1710,9 +1977,9 @@ async function hydrateSentiment() {
         datasets: [{
           label: 'Sector Sentiment',
           data: sectors.map(s => s.score),
-          borderColor: '#00d4aa',
-          backgroundColor: 'rgba(0,212,170,0.12)',
-          pointBackgroundColor: '#00d4aa',
+          borderColor: '#ff8c00',
+          backgroundColor: 'rgba(255,140,0,0.08)',
+          pointBackgroundColor: '#ff8c00',
           borderWidth: 1.5, pointRadius: 3,
         }],
       },
@@ -1722,6 +1989,9 @@ async function hydrateSentiment() {
         scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, backdropColor: 'transparent' }, grid: { color: 'rgba(255,255,255,0.06)' }, angleLines: { color: 'rgba(255,255,255,0.06)' } } },
       },
     });
+  } else {
+    const secCanvas = el('sectorSentimentChart');
+    if (secCanvas && secCanvas.parentElement) secCanvas.parentElement.innerHTML = emptyMsg;
   }
 }
 
@@ -1767,8 +2037,18 @@ window.addEventListener('DOMContentLoaded', () => {
   hydrateOverview();
   hydrateOverviewPredictions();
   hydratePaperPortfolioStrip();
-  hydrateMarket();  // populates topbar NIFTY/BANKNIFTY tickers
+  hydrateMarket();          // topbar from DB (instant, yesterday's close)
   hydrateMarketRegime();
+  startTopbarLivePolling(); // overwrites with real-time yfinance prices, refreshes every 30s
+  hydrateNewsStrip();       // amber news ticker bar
+
+  // Session restore — show toast if a previous session exists and backend is live
+  const prevSession = _session.load();
+  if (prevSession && prevSession.page && prevSession.page !== 'overview') {
+    Api.checkBackend().then(alive => {
+      if (alive) _sessionToast(prevSession);
+    });
+  }
 });
 
 // ── Opportunity Rankings — live prediction hydration ─────────
@@ -1787,7 +2067,7 @@ async function hydrateOpportunities() {
   if (best) {
     const ret = best.expectedReturn;
     _set('opp-kpi-best-return', ret != null ? (ret >= 0 ? `+${ret.toFixed(2)}%` : `${ret.toFixed(2)}%`) : '—');
-    _set('opp-kpi-best-symbol', `${best.symbol || '—'} (${best.horizon || '10d'})`);
+    _set('opp-kpi-best-symbol', `${best.symbol || '—'}${best.horizon ? ' (' + best.horizon + ')' : ''}`);
   }
   const riskCounts = { Low: 0, Medium: 0, High: 0 };
   data.forEach(p => { const r = p.risk || 'Medium'; if (riskCounts[r] != null) riskCounts[r]++; });
@@ -1850,7 +2130,7 @@ async function hydrateOpportunities() {
       labels: ['< 60 (Ignore)', '60–69 (Weak)', '70–79 (Good)', '80+ (Strong)'],
       datasets: [{
         data: confBuckets,
-        backgroundColor: ['rgba(239,68,68,0.7)','rgba(245,158,11,0.7)','rgba(0,212,170,0.6)','rgba(34,197,94,0.7)'],
+        backgroundColor: ['rgba(239,68,68,0.7)','rgba(245,158,11,0.7)','rgba(255,140,0,0.7)','rgba(34,197,94,0.7)'],
         borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
       }],
     },
@@ -1907,7 +2187,7 @@ async function hydrateModelCenter() {
       const statusColor = m.isActive ? 'positive' : 'neutral';
       return `
         <tr>
-          <td><strong style="font-family:var(--font-mono);font-size:0.72rem">${m.modelName}-${m.task}</strong></td>
+          <td><strong style="font-family:var(--font-mono);font-size:0.72rem">${m.modelName}-${m.task || 'model'}</strong></td>
           <td style="color:var(--text-muted)">${m.modelName}</td>
           <td style="color:var(--text-secondary)">${m.labelCol}</td>
           <td class="${parseFloat(primary) >= 65 ? 'positive' : parseFloat(primary) >= 55 ? 'neutral' : 'warning'}">${primary}%</td>
@@ -1921,7 +2201,7 @@ async function hydrateModelCenter() {
     // Rebuild model accuracy bar chart from live data
     const active = models.filter(m => m.isActive);
     if (active.length) {
-      const labels = active.map(m => `${m.modelName}/${m.task.slice(0,3)}`);
+      const labels = active.map(m => `${m.modelName}/${(m.task || 'unk').slice(0,3)}`);
       const values = active.map(m => m.primaryMetric != null ? (m.primaryMetric * 100) : 0);
       ChartRegistry.create('modelAccChart', {
         type: 'bar',
@@ -1930,7 +2210,7 @@ async function hydrateModelCenter() {
           datasets: [{
             label: 'Primary Metric %',
             data: values,
-            backgroundColor: values.map(v => v >= 65 ? 'rgba(34,197,94,0.7)' : v >= 55 ? 'rgba(0,212,170,0.6)' : 'rgba(245,158,11,0.6)'),
+            backgroundColor: values.map(v => v >= 65 ? 'rgba(34,197,94,0.7)' : v >= 55 ? 'rgba(255,140,0,0.7)' : 'rgba(245,158,11,0.6)'),
             borderRadius: 4,
           }],
         },
@@ -2063,15 +2343,15 @@ function renderPaperPortfolio() {
       labels: DataStore.equityCurve.labels,
       datasets: [{
         data: DataStore.equityCurve.values,
-        borderColor: '#00d4aa',
+        borderColor: '#ff8c00',
         borderWidth: 2,
         pointRadius: 0,
         tension: 0.3,
         fill: true,
         backgroundColor: (ctx) => {
           const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-          g.addColorStop(0, 'rgba(0,212,170,0.18)');
-          g.addColorStop(1, 'rgba(0,212,170,0.00)');
+          g.addColorStop(0, 'rgba(255,140,0,0.14)');
+          g.addColorStop(1, 'rgba(255,140,0,0.00)');
           return g;
         },
       }],
@@ -2095,7 +2375,7 @@ function renderPaperPortfolio() {
       datasets: [{
         data: exp.map(e => e.weight),
         backgroundColor: [
-          'rgba(0,212,170,0.7)','rgba(34,197,94,0.6)','rgba(59,130,246,0.6)',
+          'rgba(255,140,0,0.8)','rgba(34,197,94,0.6)','rgba(59,130,246,0.6)',
           'rgba(245,158,11,0.6)','rgba(239,68,68,0.6)','rgba(147,51,234,0.6)',
           'rgba(236,72,153,0.6)','rgba(255,255,255,0.1)',
         ],
@@ -2197,11 +2477,11 @@ async function hydratePaperPortfolio() {
         labels: curve.labels,
         datasets: [{
           data: curve.values,
-          borderColor: '#00d4aa', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
+          borderColor: '#ff8c00', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
           backgroundColor: (ctx) => {
             const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-            g.addColorStop(0, 'rgba(0,212,170,0.18)');
-            g.addColorStop(1, 'rgba(0,212,170,0.00)');
+            g.addColorStop(0, 'rgba(255,140,0,0.14)');
+            g.addColorStop(1, 'rgba(255,140,0,0.00)');
             return g;
           },
         }],
@@ -2229,9 +2509,9 @@ async function hydratePaperPortfolio() {
         datasets: [{
           data: allocData.map(a => a.weightPct),
           backgroundColor: allocData.map((_, i) => [
-            'rgba(0,212,170,0.7)','rgba(34,197,94,0.6)','rgba(59,130,246,0.6)',
+            'rgba(255,140,0,0.8)','rgba(34,197,94,0.6)','rgba(59,130,246,0.6)',
             'rgba(245,158,11,0.6)','rgba(239,68,68,0.6)','rgba(147,51,234,0.6)',
-            'rgba(236,72,153,0.6)','rgba(99,102,241,0.6)','rgba(251,146,60,0.6)',
+            'rgba(236,72,153,0.6)','rgba(0,170,255,0.6)','rgba(251,146,60,0.6)',
             'rgba(20,184,166,0.6)','rgba(248,113,113,0.6)','rgba(167,243,208,0.6)',
             'rgba(255,255,255,0.1)',
           ][i % 13]),
@@ -2455,7 +2735,7 @@ async function hydrateStrategyResearch() {
         <td style="color:var(--text-muted)">${r.trade_count || 0}</td>
         <td style="white-space:nowrap">
           ${canActivate ? `<button class="panel-action-btn" onclick="activateStrategy('${r.strategy_id}')">Activate</button> ` : ''}
-          ${r.trade_count > 0 ? `<button class="panel-action-btn" style="background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.4)" onclick="openStrategyTrades('${r.strategy_id}')">Trades</button>` : '—'}
+          ${r.trade_count > 0 ? `<button class="panel-action-btn" style="background:rgba(0,170,255,0.12);border-color:rgba(0,170,255,0.35)" onclick="openStrategyTrades('${r.strategy_id}')">Trades</button>` : '—'}
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="9" style="color:var(--text-muted);text-align:center">No strategies yet</td></tr>`;
@@ -2471,7 +2751,7 @@ async function hydrateStrategyResearch() {
     data: {
       labels: famLabels,
       datasets: [
-        { label: 'Alive', data: famAlive, backgroundColor: 'rgba(99,102,241,0.7)' },
+        { label: 'Alive', data: famAlive, backgroundColor: 'rgba(0,170,255,0.7)' },
         { label: 'Graveyard', data: famDead, backgroundColor: 'rgba(239,68,68,0.4)' },
       ],
     },
@@ -2592,7 +2872,7 @@ async function hydrateStrategyResearch() {
           <span style="font-size:0.75rem;font-weight:600;color:var(--text-primary)">${rep.title || cat}</span>
         </div>
         <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:8px;line-height:1.5">${rep.summary || '—'}</div>
-        ${rep.recommendations ? `<div style="font-size:0.68rem;color:var(--accent);background:rgba(99,102,241,0.08);padding:6px 10px;border-radius:4px;border-left:2px solid var(--accent)">${rep.recommendations}</div>` : ''}
+        ${rep.recommendations ? `<div style="font-size:0.68rem;color:var(--accent);background:rgba(255,140,0,0.06);padding:6px 10px;border-radius:4px;border-left:2px solid var(--accent)">${rep.recommendations}</div>` : ''}
       </div>
     `).join('');
   }
@@ -2764,7 +3044,7 @@ async function hydrateResearchOps() {
   const msgBody = el('roc-messages-body');
   if (msgBody) {
     const msgs = (msgData?.messages || []).slice(0, 10);
-    const MTYPE_COLOR = { alert: '#ef4444', finding: '#6366f1', broadcast: '#34d399', request: '#fbbf24', response: '#94a3b8' };
+    const MTYPE_COLOR = { alert: '#ff3333', finding: '#00aaff', broadcast: '#00cc66', request: '#ffcc00', response: '#666666' };
     msgBody.innerHTML = msgs.map(m => `
       <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border-faint)">
         <span style="color:${MTYPE_COLOR[m.message_type]||'#94a3b8'};font-size:0.65rem;font-family:var(--font-mono);white-space:nowrap;padding-top:1px">${(m.message_type||'').toUpperCase()}</span>
@@ -2797,7 +3077,7 @@ async function hydrateResearchOps() {
       data: {
         labels: perfData.map(p => p.agent_id.replace('_research','').replace('_','').toUpperCase()),
         datasets: [
-          { label: 'Tasks', data: perfData.map(p => p.total_tasks || 0), backgroundColor: 'rgba(99,102,241,0.6)' },
+          { label: 'Tasks', data: perfData.map(p => p.total_tasks || 0), backgroundColor: 'rgba(0,170,255,0.6)' },
           { label: 'Success %', data: perfData.map(p => p.success_rate || 0), backgroundColor: 'rgba(52,211,153,0.5)', yAxisID: 'y1' },
         ],
       },
@@ -2895,7 +3175,7 @@ async function hydrateVault() {
     type: 'line',
     data: { labels: chartSnaps.map(s => s.snapshot_date?.slice(5)),
       datasets: [{ label: 'Nifty', data: chartSnaps.map(s => s.nifty_close),
-        borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.1)', fill: true, tension: 0.4, pointRadius: 2 }] },
+        borderColor: '#00aaff', backgroundColor: 'rgba(0,170,255,0.08)', fill: true, tension: 0.4, pointRadius: 2 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
       scales: { x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { font: { size: 9 } } }, y: { grid: { color: 'rgba(255,255,255,0.05)' } } } },
   });
@@ -3249,41 +3529,51 @@ function _mergeQualityWithHealth(sources) {
     </tr>`).join('');
 }
 
-async function runDataSupremacyPipeline() {
-  const el = document.getElementById('di-pipeline-result');
-  if (el) el.textContent = 'Running pipeline…';
-  const r = await Api.triggerDataSupremacy();
-  if (el) el.textContent = r ? `Pipeline complete — ${r.steps_completed ?? '?'} steps` : 'Pipeline failed or backend offline.';
+async function runDataSupremacyPipeline(btn) {
+  const resEl = document.getElementById('di-pipeline-result');
+  if (resEl) resEl.textContent = 'Running pipeline…';
+  await _withBtnLoading(btn, async () => {
+    const r = await Api.triggerDataSupremacy();
+    if (resEl) resEl.textContent = r ? `Pipeline complete — ${r.steps_completed ?? '?'} steps` : 'Pipeline failed or backend offline.';
+  });
   _liveHydrated.delete('data-intelligence');
   await hydrateDataIntelligence();
 }
 
-async function scrapeCorpFilings() {
-  await fetch(`${API_CONFIG.BASE}/corporate/scrape`, { method: 'POST' });
+function _withBtnLoading(btn, fn) {
+  if (!btn) return fn();
+  const orig = btn.textContent;
+  btn.textContent = 'Running…';
+  btn.disabled = true;
+  return Promise.resolve(fn()).finally(() => { btn.textContent = orig; btn.disabled = false; });
+}
+
+async function scrapeCorpFilings(btn) {
+  await _withBtnLoading(btn, () => fetch(`${API_CONFIG.BASE}/corporate/scrape`, { method: 'POST' }));
   _liveHydrated.delete('data-intelligence');
   await hydrateDataIntelligence();
 }
 
-async function scrapeFiiDii() {
-  await fetch(`${API_CONFIG.BASE}/fii-dii/scrape`, { method: 'POST' });
+async function scrapeFiiDii(btn) {
+  await _withBtnLoading(btn, () => fetch(`${API_CONFIG.BASE}/fii-dii/scrape`, { method: 'POST' }));
   _liveHydrated.delete('data-intelligence');
   await hydrateDataIntelligence();
 }
 
-async function computeBreadth() {
-  await fetch(`${API_CONFIG.BASE}/market-breadth/compute`, { method: 'POST' });
+async function computeBreadth(btn) {
+  await _withBtnLoading(btn, () => fetch(`${API_CONFIG.BASE}/market-breadth/compute`, { method: 'POST' }));
   _liveHydrated.delete('data-intelligence');
   await hydrateDataIntelligence();
 }
 
-async function computeSectorRotation() {
-  await fetch(`${API_CONFIG.BASE}/sector-rotation/compute`, { method: 'POST' });
+async function computeSectorRotation(btn) {
+  await _withBtnLoading(btn, () => fetch(`${API_CONFIG.BASE}/sector-rotation/compute`, { method: 'POST' }));
   _liveHydrated.delete('data-intelligence');
   await hydrateDataIntelligence();
 }
 
-async function runQualityChecks() {
-  await fetch(`${API_CONFIG.BASE}/data-quality/run-checks`, { method: 'POST' });
+async function runQualityChecks(btn) {
+  await _withBtnLoading(btn, () => fetch(`${API_CONFIG.BASE}/data-quality/run-checks`, { method: 'POST' }));
   _liveHydrated.delete('data-intelligence');
   await hydrateDataIntelligence();
 }
@@ -3303,7 +3593,11 @@ function renderPage(pageId) {
   if (pageId === 'model')       hydrateModelCenter();
   if (pageId === 'paper')       hydratePaperPortfolio();
   if (pageId === 'risk')        hydrateRisk();
-  if (pageId === 'learning')    hydrateLearnCenter();
+  // learning: renderLearning() is fully live. _originalRenderPage calls it on first
+  // visit; we only need hydrateLearnCenter (which re-runs renderLearning) on
+  // repeat visits when _originalRenderPage is a no-op due to the rendered guard.
+  if (pageId === 'learning' && _learningInitDone) hydrateLearnCenter();
+  if (pageId === 'learning') _learningInitDone = true;
   if (pageId === 'strategy')    hydrateStrategyResearch();
   if (pageId === 'agents')           hydrateResearchOps();
   if (pageId === 'vault')            hydrateVault();
@@ -3318,18 +3612,81 @@ function renderPage(pageId) {
   if (pageId === 'live-prices')      hydrateLivePrices();
 }
 
+// ── Topbar Live Ticker — real-time prices every 30s ───────────
+let _topbarLiveTimer = null;
+let _learningInitDone = false;
+
+async function hydrateTopbarLive() {
+  const data = await Api.topbarPrices();
+  if (!data || !data.length) return;
+
+  const nifty     = data.find(d => d.key === 'nifty50');
+  const banknifty = data.find(d => d.key === 'banknifty');
+  const vix       = data.find(d => d.key === 'vix' || d.label?.includes('VIX'));
+  const usdinr    = data.find(d => d.key === 'usdinr');
+
+  function applyTicker(valId, chgId, item, fmtFn) {
+    if (!item || item.price == null) return;
+    const valEl = el(valId);
+    const chgEl = el(chgId);
+    const fmt = fmtFn ? fmtFn(item.price) : item.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (valEl) valEl.textContent = fmt;
+    if (chgEl) {
+      const pct  = item.changePct || 0;
+      const isUp = pct >= 0;
+      chgEl.textContent = `${isUp ? '+' : ''}${pct.toFixed(2)}%`;
+      chgEl.className   = 'ticker-change ' + (isUp ? 'positive' : 'negative');
+    }
+  }
+
+  applyTicker('nifty-value',    'nifty-change',    nifty);
+  applyTicker('banknifty-value','banknifty-change', banknifty);
+  applyTicker('vix-value',      'vix-change',      vix,    v => v.toFixed(2));
+  applyTicker('usdinr-value',   'usdinr-change',   usdinr, v => v.toFixed(2));
+
+  // Also keep market page KPI cards in sync
+  if (nifty && nifty.price != null) {
+    const fmt = nifty.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const pct = nifty.changePct || 0;
+    const chgText = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    const _s = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+    _s('market-nifty-val', fmt);
+    const mChg = el('market-nifty-chg');
+    if (mChg) { mChg.textContent = chgText; mChg.className = 'kpi-sub ' + (pct >= 0 ? 'positive' : 'negative'); }
+  }
+  if (banknifty && banknifty.price != null) {
+    const fmt = banknifty.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const pct = banknifty.changePct || 0;
+    const chgText = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+    const _s = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+    _s('market-banknifty-val', fmt);
+    const mChg = el('market-banknifty-chg');
+    if (mChg) { mChg.textContent = chgText; mChg.className = 'kpi-sub ' + (pct >= 0 ? 'positive' : 'negative'); }
+  }
+}
+
+function startTopbarLivePolling() {
+  if (_topbarLiveTimer) clearInterval(_topbarLiveTimer);
+  // Show loading state before first fetch resolves
+  ['nifty-value','banknifty-value','vix-value','usdinr-value'].forEach(id => {
+    const e = el(id); if (e && e.textContent === '—') e.textContent = '···';
+  });
+  hydrateTopbarLive();  // immediate first fetch
+  _topbarLiveTimer = setInterval(hydrateTopbarLive, 5000);  // every 5s
+}
+
 // ── Live Prices — real-time index/commodity quotes ────────────
 let _livePricesTimer = null;
 
 async function hydrateLivePrices() {
   await refreshLivePrices();
-  // Auto-refresh every 60 seconds while the page is visible
+  // Auto-refresh every 5 seconds while the page is visible
   if (_livePricesTimer) clearInterval(_livePricesTimer);
   _livePricesTimer = setInterval(() => {
     const page = document.getElementById('page-live-prices');
     if (page && page.classList.contains('active')) refreshLivePrices();
     else clearInterval(_livePricesTimer);
-  }, 60000);
+  }, 5000);
 }
 
 async function refreshLivePrices() {
@@ -3372,7 +3729,7 @@ async function refreshLivePrices() {
       const sign    = isUp ? '+' : '';
       const fmtFn   = FMT[d.key] || (v => v.toLocaleString('en-IN', { maximumFractionDigits: 2 }));
       return `
-        <div class="kpi-card" style="text-align:center;border-color:${isUp ? 'rgba(0,212,170,0.2)' : 'rgba(239,68,68,0.2)'}">
+        <div class="kpi-card" style="text-align:center;border-color:${isUp ? 'rgba(255,140,0,0.2)' : 'rgba(255,51,51,0.2)'}">
           <div class="kpi-label">${ICONS[d.key] || '◎'} ${d.label}</div>
           <div class="kpi-value" style="color:${color};font-size:1.05rem">${fmtFn(d.price)}</div>
           <div class="kpi-sub" style="color:${color}">${arrow} ${sign}${d.change != null ? Math.abs(d.change).toLocaleString('en-IN', {maximumFractionDigits:2}) : '—'} (${sign}${(d.changePct || 0).toFixed(2)}%)</div>
@@ -3434,15 +3791,15 @@ async function refreshLivePrices() {
         responsive: true, maintainAspectRatio: true,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y.toLocaleString('en-IN', {maximumFractionDigits:2})}` }}},
         scales: {
-          x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { color: 'rgba(255,255,255,0.04)' }},
-          y: { ticks: { maxTicksLimit: 5, callback: v => v.toLocaleString('en-IN', {maximumFractionDigits:0}) }, grid: { color: 'rgba(255,255,255,0.04)' }},
+          x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, grid: { color: '#0d0d0d' }},
+          y: { ticks: { maxTicksLimit: 5, callback: v => v.toLocaleString('en-IN', {maximumFractionDigits:0}) }, grid: { color: '#0d0d0d' }},
         },
       },
     });
   }
 
-  buildHistChart('liveNiftyChart',  niftyHist,  'Nifty 50',  'rgb(0,212,170)');
-  buildHistChart('liveSensexChart', sensexHist, 'Bank Nifty', 'rgb(99,102,241)');
+  buildHistChart('liveNiftyChart',  niftyHist,  'Nifty 50',  'rgb(255,140,0)');
+  buildHistChart('liveSensexChart', sensexHist, 'Bank Nifty', 'rgb(0,170,255)');
 }
 
 // ── Risk Center — live hydration ─────────────────────────────
@@ -3460,7 +3817,7 @@ async function hydrateRisk() {
         datasets: [{
           data: exp.map(e => e.weight),
           backgroundColor: exp.map((_, i) => [
-            'rgba(0,212,170,0.7)', 'rgba(34,197,94,0.6)', 'rgba(59,130,246,0.6)',
+            'rgba(255,140,0,0.8)', 'rgba(34,197,94,0.6)', 'rgba(59,130,246,0.6)',
             'rgba(245,158,11,0.6)', 'rgba(239,68,68,0.6)', 'rgba(147,51,234,0.6)',
             'rgba(236,72,153,0.6)', 'rgba(255,255,255,0.1)',
           ][i % 8]),
@@ -3550,54 +3907,34 @@ async function hydrateRisk() {
       statusEl.className = 'kpi-value ' + (data.circuitStatus === 'TRIGGERED' ? 'negative' : 'positive');
     }
   }
+
+  // Live risk alerts panel — replace mock data
+  const alertsBody = el('risk-alerts-body');
+  if (alertsBody) {
+    const alerts = [];
+    if (data.circuitStatus === 'TRIGGERED') alerts.push({ level: 'critical', title: 'Circuit Breaker Triggered', desc: 'One or more drawdown limits breached. Trading paused.' });
+    if (data.exposure > 70) alerts.push({ level: 'warning', title: 'High Exposure', desc: `Portfolio exposure at ${data.exposure.toFixed(1)}% — approaching 80% limit.` });
+    if (data.maxDrawdown30d && Math.abs(data.maxDrawdown30d) > 5) alerts.push({ level: 'warning', title: 'Drawdown Alert', desc: `Max drawdown at ${Math.abs(data.maxDrawdown30d).toFixed(2)}% over 30 days.` });
+    if (data.sharpe < 0.5 && data.sharpe !== 0) alerts.push({ level: 'info', title: 'Low Sharpe Ratio', desc: `Sharpe at ${data.sharpe.toFixed(2)} — risk-adjusted returns below target of 1.0.` });
+    if (data.positions && data.positions.some(p => p.riskLevel === 'High')) alerts.push({ level: 'warning', title: 'High-Risk Positions', desc: 'One or more positions flagged as high volatility.' });
+    if (!data.positions || data.positions.length === 0) alerts.push({ level: 'info', title: 'No Open Positions', desc: 'Portfolio is fully in cash. Run a paper trade cycle to deploy capital.' });
+
+    if (alerts.length) {
+      alertsBody.innerHTML = alerts.map(a => `
+        <div class="risk-alert ${a.level}">
+          <div class="risk-alert-title">${a.title}</div>
+          <div class="risk-alert-sub">${a.desc}</div>
+        </div>`).join('');
+    } else {
+      alertsBody.innerHTML = '<div class="risk-alert info"><div class="risk-alert-title">All Clear</div><div class="risk-alert-sub">No active risk alerts. All metrics within normal ranges.</div></div>';
+    }
+  }
 }
 
 // ── Learning Centre — live hydration ─────────────────────────
 async function hydrateLearnCenter() {
-  const liveData = await Api.learningOverview(30);
-  if (!liveData) return;
-
-  const _set = (id, v) => { const e = el(id); if (e) e.textContent = v; };
-  const score = liveData.intelligenceScore || 0;
-  const delta = liveData.scoreDelta || 0;
-  _set('lc-kpi-score', `${score.toFixed(1)} / 100`);
-  _set('lc-kpi-delta', `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} vs yesterday`);
-  _set('lc-kpi-failures', liveData.totalFailures ?? 0);
-  _set('lc-kpi-resolved', `${liveData.resolvedFailures ?? 0} resolved`);
-  _set('lc-kpi-lessons', liveData.totalLessons ?? 0);
-  _set('lc-kpi-applied', `${liveData.appliedLessons ?? 0} applied`);
-  _set('lc-kpi-critical', liveData.failuresBySeverity?.critical ?? 0);
-
-  // Recent events feed
-  const events = liveData.recentEvents || [];
-  const evBody = el('lc-events-body');
-  if (evBody && events.length) {
-    const outcomeColor = { positive: '#00d4aa', negative: '#ef4444', neutral: '#6b7280' };
-    evBody.innerHTML = events.slice(0, 20).map(ev => `
-      <tr>
-        <td style="color:var(--text-muted);white-space:nowrap">${(ev.date || '').slice(5)}</td>
-        <td><span style="color:${outcomeColor[ev.outcome] || '#fff'};font-size:0.68rem">${(ev.category || '').toUpperCase()}</span></td>
-        <td style="max-width:340px;white-space:normal;font-size:0.72rem">${(ev.description || '').slice(0, 120)}</td>
-      </tr>`).join('');
-  } else if (evBody) {
-    evBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);padding:12px 0">No events recorded yet.</td></tr>';
-  }
-
-  // Score components radar — update chart data
-  const comp = liveData.components || {};
-  const radarCanvas = document.getElementById('scoreComponentsChart');
-  if (radarCanvas && radarCanvas._chartInstance) {
-    const ds = radarCanvas._chartInstance.data.datasets[0];
-    ds.data = [
-      comp.predictionQuality  ?? 50,
-      comp.portfolioQuality   ?? 50,
-      comp.riskQuality        ?? 50,
-      comp.learningQuality    ?? 50,
-      comp.calibrationQuality ?? 50,
-      comp.featureQuality     ?? 50,
-    ];
-    radarCanvas._chartInstance.update();
-  }
+  // renderLearning() is already fully live — re-run it to refresh all data + charts
+  await renderLearning();
 }
 
 // ── Overview — full live hydration ───────────────────────────
@@ -3646,11 +3983,11 @@ async function hydrateOverview() {
         labels: curve.labels,
         datasets: [{
           data: curve.values,
-          borderColor: '#00d4aa', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
+          borderColor: '#ff8c00', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
           backgroundColor: (ctx) => {
             const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-            g.addColorStop(0, 'rgba(0,212,170,0.18)');
-            g.addColorStop(1, 'rgba(0,212,170,0.00)');
+            g.addColorStop(0, 'rgba(255,140,0,0.14)');
+            g.addColorStop(1, 'rgba(255,140,0,0.00)');
             return g;
           },
         }],
@@ -3756,7 +4093,7 @@ async function hydrateMarket() {
           data: sectorStrength.map(s => s.score),
           backgroundColor: sectorStrength.map(s =>
             s.score >= 80 ? 'rgba(34,197,94,0.7)'
-            : s.score >= 60 ? 'rgba(0,212,170,0.6)'
+            : s.score >= 60 ? 'rgba(255,140,0,0.7)'
             : s.score >= 45 ? 'rgba(245,158,11,0.6)'
             : 'rgba(239,68,68,0.6)'
           ),
@@ -4183,9 +4520,9 @@ function _stmDrawChart(values, labels) {
     data: {
       labels: labels,
       datasets: [
-        { label: 'Equity', data: values, borderColor: '#00d4aa', borderWidth: 2,
+        { label: 'Equity', data: values, borderColor: '#ff8c00', borderWidth: 2,
           pointRadius: values.length > 60 ? 0 : 3, tension: 0.3, fill: true,
-          backgroundColor: function(ctx){ const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height); g.addColorStop(0,'rgba(0,212,170,0.18)'); g.addColorStop(1,'rgba(0,212,170,0.00)'); return g; } },
+          backgroundColor: function(ctx){ const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height); g.addColorStop(0,'rgba(255,140,0,0.14)'); g.addColorStop(1,'rgba(255,140,0,0.00)'); return g; } },
         { label: 'Base', data: new Array(values.length).fill(100), borderColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderDash: [4,4], pointRadius: 0 },
       ],
     },
@@ -4221,10 +4558,10 @@ async function runStrategyReplay() {
       data: {
         labels: frames.map(f => f.exitDate || '—'),
         datasets: [
-          { label: 'Equity', data: eqData, borderColor: '#6366f1', borderWidth: 2,
+          { label: 'Equity', data: eqData, borderColor: '#ff8c00', borderWidth: 2,
             pointRadius: frames.length > 80 ? 0 : 4,
             pointBackgroundColor: frames.map(f => f.result==='win'?'rgba(34,197,94,0.9)':f.result==='loss'?'rgba(239,68,68,0.9)':'rgba(255,255,255,0.3)'),
-            tension: 0.2, fill: true, backgroundColor: 'rgba(99,102,241,0.08)' },
+            tension: 0.2, fill: true, backgroundColor: 'rgba(255,140,0,0.06)' },
           { label: 'Base', data: new Array(frames.length).fill(100), borderColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderDash: [4,4], pointRadius: 0 },
         ],
       },
