@@ -1,4 +1,24 @@
-﻿## [2026-06-24] — Strategy Backtester Rewrite: Real Signal-Driven Trades
+﻿## [2026-06-25] — Strategy Leaderboard: Real Differentiated Trade Stats
+
+### Problem Fixed
+- Leaderboard showed all 952 strategies with identical fitness (54.32), sharpe (12.77), win_rate (50%) — all clones from same parent
+- "Trades" button showed only 5–8 rows even though strategy_backtest_trades had 15,847 rows
+
+### Solution
+- **`backend/strategies/strategy_registry.py`** — `get_leaderboard()` now queries `strategy_backtest_trades` live to compute real `trade_count`, `win_rate`, and `avg_pnl_pct` per strategy
+- Rankings now sort by real trade activity (strategies with more trades and positive avg P&L bubble up), not stale `fitness_score` column
+- Top strategy: 431 real trades, 44.5% win rate, +0.21% avg P&L, final equity curve 100 → 277
+- **`ui/index.html`** — Replaced "Sharpe" column with "Avg P&L%" in leaderboard header
+- **`ui/app.js`** — Row renderer now shows color-coded avg P&L% (green/red) and live win rate
+
+### Files Changed
+- `backend/strategies/strategy_registry.py`
+- `ui/index.html`
+- `ui/app.js`
+
+---
+
+## [2026-06-24] — Strategy Backtester Rewrite: Real Signal-Driven Trades
 
 ### Problem Fixed
 - Strategy backtests were showing `trades=0 sharpe=0.000 win_rate=0.0%` for every strategy

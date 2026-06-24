@@ -2875,9 +2875,11 @@ async function hydrateStrategyResearch() {
     const rows = (leaders && leaders.leaderboard) ? leaders.leaderboard : [];
     lbBody.innerHTML = rows.slice(0, 15).map((r, i) => {
       const statusClass = { active: 'positive', promoted: 'accent', shadow: 'neutral', candidate: '' }[r.status] || '';
-      const fitness = r.fitness_score != null ? r.fitness_score.toFixed(1) : '—';
-      const sharpe  = r.sharpe != null ? r.sharpe.toFixed(2) : '—';
-      const wr      = r.win_rate != null ? `${r.win_rate.toFixed(0)}%` : '—';
+      const fitness  = r.fitness_score != null ? r.fitness_score.toFixed(1) : '—';
+      const wr       = r.win_rate != null ? `${r.win_rate.toFixed(1)}%` : '—';
+      const avgPnl   = r.avg_pnl_pct != null ? r.avg_pnl_pct : null;
+      const avgPnlStr = avgPnl != null ? (avgPnl >= 0 ? '+' : '') + avgPnl.toFixed(2) + '%' : '—';
+      const avgPnlColor = avgPnl == null ? '' : avgPnl > 0 ? 'color:var(--positive)' : avgPnl < 0 ? 'color:var(--negative)' : '';
       const canActivate = r.status === 'promoted';
       return `<tr>
         <td style="color:var(--text-muted)">${i + 1}</td>
@@ -2885,8 +2887,8 @@ async function hydrateStrategyResearch() {
         <td><span class="chip">${r.family || '—'}</span></td>
         <td class="${statusClass}" style="font-size:0.7rem">${(r.status || '').toUpperCase()}</td>
         <td style="font-weight:600">${fitness}</td>
-        <td>${sharpe}</td>
         <td>${wr}</td>
+        <td style="font-weight:600;${avgPnlColor}">${avgPnlStr}</td>
         <td style="color:var(--text-muted)">${r.trade_count || 0}</td>
         <td style="white-space:nowrap">
           ${canActivate ? `<button class="panel-action-btn" onclick="activateStrategy('${r.strategy_id}')">Activate</button> ` : ''}

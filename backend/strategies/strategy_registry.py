@@ -70,14 +70,55 @@ def get_family_summary(db: Session) -> dict:
 
 
 def get_leaderboard(db: Session, top_n: int = 20, status: str | None = None) -> list[dict]:
-    """Top-N strategies ranked by fitness score."""
+    """Top-N strategies ranked by live trade stats from strategy_backtest_trades, falling back to fitness_score."""
+    from aqrti.database.models import StrategyBacktestTrade
+    from sqlalchemy import func, case
+
+    # Pull real trade stats in one query
+    trade_stats = (
+        db.query(
+            StrategyBacktestTrade.strategy_id,
+            func.count(StrategyBacktestTrade.id).label("tc"),
+            func.avg(StrategyBacktestTrade.pnl_pct).label("avg_pnl"),
+            func.sum(case((StrategyBacktestTrade.pnl_pct > 0, 1), else_=0)).label("wins"),
+        )
+        .group_by(StrategyBacktestTrade.strategy_id)
+        .all()
+    )
+    live_map: dict[str, dict] = {}
+    for row in trade_stats:
+        tc = row.tc or 0
+        wins = row.wins or 0
+        live_map[row.strategy_id] = {
+            "real_trade_count": tc,
+            "avg_pnl": round(row.avg_pnl or 0, 4),
+            "live_win_rate": round(wins * 100.0 / tc, 1) if tc > 0 else 0.0,
+        }
+
     q = db.query(StrategyV2).filter(StrategyV2.fitness_score.isnot(None))
     if status:
         q = q.filter(StrategyV2.status == status)
-    rows = q.order_by(StrategyV2.fitness_score.desc()).limit(top_n).all()
 
-    return [
-        {
+    # Fetch more rows than top_n so we can sort by real trade quality
+    rows = q.order_by(StrategyV2.fitness_score.desc()).limit(min(top_n * 5, 500)).all()
+
+    # Enrich each row with live stats
+    enriched = []
+    for r in rows:
+        live = live_map.get(r.strategy_id, {})
+        real_tc = live.get("real_trade_count", r.trade_count or 0)
+        live_wr = live.get("live_win_rate", r.win_rate or 0)
+        avg_pnl = live.get("avg_pnl", 0)
+        # Score: prefer strategies with actual trades and positive avg P&L
+        sort_key = (real_tc > 0, real_tc, avg_pnl)
+        enriched.append((sort_key, r, real_tc, live_wr, avg_pnl))
+
+    # Sort: strategies with real trades first, then by trade count desc, then avg_pnl
+    enriched.sort(key=lambda x: x[0], reverse=True)
+
+    result = []
+    for i, (_, r, real_tc, live_wr, avg_pnl) in enumerate(enriched[:top_n]):
+        result.append({
             "rank":          i + 1,
             "strategy_id":   r.strategy_id,
             "name":          r.name or r.strategy_id,
@@ -85,14 +126,14 @@ def get_leaderboard(db: Session, top_n: int = 20, status: str | None = None) -> 
             "status":        r.status,
             "fitness_score": r.fitness_score,
             "sharpe":        r.sharpe,
-            "win_rate":      r.win_rate,
+            "win_rate":      live_wr if real_tc > 0 else (r.win_rate or 0),
+            "avg_pnl_pct":   avg_pnl,
             "profit_factor": r.profit_factor,
             "max_drawdown":  r.max_drawdown,
             "generation":    r.generation,
-            "trade_count":   r.trade_count,
-        }
-        for i, r in enumerate(rows)
-    ]
+            "trade_count":   real_tc,
+        })
+    return result
 
 
 def resolve_dsl(db: Session, strategy_id: str) -> Optional[dict]:
