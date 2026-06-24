@@ -40,11 +40,12 @@ TARGET_SHARPE        = 1.0     # 1.0 is excellent for Indian equities (vs 2.0 ov
 TARGET_PROFIT_FACTOR = 1.8     # 1.8 profit factor is strong
 TARGET_WIN_RATE      = 55.0    # 55% win rate is realistic for trend-following
 TARGET_TRADES        = 30      # 30+ trades = full longevity (365-day window, 20 stocks)
-MIN_TRADES           = 3       # below this, longevity = 0
+MIN_TRADES           = 8       # below this, longevity = 0 (prevent inflated Sharpe from tiny samples)
 
 
 def profitability_score(sharpe: float, profit_factor: float, total_return: float) -> float:
     # Sharpe: full credit at 1.0, partial below, 0 below -0.5 (soft floor, not cliff)
+    # Note: sharpe and profit_factor are already capped by compute_fitness caller
     sharpe_norm = max(sharpe + 0.5, 0.0) / (TARGET_SHARPE + 0.5)   # shift so -0.5 → 0
     s1 = min(sharpe_norm, 1.0) * 45
     s2 = min(max(profit_factor - 1.0, 0.0) / (TARGET_PROFIT_FACTOR - 1.0), 1.0) * 35
@@ -127,17 +128,19 @@ def compute_fitness(
     """
     Compute full fitness breakdown and composite score.
     All input sharpe values may be None — treated as 0.
+    All Sharpes capped at 3.0, profit_factor capped at 4.0 to prevent small-sample inflation.
     """
-    sharpe          = sharpe or 0.0
-    sortino         = sortino or 0.0
+    SHARPE_CAP = 3.0
+    sharpe          = min(sharpe or 0.0, SHARPE_CAP)
+    sortino         = min(sortino or 0.0, 5.0)
     win_rate        = win_rate or 0.0
-    profit_factor   = profit_factor or 1.0
+    profit_factor   = min(profit_factor or 1.0, 4.0)
     max_drawdown    = max_drawdown or 0.0
-    expectancy      = expectancy or 0.0
-    bull_sharpe     = bull_sharpe or 0.0
-    bear_sharpe     = bear_sharpe or 0.0
-    sideways_sharpe = sideways_sharpe or 0.0
-    volatile_sharpe = volatile_sharpe or 0.0
+    expectancy      = min(expectancy or 0.0, 5.0)
+    bull_sharpe     = min(bull_sharpe or 0.0, SHARPE_CAP)
+    bear_sharpe     = min(bear_sharpe or 0.0, SHARPE_CAP)
+    sideways_sharpe = min(sideways_sharpe or 0.0, SHARPE_CAP)
+    volatile_sharpe = min(volatile_sharpe or 0.0, SHARPE_CAP)
 
     s_prof  = profitability_score(sharpe, profit_factor, total_return)
     s_cons  = consistency_score(win_rate, expectancy)
