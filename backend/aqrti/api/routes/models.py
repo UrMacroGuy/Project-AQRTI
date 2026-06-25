@@ -12,10 +12,21 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+import sys, os
+backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 from aqrti.database.engine import get_db_dependency
 from aqrti.database.models import ModelVersion, ModelMetric, WalkForwardFold
 
 router = APIRouter()
+
+try:
+    from ml.model_retrainer import check_and_retrain, get_retraining_status
+    _RETRAINER_AVAILABLE = True
+except Exception:
+    _RETRAINER_AVAILABLE = False
 
 
 @router.get("")
@@ -143,3 +154,34 @@ def get_walk_forward_folds(
         }
         for r in rows
     ]
+
+
+@router.get("/retrain-status")
+def get_retrain_status(db: Session = Depends(get_db_dependency)):
+    """Check whether model retraining is needed."""
+    if not _RETRAINER_AVAILABLE:
+        return {"available": False, "reason": "ml_retrainer_not_importable"}
+    try:
+        status = get_retraining_status(db)
+        return {"available": True, **status}
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+
+
+@router.post("/retrain")
+def trigger_retrain(
+    force: bool     = False,
+    db:    Session  = Depends(get_db_dependency),
+):
+    """
+    Trigger model retraining.
+    - force=false: retrain only if accuracy or staleness thresholds are breached
+    - force=true:  retrain regardless
+    """
+    if not _RETRAINER_AVAILABLE:
+        return {"status": "unavailable", "reason": "ml_retrainer_not_importable"}
+    try:
+        result = check_and_retrain(db, force=force)
+        return result
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}

@@ -788,7 +788,13 @@ body {
 .chart-container {
   position: relative;
   height: 200px;
+  min-height: 200px;
   width: 100%;
+  overflow: hidden;
+}
+/* When chart-container is also a panel-body (flex child), fix its height */
+.panel-body.chart-container {
+  flex: none;
 }
 .chart-container canvas { width: 100% !important; height: 100% !important; }
 

@@ -228,6 +228,48 @@ def get_topbar_prices():
     return data
 
 
+_NSE_STOCKS_MAP = {
+    "RELIANCE":   ("RELIANCE.NS",   "Reliance"),
+    "HDFCBANK":   ("HDFCBANK.NS",   "HDFC Bank"),
+    "ICICIBANK":  ("ICICIBANK.NS",  "ICICI Bank"),
+    "INFY":       ("INFY.NS",       "Infosys"),
+    "TCS":        ("TCS.NS",        "TCS"),
+    "AXISBANK":   ("AXISBANK.NS",   "Axis Bank"),
+    "SBIN":       ("SBIN.NS",       "SBI"),
+    "BAJFINANCE": ("BAJFINANCE.NS", "Bajaj Finance"),
+    "MARUTI":     ("MARUTI.NS",     "Maruti"),
+    "TITAN":      ("TITAN.NS",      "Titan"),
+    "WIPRO":      ("WIPRO.NS",      "Wipro"),
+    "ONGC":       ("ONGC.NS",       "ONGC"),
+    "SUNPHARMA":  ("SUNPHARMA.NS",  "Sun Pharma"),
+    "NESTLEIND":  ("NESTLEIND.NS",  "Nestle"),
+    "BHARTIARTL": ("BHARTIARTL.NS", "Bharti Airtel"),
+    "KOTAKBANK":  ("KOTAKBANK.NS",  "Kotak Bank"),
+    "TATASTEEL":  ("TATASTEEL.NS",  "Tata Steel"),
+    "HINDALCO":   ("HINDALCO.NS",   "Hindalco"),
+}
+
+_stocks_cache: dict = {"ts": 0, "data": None}
+_STOCKS_TTL = 60  # 60s — live price cache for stocks
+
+
+@router.get("/live/stocks")
+def get_live_stock_prices():
+    """Live prices for all 18 NSE stocks in the universe (60s server-side cache)."""
+    now = _time.time()
+    if _stocks_cache["data"] and (now - _stocks_cache["ts"]) < _STOCKS_TTL:
+        return _stocks_cache["data"]
+    try:
+        import yfinance  # noqa
+    except ImportError:
+        raise HTTPException(status_code=503, detail="yfinance not installed")
+
+    data = _fetch_parallel(_NSE_STOCKS_MAP, timeout=25)
+    _stocks_cache["ts"]   = now
+    _stocks_cache["data"] = data
+    return data
+
+
 @router.get("/live")
 def get_live_prices():
     """Fetch real-time prices for all 8 symbols via yfinance (parallel)."""

@@ -1,4 +1,115 @@
-﻿## [2026-06-25] — Session Summary
+﻿## [2026-06-25b] — Meta-Learning Engine, Model Self-Improvement, Adaptive Evolution
+
+### New Features
+
+**Meta-Learning Engine** (strategies/meta_learner.py)
+- Reads 5 signal sources every evolution cycle: strategy graveyard (failures + lessons), evolution history (operation fitness deltas), live paper trade outcomes, prediction accuracy by regime, alive top-strategy parameters
+- Computes `MetaState`: per-family generation weights (adjusted from defaults), bad-features list (features that appear in dead strategies but rarely in top ones), dynamic confidence floor per regime (raised if model underperforms, lowered if reliable), ranked mutation operations by avg fitness delta
+- Writes `MetaLearningRecord` rows for each insight: family weight shifts >15%, bad features, confidence floor changes, best mutation op
+- `GET /strategy-evolution/meta-state` — current meta-state (family weights, signals, regime accuracy)
+- `POST /strategy-evolution/meta-learn` — trigger a full meta-learning cycle on demand
+
+**Strategy Generator — Meta-Adaptive** (strategy_generator.py)
+- `generate_candidates()` now accepts `meta_state` dict; uses meta-learned family weights instead of static defaults
+- Applies confidence floor from meta-state: strategies generated below the dynamic floor are bumped up
+- Bad-feature avoidance: if all entry conditions use bad features, the strategy is regenerated once with the same family
+- `run_generation_cycle(use_meta=True)` automatically fetches meta-state before generating
+
+**Mutation Engine — Meta-Adaptive** (mutation_engine.py)
+- `mutate()` now accepts `meta_state`; builds operation pool biased toward historically best operations
+- Top-ranked operations (by avg fitness delta over last 60 days) receive 2-3x more selection slots vs baseline
+- Only operations with positive avg delta get boosted — underperforming ops stay at baseline weight
+
+**Evolution Engine — Full Meta Integration** (evolution_engine.py)
+- `evolve_population(run_meta=True)`: runs `run_meta_learning()` before each cycle, passes meta-state to both `mutate()` and the parent selection logic
+- Returns `meta_state_summary` in the cycle result: bad_features, conf_floor, top_mutation_op, meta_insights count
+
+**Model Self-Improvement Engine** (ml/model_retrainer.py)
+- Checks prediction accuracy over last 30 days: if win rate < 50%, triggers automatic retraining
+- Checks model staleness: if active model > 45 days old, triggers retraining
+- Runs full LightGBM + XGBoost + CatBoost walk-forward training pipeline on fresh data
+- Retires old active model, registers new version in `model_versions` table, writes `LessonLearned` and `KnowledgeEvent` records
+- `check_and_retrain(force=False)` — smart retraining; `force=True` ignores thresholds
+- `GET /models/retrain-status` — check if retraining is needed without triggering it
+- `POST /models/retrain?force=true/false` — trigger retraining via API
+
+**Model Research Agent — Autonomous Retraining** (agents/model_research_agent.py)
+- Now calls `get_retraining_status()` at end of every research run
+- If needs_retraining → automatically calls `check_and_retrain()` without human intervention
+- Writes findings about retraining outcome (new model accuracy, trigger reason, per-regime win rates)
+- Falls back gracefully if ML dependencies unavailable (e.g., first install)
+
+**Meta-Learning Control Center UI** (Strategy Research page)
+- New panel: "⬡ Meta-Learning Control Center"
+- 3-column layout: (1) Family Weight Adjustments table showing default vs current weight + delta for all 10 families, (2) Learning Signals (regime, confidence floor, graveyard size, bad features with colour tags, per-regime prediction accuracy bar chart), (3) Model Self-Improvement (needs-retrain alert, 30d win rate, model age, last retrained, regime breakdown)
+- Mutation Operation Performance table: ranked by avg fitness delta, shows total/positive%/avg delta/rank for every mutation operation over 60 days
+- Buttons: "Refresh State", "Run Meta-Learn", "Check Model", "Retrain Model" (with confirmation dialog)
+- Auto-loads when Strategy Research page opens
+
+---
+
+## [2026-06-25] — Strategy DNA Viewer, Trade Recommendations, Live Validation, Cost-Aware Fitness
+
+### New Features
+
+**Strategy DNA Viewer** (Strategy Research page)
+- `GET /strategies/{id}/dna` — full strategy decode: entry/exit conditions in plain English, DSL params (stop %, target %, min confidence, max hold), regime permissions, per-regime Sharpe
+- Parent lineage (clickable, recursive exploration), children/offspring list, version/mutation history, live-vs-backtest validation comparison, last 8 backtest trades
+- "DNA" button added to every leaderboard row — scrolls to viewer and populates it instantly
+- ID search box for exploring any strategy directly
+
+**Trade Recommendations Panel** (Strategy Research page — "Trade This Now")
+- `GET /strategies/recommendations` — top 5 actionable trades combining ML predictions (confidence ≥ 55%) with top promoted strategy DSL for stop/target calculation
+- Each trade card shows: symbol, sector, entry price, stop-loss (with % risk), target (with % upside), reward:risk ratio, position size (5% each), confidence score
+- Regime label, strategy bar showing which strategy generated the params
+- Disclaimer: paper trading reference only, not financial advice
+- Auto-loads when Strategy Research page opens; manual Refresh button
+
+**NSE Transaction Cost Model** (backtester)
+- Real Indian delivery equity breakdown: STT 0.1% buy+sell, exchange charge 0.00345%, SEBI 0.0001%, stamp duty 0.015% buy-only, brokerage 0.03%, GST 18% on brokerage+exchange+SEBI, slippage 0.05%/0.03%
+- Round-trip cost ≈ 0.28% — replaces old flat 0.1% slippage assumption
+- Entry price includes buy cost; exit P&L deducts sell cost
+
+**Fitness Engine v2 — 6 Dimensions** (fitness_engine.py)
+- Profitability 28%, Consistency 22%, Robustness 18%, Cost Efficiency 15%, Regime Adaptability 12%, Longevity 5%
+- Cost Efficiency: strategies where avg trade return barely exceeds round-trip cost score 0 — filters high-friction strategies that look good gross
+- Walk-forward penalty: avg_holding_days < 3 → robustness halved
+- Targets raised: Sharpe 1.2 (was 1.0), P/F 2.0 (was 1.8)
+- `rescore_all()` endpoint: `POST /strategies/admin/rescore` triggers full re-score + lifecycle sweep
+
+**Live Paper Trading Validation** (live_validator.py)
+- `record_strategy_live_day()` — upserts StrategyPerformance from closed paper trades
+- `run_daily_validation_sweep()` — full recompute across all strategies
+- `_check_live_divergence()` — SHARPE_DIVERGE_LIMIT=0.8, WINRATE_DIVERGE_LIMIT=20pp
+- `_demote_to_shadow()` — auto-demotes strategy if divergence is critical
+- `on_trade_closed()` hook wired into `paper_trade.close_position()` — live validation fires on every trade close
+- `POST /strategy-performance/validate` and `GET /strategy-performance/{id}/validation` endpoints
+
+**Strategy Generator Refinements**
+- 2 new families: `quality_momentum` (QGLP-style) and `institutional_flow` (delivery% + volume surge)
+- All generators enforce reward:risk ratio (1.5:1 min, up to 3.5:1)
+- Momentum: min hold raised to 7-25 days; mean reversion: requires 2-5% actual pullback
+- `_FAMILY_WEIGHTS` updated — quality_momentum 12%, institutional_flow 8% of new generations
+
+---
+
+## [2026-06-25] — Full App Audit + Data Fixes (Round 2)
+
+### Fixes Implemented
+- **`/api/v1/overview` — `date` import missing** — `date.today()` on line 40 would NameError because only `timedelta` was imported inline; moved both to module-level `from datetime import date, timedelta`
+- **`/api/v1/strategies/stats` 404** — added `GET /strategies/stats` endpoint returning total/promoted/active/shadow/retired/families counts + top strategy; fixes dashboard strategy card
+- **`/api/v1/replay/date-range` 422** — added missing `GET /replay/date-range` route (was entirely absent); returns oldest/newest trade + price dates from DB
+- **Equity curve flat line** — `GET /equity-curve` and `GET /paper-portfolio/equity-curve` now reconstruct a synthetic curve from closed paper trade P&L by date when `EquityCurvePoint` has fewer than 3 rows; chart shows real history instead of flat capital line
+- **`POST /paper-portfolio/backfill-equity`** — new endpoint: one-time idempotent backfill that creates `EquityCurvePoint` rows from paper trade history so `performance_tracker` can compute real Sharpe/Sortino; called automatically from frontend on first paper portfolio load (guarded by `sessionStorage`)
+- **Sector rotation `avg_sentiment` always null** — `SentimentRecord.timestamp` is a datetime; filter was comparing against a `date` (no-op); fixed to use `datetime.combine()` for both cutoff and target bounds
+- **Sector rotation `avg_volume_ratio` always null** — field was never populated in `compute_sector_rotation()`; added `_avg_sector_volume_ratio()` that computes 5d/20d volume ratio from `DailyPrice` and wires it into both new and update paths
+- **FII/DII synthetic history anchored to unrealistically low values** — when NSE returns a low-activity day (₹12–22 cr net), the backfill used that as anchor for 30 days of history; added unit-awareness check (scales lakh→crore if value < 500) and realistic clamps (net ±₹5000 cr, gross ₹5000–30000 cr)
+- **`GET /market/live/stocks`** — new endpoint: parallel live yfinance prices for all 18 NSE stocks in the universe (60s server-side cache); added `Api.liveStockPrices()` in `api.js`
+- **`portfolio.py` `get_equity_curve()`** — upgraded with 3-tier fallback: `PortfolioSnapshot` → `EquityCurvePoint` → paper trade reconstruction; no more flat-line on fresh installs
+
+---
+
+## [2026-06-25] — Session Summary
 - Strategy population: 3,469 → 4,087 (+618) · Promoted: 516 → 847 (+331)
 - All 8 families now get fair backtest coverage (family-balanced allocation)
 - Historical regimes backfilled: 227 days — volatility_play unlocked (best fitness 67.3)

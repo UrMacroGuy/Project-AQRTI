@@ -75,27 +75,60 @@ def _replace_condition_in_group(
     return ConditionGroup(conditions=new_conds, logic=group.logic)
 
 
+def _build_op_pool(meta_state: dict | None) -> list[str]:
+    """
+    Build the mutation operation pool, biased toward meta-learned best ops.
+    Higher-ranked operations get more slots (up to 3x baseline weight).
+    """
+    base_pool = [
+        "threshold_shift", "threshold_shift",
+        "operator_flip", "feature_swap",
+        "rule_add", "rule_remove",
+        "regime_expand", "regime_restrict",
+        "param_adjust", "param_adjust",
+        "confidence_adjust",
+    ]
+    if not meta_state:
+        return base_pool
+
+    ranked = meta_state.get("ranked_mutation_ops", [])
+    op_stats = meta_state.get("mutation_op_stats", {})
+    if not ranked:
+        return base_pool
+
+    # Extra slots for top-3 operations (only if they had positive avg delta)
+    pool = list(base_pool)
+    for i, op in enumerate(ranked[:3]):
+        stats = op_stats.get(op, {})
+        if stats.get("avg_delta", 0) > 0.5:
+            extra = 3 - i  # rank 0 gets 3 extra, rank 1 gets 2, rank 2 gets 1
+            pool.extend([op] * extra)
+
+    return pool
+
+
 def mutate(
     parent:       StrategyDSL,
     rng:          Optional[random.Random] = None,
     operation:    Optional[str] = None,
+    meta_state:   dict | None = None,
 ) -> tuple[StrategyDSL, str, str]:
     """
     Produce a mutated copy of parent.
+
+    Args:
+        parent:     source StrategyDSL
+        rng:        random number generator
+        operation:  force a specific operation (optional)
+        meta_state: output of meta_learner.compute_meta_state(); if supplied,
+                    operation selection is biased toward historically best ops.
 
     Returns:
         (child_strategy, operation_used, description)
     """
     rng  = rng or random.Random()
     dsl  = copy.deepcopy(parent)
-    ops  = [
-        "threshold_shift", "threshold_shift",   # double weight — most impactful
-        "operator_flip", "feature_swap",
-        "rule_add", "rule_remove",
-        "regime_expand", "regime_restrict",
-        "param_adjust", "param_adjust",          # double weight
-        "confidence_adjust",                     # new: tune entry confidence threshold
-    ]
+    ops  = _build_op_pool(meta_state)
     op   = operation or rng.choice(ops)
     desc = ""
 

@@ -24,6 +24,13 @@ from aqrti.utils.logger import get_logger
 from agents.agent_base import AgentBase
 from agents.agent_registry import register_agent_class
 
+# Self-improvement: import retrainer (graceful fail if ML deps unavailable)
+try:
+    from ml.model_retrainer import check_and_retrain, get_retraining_status
+    _RETRAINER_AVAILABLE = True
+except Exception:
+    _RETRAINER_AVAILABLE = False
+
 log = get_logger("agent.model_research")
 
 
@@ -250,9 +257,74 @@ class ModelResearchAgent(AgentBase):
                 "subcategory": "all_clear",
             })
 
+        # ── 5. Self-Improvement: trigger retraining if needed ─────
+        retrain_status = None
+        if _RETRAINER_AVAILABLE:
+            try:
+                retrain_status = get_retraining_status(db)
+                if retrain_status.get("needs_retraining"):
+                    acc   = retrain_status.get("accuracy_check", {})
+                    stale = retrain_status.get("staleness_check", {})
+
+                    # Trigger automatic retraining
+                    log.info("ModelResearchAgent: triggering automatic model retraining")
+                    retrain_result = check_and_retrain(db)
+
+                    if retrain_result.get("retrained"):
+                        r = retrain_result.get("result", {})
+                        findings.append({
+                            "title":       f"Auto-Retrain Triggered: new model v{r.get('version', '?')} accuracy={r.get('accuracy', 0):.3f}",
+                            "description": (
+                                f"Model retrained automatically. Trigger: {retrain_result.get('trigger_reason', 'N/A')}. "
+                                f"New model: {r.get('model', 'N/A')} v{r.get('version', '?')} "
+                                f"accuracy={r.get('accuracy', 0):.3f}. "
+                                f"Elapsed: {r.get('elapsed_sec', '?')}s."
+                            ),
+                            "evidence":    f"retrain_status={r.get('status')}, trigger={retrain_result.get('trigger_reason')}",
+                            "implication": "Model has been updated. Monitor accuracy over next 5-10 days.",
+                            "urgency":     "high",
+                            "subcategory": "auto_retrain",
+                        })
+                        recommendations.append(
+                            f"Model retrained (v{r.get('version', '?')}). "
+                            "Monitor win rate over next week to verify improvement."
+                        )
+                    else:
+                        findings.append({
+                            "title":       "Model Retraining Attempted — No Data Available",
+                            "description": (
+                                f"Retraining was triggered ({retrain_result.get('trigger_reason', 'N/A')}) "
+                                f"but pipeline returned: {retrain_result.get('result', {}).get('status', 'unknown')}."
+                            ),
+                            "evidence":    f"result={retrain_result}",
+                            "implication": "Check ML pipeline — training data or model code may be unavailable.",
+                            "urgency":     "normal",
+                            "subcategory": "retrain_unavailable",
+                        })
+                else:
+                    # No retraining needed — report status
+                    acc = retrain_status.get("accuracy_check", {})
+                    if acc.get("win_rate") is not None:
+                        findings.append({
+                            "title":       f"Model Self-Check: win_rate={acc['win_rate']:.1f}% — no retraining needed",
+                            "description": (
+                                f"Accuracy check over last 30 days: {acc['win_rate']:.1f}% win rate "
+                                f"({acc.get('evaluated', 0)} evaluated predictions). "
+                                f"Model age: {retrain_status.get('staleness_check', {}).get('age_days', '?')} days."
+                            ),
+                            "evidence":    f"win_rate={acc['win_rate']:.1f}%, evaluated={acc.get('evaluated', 0)}",
+                            "implication": "Model is performing within acceptable range.",
+                            "urgency":     "low",
+                            "subcategory": "model_self_check_ok",
+                        })
+            except Exception as exc:
+                log.warning("Self-improvement check failed: %s", exc)
+
         summary = (
             f"Model health: {len([f for f in findings if f['urgency'] == 'high'])} high-urgency findings. "
             f"{len(findings)} total findings."
+            + (f" Auto-retrain: {'yes' if retrain_status and retrain_status.get('needs_retraining') else 'no'}."
+               if retrain_status else "")
         )
         urgency = "high" if any(f["urgency"] == "high" for f in findings) else "normal"
 
@@ -262,6 +334,10 @@ class ModelResearchAgent(AgentBase):
             "findings":        findings,
             "recommendations": recommendations,
             "urgency":         urgency,
+            "metadata": {
+                "retrainer_available": _RETRAINER_AVAILABLE,
+                "retrain_status":      retrain_status,
+            },
         }
 
 

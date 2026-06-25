@@ -33,6 +33,7 @@ from strategies.crossover_engine import crossover
 from strategies.strategy_backtester import backtest_and_update
 from strategies.fitness_engine import score_strategy, compute_fitness
 from strategies.strategy_lifecycle import run_lifecycle_sweep
+from strategies.meta_learner import run_meta_learning, compute_meta_state
 
 log = get_logger("evolution_engine")
 
@@ -72,15 +73,17 @@ def evolve_population(
     n_offspring:   int = 20,
     seed:          Optional[int] = None,
     backtest_days: int = BACKTEST_DAYS,
+    run_meta:      bool = True,
 ) -> dict:
     """
-    Run one evolution cycle: select → reproduce → evaluate → promote/retire.
+    Run one evolution cycle: meta-learn → select → reproduce → evaluate → promote/retire.
 
     Args:
         db:            DB session
         n_offspring:   number of offspring to generate
         seed:          random seed
         backtest_days: how many days to backtest new offspring
+        run_meta:      if True, run meta-learning before this cycle and apply results
 
     Returns:
         Summary dict of the evolution cycle.
@@ -88,6 +91,21 @@ def evolve_population(
     rng       = random.Random(seed)
     regime    = _current_regime(db)
     next_gen  = _get_next_generation(db)
+
+    # ── Run meta-learning before evolution ────────────────────────
+    meta_state = None
+    meta_insights = 0
+    if run_meta:
+        try:
+            meta_state    = run_meta_learning(db)
+            meta_insights = meta_state.get("insights_written", 0)
+            log.info(
+                "Meta-learning: family_weights adjusted, bad_features=%d, conf_floor=%.1f",
+                len(meta_state.get("bad_features", [])),
+                meta_state.get("current_conf_floor", 55.0),
+            )
+        except Exception as exc:
+            log.warning("Meta-learning failed, proceeding without: %s", exc)
 
     # Select parent pool — diversified across families for genetic variety
     parents = (
@@ -129,8 +147,8 @@ def evolve_population(
             dsl_a    = StrategyDSL.from_json(parent_a.dsl_json)
 
             if rng.random() < MUTATION_RATE or len(parents) < 2:
-                # Mutation
-                child_dsl, op, desc = mutate(dsl_a, rng=rng)
+                # Mutation — pass meta_state so op selection is biased toward best ops
+                child_dsl, op, desc = mutate(dsl_a, rng=rng, meta_state=meta_state)
                 parent_ids          = [parent_a.strategy_id]
                 operation           = f"mutation:{op}"
             else:
@@ -221,21 +239,28 @@ def evolve_population(
     lifecycle = run_lifecycle_sweep(db)
 
     log.info(
-        "Evolution cycle gen=%d: created=%d skipped=%d promoted=%d retired=%d errors=%d",
+        "Evolution cycle gen=%d: created=%d skipped=%d promoted=%d retired=%d errors=%d meta_insights=%d",
         next_gen, len(created), skipped,
         len(lifecycle.get("promoted", [])),
         len(lifecycle.get("retired", [])),
         len(errors),
+        meta_insights,
     )
 
     return {
-        "generation":  next_gen,
-        "n_offspring": n_offspring,
-        "created":     len(created),
-        "skipped":     skipped,
-        "errors":      len(errors),
-        "promoted":    lifecycle.get("promoted", []),
-        "retired":     lifecycle.get("retired", []),
-        "regime_at":   regime,
-        "offspring":   created,
+        "generation":    next_gen,
+        "n_offspring":   n_offspring,
+        "created":       len(created),
+        "skipped":       skipped,
+        "errors":        len(errors),
+        "promoted":      lifecycle.get("promoted", []),
+        "retired":       lifecycle.get("retired", []),
+        "regime_at":     regime,
+        "offspring":     created,
+        "meta_insights": meta_insights,
+        "meta_state_summary": {
+            "bad_features":    meta_state.get("bad_features", []) if meta_state else [],
+            "conf_floor":      meta_state.get("current_conf_floor") if meta_state else None,
+            "top_mutation_op": (meta_state.get("ranked_mutation_ops") or [None])[0] if meta_state else None,
+        } if meta_state else None,
     }

@@ -147,9 +147,9 @@ def create_app() -> FastAPI:
     @app.post("/admin/ingest", tags=["Admin"])
     async def trigger_ingestion():
         """Manually trigger full market data ingestion."""
+        import asyncio
         api_logger.info("Manual ingestion triggered via admin endpoint.")
-        report = run_daily_ingestion()
-        return report
+        return await asyncio.to_thread(run_daily_ingestion)
 
     @app.post("/admin/backfill", tags=["Admin"])
     async def trigger_backfill(years: int = 3):
@@ -159,13 +159,16 @@ def create_app() -> FastAPI:
         After backfill completes, run /admin/features to compute features
         for all historical dates, then /admin/train to train ML models.
         """
+        import asyncio
         from datetime import date, timedelta
         start = date.today() - timedelta(days=int(years) * 365)
         api_logger.info("Historical backfill triggered: %d years back to %s", years, start)
-        report = run_daily_ingestion(start_override=start)
-        report["backfill_start"] = str(start)
-        report["years_requested"] = years
-        return report
+        def _run():
+            report = run_daily_ingestion(start_override=start)
+            report["backfill_start"] = str(start)
+            report["years_requested"] = years
+            return report
+        return await asyncio.to_thread(_run)
 
     @app.get("/admin/data-status", tags=["Admin"])
     async def data_status():
@@ -211,8 +214,9 @@ def create_app() -> FastAPI:
         import sys, os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
         from features.feature_generator import run_incremental_feature_generation
+        import asyncio
         api_logger.info("Manual feature generation triggered.")
-        return run_incremental_feature_generation()
+        return await asyncio.to_thread(run_incremental_feature_generation)
 
     @app.post("/admin/features-full", tags=["Admin"])
     async def trigger_features_full():
@@ -224,8 +228,9 @@ def create_app() -> FastAPI:
         import sys, os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
         from features.feature_generator import run_full_feature_generation
+        import asyncio
         api_logger.info("Full historical feature generation triggered.")
-        return run_full_feature_generation()
+        return await asyncio.to_thread(run_full_feature_generation)
 
     @app.post("/admin/news", tags=["Admin"])
     async def trigger_news():
@@ -233,8 +238,9 @@ def create_app() -> FastAPI:
         import sys, os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
         from news.news_pipeline import run_news_pipeline
+        import asyncio
         api_logger.info("Manual news pipeline triggered.")
-        return run_news_pipeline()
+        return await asyncio.to_thread(run_news_pipeline)
 
     @app.post("/admin/sentiment", tags=["Admin"])
     async def trigger_sentiment():
@@ -242,8 +248,9 @@ def create_app() -> FastAPI:
         import sys, os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
         from sentiment.sentiment_engine import run_sentiment_pipeline
+        import asyncio
         api_logger.info("Manual sentiment pipeline triggered.")
-        return run_sentiment_pipeline()
+        return await asyncio.to_thread(run_sentiment_pipeline)
 
     @app.post("/admin/train", tags=["Admin"])
     async def trigger_training():
@@ -253,8 +260,9 @@ def create_app() -> FastAPI:
         sys.path.insert(0, backend_dir)
         from ml.validation.backtest_validator import run_full_training
         from ml.ensemble.ensemble_engine import reload_ensemble
+        import asyncio
         api_logger.info("Manual model training triggered.")
-        result = run_full_training()
+        result = await asyncio.to_thread(run_full_training)
         reload_ensemble()
         return result
 
@@ -265,8 +273,9 @@ def create_app() -> FastAPI:
         backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
         sys.path.insert(0, backend_dir)
         from ml.prediction_pipeline import run_prediction_pipeline
+        import asyncio
         api_logger.info("Manual prediction pipeline triggered.")
-        return run_prediction_pipeline()
+        return await asyncio.to_thread(run_prediction_pipeline)
 
     @app.post("/admin/paper-trade", tags=["Admin"])
     async def trigger_paper_trade():
@@ -280,8 +289,9 @@ def create_app() -> FastAPI:
         import portfolio.portfolio_builder as _pb
         importlib.reload(_pb)
         from paper_trading.paper_engine import run_paper_trading_cycle
+        import asyncio
         api_logger.info("Manual paper trading cycle triggered.")
-        return run_paper_trading_cycle()
+        return await asyncio.to_thread(run_paper_trading_cycle)
 
     @app.post("/admin/lifecycle", tags=["Admin"])
     async def trigger_lifecycle():
@@ -291,11 +301,14 @@ def create_app() -> FastAPI:
         sys.path.insert(0, backend_dir)
         from strategies.strategy_lifecycle import run_lifecycle_sweep
         from aqrti.database.engine import get_db
+        import asyncio
         api_logger.info("Manual lifecycle sweep triggered.")
-        with get_db() as db:
-            result = run_lifecycle_sweep(db)
-            db.commit()
-        return result
+        def _run_lc():
+            with get_db() as db:
+                result = run_lifecycle_sweep(db)
+                db.commit()
+            return result
+        return await asyncio.to_thread(_run_lc)
 
     @app.post("/admin/learning", tags=["Admin"])
     async def trigger_learning():
@@ -304,8 +317,9 @@ def create_app() -> FastAPI:
         backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
         sys.path.insert(0, backend_dir)
         from learning.learning_loop import run_daily_learning
+        import asyncio
         api_logger.info("Manual learning loop triggered.")
-        return run_daily_learning(days=7)
+        return await asyncio.to_thread(run_daily_learning, 7)
 
     @app.post("/admin/strategy-research", tags=["Admin"])
     async def trigger_strategy_research():
@@ -314,8 +328,10 @@ def create_app() -> FastAPI:
         backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
         sys.path.insert(0, backend_dir)
         from strategies.strategy_research_loop import run_daily_strategy_research
+        import asyncio
         api_logger.info("Manual strategy research loop triggered.")
-        return run_daily_strategy_research(generate_n=50, evolve_n=20)
+        import functools
+        return await asyncio.to_thread(functools.partial(run_daily_strategy_research, generate_n=50, evolve_n=20))
 
     @app.post("/admin/agent-pipeline", tags=["Admin"])
     async def trigger_agent_pipeline():
@@ -325,14 +341,17 @@ def create_app() -> FastAPI:
         sys.path.insert(0, backend_dir)
         from aqrti.database.engine import get_session_factory
         from agents.agent_scheduler import run_daily_pipeline
+        import asyncio
         api_logger.info("Manual agent pipeline triggered.")
-        db = get_session_factory()()
-        try:
-            result = run_daily_pipeline(db)
-            db.commit()
-            return result
-        finally:
-            db.close()
+        def _run_ap():
+            db = get_session_factory()()
+            try:
+                result = run_daily_pipeline(db)
+                db.commit()
+                return result
+            finally:
+                db.close()
+        return await asyncio.to_thread(_run_ap)
 
     @app.post("/admin/vault", tags=["Admin"])
     async def trigger_vault():
@@ -341,18 +360,19 @@ def create_app() -> FastAPI:
         backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
         sys.path.insert(0, backend_dir)
         from vault.vault_manager import run_daily_vault
+        import asyncio
         api_logger.info("Manual vault archive triggered.")
-        return run_daily_vault()
+        return await asyncio.to_thread(run_daily_vault)
 
     @app.post("/admin/intelligence", tags=["Admin"])
     async def trigger_intelligence_pipeline():
         """Manually trigger the full Historical Intelligence Training pipeline."""
-        import sys, os
+        import asyncio, sys, os
         backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
         sys.path.insert(0, backend_dir)
         from intelligence_training.intelligence_pipeline import run_historical_intelligence_pipeline
         api_logger.info("Manual historical intelligence pipeline triggered.")
-        return run_historical_intelligence_pipeline()
+        return await asyncio.to_thread(run_historical_intelligence_pipeline)
 
     @app.post("/admin/data-supremacy", tags=["Admin"])
     async def trigger_data_supremacy():
@@ -361,8 +381,9 @@ def create_app() -> FastAPI:
         backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
         sys.path.insert(0, backend_dir)
         from data_supremacy.pipeline import run_data_supremacy_pipeline
+        import asyncio
         api_logger.info("Manual data supremacy pipeline triggered.")
-        return run_data_supremacy_pipeline()
+        return await asyncio.to_thread(run_data_supremacy_pipeline)
 
     @app.get("/health", tags=["Admin"])
     async def health():

@@ -83,59 +83,69 @@ def _rand_confidence(rng: random.Random, lo: float = 50.0, hi: float = 68.0) -> 
     return round(rng.uniform(lo, hi), 1)
 
 
+def _rr_take_profit(rng: random.Random, stop_loss_pct: float, min_rr: float = 1.5) -> float:
+    """Return a take-profit that gives at minimum min_rr reward:risk ratio."""
+    min_tp = abs(stop_loss_pct) * min_rr
+    max_tp = abs(stop_loss_pct) * 3.5
+    return round(rng.uniform(min_tp, max_tp), 1)
+
+
 def _generate_momentum(rng: random.Random) -> StrategyDSL:
-    feat   = rng.choice(["return_5d", "return_21d", "momentum_10d", "momentum_20d"])
-    # Wider threshold ranges so some strategies fire on smaller moves
-    thresh = rng.uniform(1.0, 6.0)
-    rsi_th = rng.uniform(45, 60)       # was 50-65, lowered to catch more entries
-    regime = rng.choice(["bull_only", "bull_sideways", "all_weather"])
-    n_conds = rng.randint(2, 3)        # allow 2-condition strategies (less restrictive)
-    conds = [_make_condition(feat, ">", round(thresh, 2))]
+    feat    = rng.choice(["return_5d", "return_21d", "momentum_10d", "momentum_20d"])
+    thresh  = rng.uniform(1.5, 6.0)      # must move at least 1.5% to qualify
+    rsi_th  = rng.uniform(45, 58)        # don't chase overbought
+    regime  = rng.choice(["bull_only", "bull_sideways", "all_weather"])
+    n_conds = rng.randint(2, 3)
+    conds   = [_make_condition(feat, ">", round(thresh, 2))]
     if n_conds >= 2:
         conds.append(_make_condition("rsi_14", ">", round(rsi_th, 1)))
     if n_conds >= 3:
-        trend = rng.choice(["macd_signal", "adx_14", "ema20_above_ema50"])
-        t_val = rng.uniform(45, 65)
+        trend = rng.choice(["macd_signal", "adx_14", "ema20_above_ema50", "price_above_ema50"])
+        t_val = rng.uniform(25, 50)     # ADX > 25 = trending; others are binary/normalised
         conds.append(_make_condition(trend, ">", round(t_val, 1)))
     entry  = ConditionGroup(conditions=conds)
     exit_  = ConditionGroup(conditions=[
         _make_condition("rsi_14", ">", round(rng.uniform(68, 80), 1)),
     ], logic="OR")
+    sl     = round(-rng.uniform(5, 10), 1)
     return StrategyDSL(
         entry_conditions = entry,
         exit_conditions  = exit_,
         allowed_regimes  = REGIME_SETS[regime],
         family           = "momentum",
         name             = f"Momentum_{feat}_{round(thresh,1)}",
-        min_confidence   = _rand_confidence(rng, 50.0, 68.0),
-        max_holding_days = rng.randint(5, 20),
-        stop_loss_pct    = round(-rng.uniform(5, 10), 1),
-        take_profit_pct  = round(rng.uniform(8, 18), 1),
+        min_confidence   = _rand_confidence(rng, 52.0, 68.0),
+        max_holding_days = rng.randint(7, 25),   # min 7 to clear cost drag
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.8),  # min 1.8:1 R:R
     )
 
 
 def _generate_mean_reversion(rng: random.Random) -> StrategyDSL:
-    rsi_lo = round(rng.uniform(28, 42), 1)
+    rsi_lo = round(rng.uniform(25, 38), 1)   # deeper oversold = higher conviction
     n_conds = rng.randint(2, 3)
     conds = [_make_condition("rsi_14", "<", rsi_lo)]
     if n_conds >= 2:
-        conds.append(_make_condition("return_5d", "<", round(-rng.uniform(1.0, 3.5), 2)))
+        # Recent pullback confirms oversold (require actual price drop)
+        conds.append(_make_condition("return_5d", "<", round(-rng.uniform(2.0, 5.0), 2)))
     if n_conds >= 3:
-        conds.append(_make_condition("bb_width_20", ">", round(rng.uniform(0.02, 0.07), 3)))
-    entry  = ConditionGroup(conditions=conds)
-    exit_  = ConditionGroup(conditions=[
-        _make_condition("rsi_14", ">", round(rng.uniform(48, 58), 1)),
+        # BB squeeze or Bollinger lower band touch
+        conds.append(_make_condition("bb_width_20", ">", round(rng.uniform(0.03, 0.08), 3)))
+    entry = ConditionGroup(conditions=conds)
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("rsi_14", ">", round(rng.uniform(50, 60), 1)),
     ])
+    sl = round(-rng.uniform(4, 8), 1)
     return StrategyDSL(
         entry_conditions = entry,
         exit_conditions  = exit_,
         allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
         family           = "mean_reversion",
         name             = f"MeanRev_RSI{rsi_lo}",
-        min_confidence   = _rand_confidence(rng, 48.0, 65.0),
-        max_holding_days = rng.randint(3, 12),
-        stop_loss_pct    = round(-rng.uniform(4, 9), 1),
-        take_profit_pct  = round(rng.uniform(5, 13), 1),
+        min_confidence   = _rand_confidence(rng, 50.0, 65.0),
+        max_holding_days = rng.randint(5, 15),   # min 5 — MR needs time to recover
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
     )
 
 
@@ -290,15 +300,102 @@ def _generate_hybrid(rng: random.Random) -> StrategyDSL:
     )
 
 
+def _generate_quality_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    QGLP-inspired: Quality + Growth + Low Leverage + Price Momentum.
+    Indian market's most durable factor — works across most regimes.
+    Entry: stock showing BOTH strong price momentum AND positive sentiment
+           (proxy for improving fundamentals since we don't have balance sheet data).
+    Target: 20-35% TP, 8-12% SL — position for multi-week swing.
+    """
+    mom_feat = rng.choice(["return_21d", "momentum_20d", "relative_strength_nifty_21d"])
+    mom_th   = round(rng.uniform(3.0, 8.0), 2)   # 3-8% outperformance
+    rsi_th   = round(rng.uniform(50, 62), 1)      # not overbought but trending up
+    n_conds  = rng.randint(3, 4)
+
+    conds = [
+        _make_condition(mom_feat, ">", mom_th),         # price strength
+        _make_condition("rsi_14", ">", rsi_th),         # momentum confirmed
+    ]
+    if n_conds >= 3:
+        conds.append(_make_condition("adx_14", ">", round(rng.uniform(22, 30), 1)))  # trending
+    if n_conds >= 4:
+        conds.append(_make_condition("volume_ratio_20d", ">", round(rng.uniform(1.1, 1.6), 2)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("rsi_14", ">", round(rng.uniform(72, 82), 1)),
+        _make_condition("return_5d", "<", round(-rng.uniform(2.0, 4.0), 1)),  # momentum break
+    ], logic="OR")
+
+    sl = round(-rng.uniform(8, 12), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS["bull_sideways"],
+        family           = "quality_momentum",
+        name             = f"QualMom_{mom_feat[:8]}_{mom_th}",
+        min_confidence   = _rand_confidence(rng, 58.0, 72.0),  # higher conviction needed
+        max_holding_days = rng.randint(15, 40),    # position trade — 3-8 weeks
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),   # min 2:1 R:R
+    )
+
+
+def _generate_institutional_flow(rng: random.Random) -> StrategyDSL:
+    """
+    Ride institutional accumulation: high delivery %, volume surge,
+    price above EMA50. When big money is buying, follow.
+    """
+    del_th  = round(rng.uniform(60, 78), 1)    # >60% delivery = genuine buying
+    vol_th  = round(rng.uniform(1.4, 2.5), 2)  # volume surge
+    n_conds = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("delivery_pct", ">", del_th),
+        _make_condition("volume_ratio_20d", ">", vol_th),
+        _make_condition("price_above_ema50", "==", 1.0),
+    ]
+    if n_conds >= 4:
+        conds.append(_make_condition("rsi_14", ">", round(rng.uniform(48, 60), 1)))
+
+    sl = round(-rng.uniform(6, 10), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "institutional_flow",
+        name             = f"InstFlow_Del{del_th}_Vol{vol_th}",
+        min_confidence   = _rand_confidence(rng, 55.0, 70.0),
+        max_holding_days = rng.randint(10, 30),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
 _GENERATORS = {
-    "momentum":         _generate_momentum,
-    "mean_reversion":   _generate_mean_reversion,
-    "breakout":         _generate_breakout,
-    "sentiment_driven": _generate_sentiment_driven,
-    "regime_adaptive":  _generate_regime_adaptive,
-    "volume_surge":     _generate_volume_surge,
-    "volatility_play":  _generate_volatility_play,
-    "hybrid":           _generate_hybrid,
+    "momentum":           _generate_momentum,
+    "mean_reversion":     _generate_mean_reversion,
+    "breakout":           _generate_breakout,
+    "sentiment_driven":   _generate_sentiment_driven,
+    "regime_adaptive":    _generate_regime_adaptive,
+    "volume_surge":       _generate_volume_surge,
+    "volatility_play":    _generate_volatility_play,
+    "hybrid":             _generate_hybrid,
+    "quality_momentum":   _generate_quality_momentum,
+    "institutional_flow": _generate_institutional_flow,
+}
+
+# Family weights for generation — bias toward historically stronger families
+_FAMILY_WEIGHTS = {
+    "momentum":           0.18,
+    "mean_reversion":     0.10,
+    "breakout":           0.12,
+    "sentiment_driven":   0.06,
+    "regime_adaptive":    0.08,
+    "volume_surge":       0.10,
+    "volatility_play":    0.08,
+    "hybrid":             0.08,
+    "quality_momentum":   0.12,   # strong Indian factor — weighted up
+    "institutional_flow": 0.08,
 }
 
 
@@ -306,14 +403,17 @@ def generate_candidates(
     n:            int = 100,
     seed:         int | None = None,
     families:     list[str] | None = None,
+    meta_state:   dict | None = None,
 ) -> list[StrategyDSL]:
     """
     Generate N candidate strategies.
 
     Args:
-        n:        number of candidates to generate
-        seed:     random seed for reproducibility
-        families: restrict generation to specific families
+        n:          number of candidates to generate
+        seed:       random seed for reproducibility
+        families:   restrict generation to specific families
+        meta_state: output of meta_learner.compute_meta_state() — if supplied,
+                    generation weights and bad-feature avoidance are adapted.
 
     Returns:
         list of unique StrategyDSL objects (deduplicated by strategy_id)
@@ -323,13 +423,44 @@ def generate_candidates(
     seen_ids = set()
     result   = []
 
+    # Use meta-learned weights if available, else defaults
+    if meta_state and meta_state.get("family_weights"):
+        adapted_weights = meta_state["family_weights"]
+        pool_weights = [adapted_weights.get(f, _FAMILY_WEIGHTS.get(f, 0.05)) for f in pool]
+        log.info("Generator using meta-learned family weights")
+    else:
+        pool_weights = [_FAMILY_WEIGHTS.get(f, 0.1) for f in pool]
+
+    total_w = sum(pool_weights)
+    pool_weights = [w / total_w for w in pool_weights]
+
+    bad_features = set(meta_state.get("bad_features", [])) if meta_state else set()
+    conf_floor   = (meta_state.get("current_conf_floor") or 55.0) if meta_state else 55.0
+
     attempts = 0
     while len(result) < n and attempts < n * 5:
-        family = rng.choice(pool)
+        family = rng.choices(pool, weights=pool_weights, k=1)[0]
         gen_fn = _GENERATORS[family]
         try:
             strategy = gen_fn(rng)
-            sid      = strategy.strategy_id()
+
+            # Apply meta-learned confidence floor
+            if strategy.min_confidence is None or strategy.min_confidence < conf_floor:
+                strategy.min_confidence = round(conf_floor + rng.uniform(0, 8.0), 1)
+
+            # If strategy uses a bad feature as its primary condition, regenerate once
+            if bad_features:
+                from strategies.strategy_dsl import ConditionGroup
+                entry_conds = strategy.entry_conditions.conditions if strategy.entry_conditions else []
+                primary_feats = [
+                    c.feature for c in entry_conds
+                    if hasattr(c, "feature") and c.feature in bad_features
+                ]
+                if len(primary_feats) >= len(entry_conds):
+                    # All entry conditions use bad features — try once more with same family
+                    strategy = gen_fn(rng)
+
+            sid = strategy.strategy_id()
             if sid not in seen_ids:
                 seen_ids.add(sid)
                 result.append(strategy)
@@ -337,7 +468,12 @@ def generate_candidates(
             log.warning("Generator error in family %s: %s", family, exc)
         attempts += 1
 
-    log.info("Generated %d candidates (%d families) in %d attempts", len(result), len(pool), attempts)
+    log.info(
+        "Generated %d candidates (%d families) in %d attempts (meta=%s bad_feats=%d conf_floor=%.1f)",
+        len(result), len(pool), attempts,
+        "yes" if meta_state else "no",
+        len(bad_features), conf_floor,
+    )
     return result
 
 
@@ -385,17 +521,30 @@ def persist_candidates(
 
 
 def run_generation_cycle(
-    db:       Session,
-    n:        int = 200,
-    seed:     int | None = None,
-    families: list[str] | None = None,
+    db:         Session,
+    n:          int = 200,
+    seed:       int | None = None,
+    families:   list[str] | None = None,
     generation: int = 0,
+    use_meta:   bool = True,
 ) -> dict:
-    candidates = generate_candidates(n=n, seed=seed, families=families)
+    meta_state = None
+    if use_meta:
+        try:
+            from strategies.meta_learner import compute_meta_state
+            meta_state = compute_meta_state(db)
+            log.info("Generation cycle using meta-state (conf_floor=%.1f bad_feats=%d)",
+                     meta_state.get("current_conf_floor", 55.0),
+                     len(meta_state.get("bad_features", [])))
+        except Exception as exc:
+            log.warning("Meta-learner unavailable, using defaults: %s", exc)
+
+    candidates = generate_candidates(n=n, seed=seed, families=families, meta_state=meta_state)
     written    = persist_candidates(db, candidates, generation=generation)
     return {
         "generated":   len(candidates),
         "persisted":   written,
         "skipped":     len(candidates) - written,
         "generation":  generation,
+        "meta_used":   meta_state is not None,
     }

@@ -78,8 +78,10 @@ def get_portfolio_summary(db: Session) -> dict:
 
 
 def get_equity_curve(db: Session, days: int = 30) -> dict:
-    """Return equity curve from portfolio snapshots."""
+    """Return equity curve — prefers PortfolioSnapshot, falls back to EquityCurvePoint, then paper trade reconstruction."""
+    from collections import defaultdict
     cutoff = date.today() - timedelta(days=days)
+
     rows = (
         db.query(PortfolioSnapshot)
         .filter(PortfolioSnapshot.date >= cutoff)
@@ -92,7 +94,55 @@ def get_equity_curve(db: Session, days: int = 30) -> dict:
             "values": [r.total_value for r in rows],
         }
 
-    # Synthetic flat line when no data yet
+    # Try EquityCurvePoint (written by performance_tracker)
+    try:
+        from aqrti.database.models import EquityCurvePoint
+        eq_rows = (
+            db.query(EquityCurvePoint)
+            .filter(EquityCurvePoint.date >= cutoff)
+            .order_by(EquityCurvePoint.date.asc())
+            .all()
+        )
+        if len(eq_rows) >= 2:
+            return {
+                "labels": [str(r.date) for r in eq_rows],
+                "values": [round(r.total_value, 2) for r in eq_rows],
+            }
+    except Exception:
+        pass
+
+    # Reconstruct from paper trade P&L history
+    try:
+        from aqrti.database.models import PaperPortfolio, PaperTrade as _PaperTrade
+        settings  = get_settings()
+        paper     = db.query(PaperPortfolio).filter_by(portfolio_name="default").first()
+        capital   = paper.initial_capital if paper else settings.paper_capital
+
+        trades = db.query(_PaperTrade).filter(_PaperTrade.portfolio_name == "default").all()
+        daily_pnl: dict = defaultdict(float)
+        for t in trades:
+            if not t.is_open and t.gross_pnl and t.exit_date:
+                daily_pnl[str(t.exit_date)] += t.gross_pnl
+
+        if daily_pnl:
+            sorted_keys = sorted(daily_pnl.keys())
+            start_d  = date.fromisoformat(sorted_keys[0]) - timedelta(days=1)
+            end_d    = date.today()
+            running  = capital
+            labels, values = [], []
+            cur_d = start_d
+            while cur_d <= end_d:
+                running += daily_pnl.get(str(cur_d), 0.0)
+                if cur_d >= cutoff:
+                    labels.append(str(cur_d))
+                    values.append(round(running, 2))
+                cur_d += timedelta(days=1)
+            if len(labels) >= 2:
+                return {"labels": labels, "values": values}
+    except Exception:
+        pass
+
+    # Last resort: flat line
     settings = get_settings()
     labels, values = [], []
     for i in range(days, -1, -1):

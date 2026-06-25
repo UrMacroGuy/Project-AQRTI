@@ -37,10 +37,44 @@ from strategies.strategy_metrics import (
 
 log = get_logger("strategy_backtester")
 
-SLIPPAGE_PCT    = 0.05    # 5 bps round-trip
-COMMISSION_PCT  = 0.03    # 3 bps commission
+# ── Indian NSE Transaction Cost Model (delivery equity) ───────
+# Applied on ENTRY and EXIT separately.
+# All values are percentages of trade value.
+STT_BUY          = 0.001    # 0.10% — Securities Transaction Tax on buy
+STT_SELL         = 0.001    # 0.10% — Securities Transaction Tax on sell
+EXCHANGE_CHARGE  = 0.0000345 # 0.00345% — NSE transaction charge (each side)
+SEBI_CHARGE      = 0.000001  # 0.0001% — SEBI turnover fee (each side)
+STAMP_DUTY       = 0.00015  # 0.015% — Stamp duty on buy only
+BROKERAGE        = 0.0003   # 0.03% — discount broker (each side, capped ₹20/order)
+GST_RATE         = 0.18     # 18% GST on (brokerage + exchange + SEBI)
+
+# Slippage: 0.05% entry (market impact) + 0.03% exit
+SLIPPAGE_ENTRY   = 0.0005   # 0.05% — bid-ask spread + market impact on entry
+SLIPPAGE_EXIT    = 0.0003   # 0.03% — tighter on exit (limit order assumed)
+
 POSITION_SIZE   = 0.05    # 5% of capital per trade
 MAX_OPEN_TRADES = 8       # max concurrent positions
+
+
+def _transaction_cost(side: str = "buy") -> float:
+    """
+    Total one-way transaction cost as a fraction of trade value.
+    side: 'buy' or 'sell'
+    Returns a positive fraction (e.g. 0.00145 = 0.145%)
+    """
+    brokerage    = BROKERAGE
+    exchange     = EXCHANGE_CHARGE
+    sebi         = SEBI_CHARGE
+    gst          = (brokerage + exchange + sebi) * GST_RATE
+    stt          = STT_BUY if side == "buy" else STT_SELL
+    stamp        = STAMP_DUTY if side == "buy" else 0.0
+    slippage     = SLIPPAGE_ENTRY if side == "buy" else SLIPPAGE_EXIT
+    return brokerage + exchange + sebi + gst + stt + stamp + slippage
+
+
+# Pre-compute round-trip cost (used in P&L calc)
+ROUND_TRIP_COST = _transaction_cost("buy") + _transaction_cost("sell")
+# ≈ 0.145% buy + 0.135% sell = 0.28% round-trip (realistic for NSE delivery)
 
 STOCK_UNIVERSE = [
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
@@ -441,7 +475,9 @@ def backtest_strategy(
                     exit_reason = "bearish_flip"
 
             if exit_reason:
-                net_pnl = pnl_pct - SLIPPAGE_PCT - COMMISSION_PCT
+                # Real NSE cost: entry already inflated by slippage; deduct exit costs
+                exit_cost_pct = _transaction_cost("sell") * 100
+                net_pnl = pnl_pct - exit_cost_pct
                 t = TradeRecord(
                     symbol        = sym,
                     entry_date    = pos["entry_date"],
@@ -498,9 +534,11 @@ def backtest_strategy(
             if entry_price is None:
                 continue
 
+            # Inflate entry price by full buy-side cost (STT+brokerage+slippage+stamp+GST+SEBI)
+            entry_cost_pct = _transaction_cost("buy")
             open_positions[sym] = {
                 "entry_date":   d,
-                "entry_price":  entry_price * (1 + SLIPPAGE_PCT / 100),
+                "entry_price":  entry_price * (1 + entry_cost_pct),
                 "holding_days": 0,
                 "regime_entry": regime,
                 "confidence":   signal["confidence"],
@@ -513,7 +551,8 @@ def backtest_strategy(
         if cur_price is None:
             continue
         pnl_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
-        net_pnl = pnl_pct - SLIPPAGE_PCT - COMMISSION_PCT
+        exit_cost_pct = _transaction_cost("sell") * 100
+        net_pnl = pnl_pct - exit_cost_pct
         t = TradeRecord(
             symbol        = sym,
             entry_date    = pos["entry_date"],

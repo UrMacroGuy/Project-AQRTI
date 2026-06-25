@@ -364,6 +364,41 @@ def get_price_history(
     ]
 
 
+_INDEX_YF_MAP = {"NIFTY50": "^NSEI", "BANKNIFTY": "^NSEBANK"}
+
+
+def _fetch_live_index(index_name: str) -> Optional[dict]:
+    """Fetch today's index value from yfinance when DB is stale."""
+    yf_sym = _INDEX_YF_MAP.get(index_name)
+    if not yf_sym:
+        return None
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(yf_sym)
+        fi = ticker.fast_info
+        price = getattr(fi, "last_price", None)
+        prev  = getattr(fi, "previous_close", None)
+        if price is None:
+            hist = ticker.history(period="2d", interval="1d", auto_adjust=True)
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+                prev  = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None
+        if price:
+            ret = ((float(price) - float(prev)) / float(prev) * 100) if prev else 0.0
+            return {
+                "index_name": index_name,
+                "date":       str(date.today()),
+                "open":       None,
+                "high":       None,
+                "low":        None,
+                "close":      round(float(price), 2),
+                "returns":    round(ret, 4),
+            }
+    except Exception:
+        pass
+    return None
+
+
 def get_latest_index(db: Session, index_name: str) -> Optional[dict]:
     row = (
         db.query(IndexData)
@@ -371,8 +406,14 @@ def get_latest_index(db: Session, index_name: str) -> Optional[dict]:
         .order_by(IndexData.date.desc())
         .first()
     )
+    today = date.today()
+    # If DB data is stale (more than 1 calendar day old on a weekday), try live
+    if row and (today - row.date).days > 1:
+        live = _fetch_live_index(index_name)
+        if live:
+            return live
     if not row:
-        return None
+        return _fetch_live_index(index_name)
     return {
         "index_name": row.index_name,
         "date":       str(row.date),

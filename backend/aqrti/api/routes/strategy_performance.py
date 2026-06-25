@@ -107,6 +107,30 @@ def list_performance(
     return {"performance": perf, "total": len(perf), "source": "backtest"}
 
 
+@router.post("/validate")
+def run_validation_sweep(
+    days: int = Query(default=90, ge=7, le=365),
+    db: Session = Depends(get_db_dependency),
+):
+    """
+    Full live-vs-backtest validation sweep.
+    Reads all closed paper trades, writes StrategyPerformance rows,
+    demotes strategies that diverge badly from their backtest metrics.
+    """
+    from strategies.live_validator import run_daily_validation_sweep
+    return run_daily_validation_sweep(db, days_back=days)
+
+
+@router.get("/{strategy_id}/validation")
+def get_strategy_validation(
+    strategy_id: str,
+    db: Session = Depends(get_db_dependency),
+):
+    """Live-vs-backtest comparison for one strategy (used by DNA viewer)."""
+    from strategies.live_validator import get_live_validation_summary
+    return get_live_validation_summary(db, strategy_id)
+
+
 @router.get("/{strategy_id}/metrics")
 def get_live_metrics(
     strategy_id: str,
@@ -126,6 +150,8 @@ def get_pnl_chart(
     db: Session = Depends(get_db_dependency),
 ):
     cutoff = date.today() - timedelta(days=days)
+
+    # Try live StrategyPerformance rows first
     rows = (
         db.query(StrategyPerformance)
         .filter(
@@ -135,10 +161,51 @@ def get_pnl_chart(
         .order_by(StrategyPerformance.date)
         .all()
     )
+    if rows:
+        return {
+            "strategy_id":    strategy_id,
+            "labels":         [str(r.date) for r in rows],
+            "cumulative_pnl": [r.cumulative_pnl for r in rows],
+            "daily_pnl_pct":  [r.daily_pnl_pct for r in rows],
+            "regime":         [r.regime_at for r in rows],
+        }
+
+    # Build synthetic equity curve from backtest trades
+    from aqrti.database.models import StrategyBacktestTrade
+    trades = (
+        db.query(StrategyBacktestTrade)
+        .filter(
+            StrategyBacktestTrade.strategy_id == strategy_id,
+            StrategyBacktestTrade.exit_date != None,
+        )
+        .order_by(StrategyBacktestTrade.exit_date.asc())
+        .all()
+    )
+    if not trades:
+        return {"strategy_id": strategy_id, "labels": [], "cumulative_pnl": [], "daily_pnl_pct": [], "regime": []}
+
+    # Group by exit date, accumulate cumulative P&L
+    from collections import defaultdict
+    daily_pnl: dict = defaultdict(float)
+    for t in trades:
+        d = str(t.exit_date)
+        daily_pnl[d] += (t.pnl_pct or 0.0)
+
+    sorted_dates = sorted(daily_pnl.keys())
+    cum = 0.0
+    labels, cum_pnl, daily = [], [], []
+    for d in sorted_dates:
+        pnl = round(daily_pnl[d], 4)
+        cum = round(cum + pnl, 4)
+        labels.append(d)
+        daily.append(pnl)
+        cum_pnl.append(cum)
+
     return {
-        "strategy_id": strategy_id,
-        "labels":      [str(r.date) for r in rows],
-        "cumulative_pnl": [r.cumulative_pnl for r in rows],
-        "daily_pnl_pct":  [r.daily_pnl_pct for r in rows],
-        "regime":         [r.regime_at for r in rows],
+        "strategy_id":    strategy_id,
+        "labels":         labels,
+        "cumulative_pnl": cum_pnl,
+        "daily_pnl_pct":  daily,
+        "regime":         [],
+        "source":         "backtest",
     }

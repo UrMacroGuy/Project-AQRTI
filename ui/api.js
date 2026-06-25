@@ -7,6 +7,7 @@
 const API_CONFIG = {
   USE_MOCK: false,
   BASE:     'http://localhost:8000/api/v1',
+  ADMIN:    'http://localhost:8000/admin',
   TIMEOUT:  10000,
 };
 
@@ -127,6 +128,18 @@ const Api = {
       return await res.json();
     } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/live failed:', e.message); return null; }
   },
+  async liveStockPrices() {
+    // 18-stock universe live prices (60s server cache)
+    const url = `${API_CONFIG.BASE}/market/live/stocks`;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 30000);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/live/stocks failed:', e.message); return null; }
+  },
   async indexHistory(name, days = 30)  { return apiFetch(`/market/history/${name}`, { days }); },
   async predictions(p = {})            { return apiFetch('/predictions', p); },
   async news(p = {})                    { return apiFetch('/news', p); },
@@ -158,6 +171,7 @@ const Api = {
   async performance()                  { return apiFetch('/performance'); },
   async performanceSummary()           { return apiFetch('/performance/summary'); },
   async equityCurve(days = 90)         { return apiFetch('/equity-curve', { days }); },
+  async backfillEquity()               { return apiPost('/paper-portfolio/backfill-equity'); },
   async rebalancePreview()             { return apiFetch('/rebalance'); },
 
   // Learning engine
@@ -254,17 +268,17 @@ const Api = {
   async predictionPatterns()         { return apiFetch('/prediction-patterns'); },
   async replayHistory()              { return apiFetch('/replay/history'); },
 
-  // Admin triggers (POST to /admin/*)
-  async triggerTraining()            { return apiPostRaw(`${API_CONFIG.BASE}/admin/train`); },
-  async triggerPredictions()         { return apiPostRaw(`${API_CONFIG.BASE}/admin/predict`); },
-  async triggerIngestion()           { return apiPostRaw(`${API_CONFIG.BASE}/admin/ingest`); },
-  async triggerPaperTrade()          { return apiPostRaw(`${API_CONFIG.BASE}/admin/paper-trade`); },
-  async triggerLearning()            { return apiPostRaw(`${API_CONFIG.BASE}/admin/learning`); },
-  async triggerStrategyResearch()    { return apiPostRaw(`${API_CONFIG.BASE}/admin/strategy-research`); },
-  async triggerVault()               { return apiPostRaw(`${API_CONFIG.BASE}/admin/vault`); },
-  async triggerDataSupremacy()       { return apiPostRaw(`${API_CONFIG.BASE}/admin/data-supremacy`); },
-  async triggerIntelligence()        { return apiPostRaw(`${API_CONFIG.BASE}/admin/intelligence`); },
-  async agentPipeline()              { return apiPostRaw(`${API_CONFIG.BASE}/admin/agent-pipeline`); },
+  // Admin triggers (POST to /admin/* — no /api/v1 prefix)
+  async triggerTraining()            { return apiPostRaw(`${API_CONFIG.ADMIN}/train`); },
+  async triggerPredictions()         { return apiPostRaw(`${API_CONFIG.ADMIN}/predict`); },
+  async triggerIngestion()           { return apiPostRaw(`${API_CONFIG.ADMIN}/ingest`); },
+  async triggerPaperTrade()          { return apiPostRaw(`${API_CONFIG.ADMIN}/paper-trade`); },
+  async triggerLearning()            { return apiPostRaw(`${API_CONFIG.ADMIN}/learning`); },
+  async triggerStrategyResearch()    { return apiPostRaw(`${API_CONFIG.ADMIN}/strategy-research`); },
+  async triggerVault()               { return apiPostRaw(`${API_CONFIG.ADMIN}/vault`); },
+  async triggerDataSupremacy()       { return apiPostRaw(`${API_CONFIG.ADMIN}/data-supremacy`); },
+  async triggerIntelligence()        { return apiPostRaw(`${API_CONFIG.ADMIN}/intelligence`); },
+  async agentPipeline()              { return apiPostRaw(`${API_CONFIG.ADMIN}/agent-pipeline`); },
   async generateBrief()              { return apiPost('/research-briefs/generate'); },
   async runBackup()                  { return apiPost('/backups/run'); },
   async runLearningLoop(days = 7)    { return apiPost(`/learning/run?days=${days}`); },
@@ -287,6 +301,21 @@ const Api = {
       return res && res.ok;
     } catch { return false; }
   },
+
+  // Strategy DNA + trade recommendations
+  async strategyDna(id)               { return apiFetch(`/strategies/${id}/dna`); },
+  async tradeRecommendations()        { return apiFetch('/strategies/recommendations'); },
+  async runValidationSweep(days = 90) { return apiPost(`/strategy-performance/validate?days=${days}`); },
+  async strategyValidation(id)        { return apiFetch(`/strategy-performance/${id}/validation`); },
+  async rescoreStrategies()           { return apiPost('/strategies/admin/rescore'); },
+
+  // Meta-learning
+  async metaState()                   { return apiFetch('/strategy-evolution/meta-state'); },
+  async runMetaLearning()             { return apiPost('/strategy-evolution/meta-learn'); },
+
+  // Model self-improvement
+  async modelRetrainStatus()          { return apiFetch('/models/retrain-status'); },
+  async triggerModelRetrain(force = false) { return apiPost(`/models/retrain?force=${force}`); },
 };
 
 // ── Legacy uppercase API shim (used in intelligence-lab + replay) ──

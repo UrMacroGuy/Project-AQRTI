@@ -79,7 +79,10 @@ def get_predictions(
             "expectedReturn":   p.expected_return,
             "risk":             p.risk_level,
             "sentimentScore":   sentiment_score,
-            "positionSize":     f"{p.position_size:.0f}%" if p.position_size else None,
+            "positionSize":     f"{p.position_size:.0f}%" if p.position_size else (
+                # Kelly-lite sizing: scale from 2% (conf=65) to 8% (conf=85+)
+                f"{min(8.0, max(2.0, (p.confidence - 65) * 0.3 + 2.0)):.1f}%" if p.confidence and p.confidence >= 65 else "1.0%"
+            ),
             "date":             str(p.date),
             "reasoning":        p.reasoning,
             "modelVersion":     p.model_version,

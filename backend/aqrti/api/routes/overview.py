@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -35,10 +37,17 @@ def get_overview(db: Session = Depends(get_db_dependency)):
         if today_preds else 0.0
     )
 
-    # Win rate last 30 days
-    resolved = db.query(Prediction).filter(Prediction.success != None).all()
-    wins = [p for p in resolved if p.success]
-    win_rate = (len(wins) / len(resolved) * 100) if resolved else 0.0
+    # Win rate last 30 days — from paper trades (closed positions)
+    cutoff30 = date.today() - timedelta(days=30)
+    closed_trades = db.query(PaperTrade).filter(
+        PaperTrade.portfolio_name == "default",
+        PaperTrade.is_open == False,
+        PaperTrade.exit_date != None,
+    ).all()
+    recent_closed = [t for t in closed_trades if t.exit_date and t.exit_date >= cutoff30]
+    recent_wins   = [t for t in recent_closed if (t.gross_pnl or 0) > 0]
+    win_rate      = (len(recent_wins) / len(recent_closed) * 100) if recent_closed else 0.0
+    total_trades_30d = len(recent_closed)
 
     # Regime from latest index data
     nifty = get_latest_index(db, "NIFTY50")
@@ -77,7 +86,7 @@ def get_overview(db: Session = Depends(get_db_dependency)):
         "activePredictions": len(today_preds),
         "avgConfidence":     round(avg_conf, 1),
         "winRate30d":        round(win_rate, 1),
-        "totalTrades30d":    len(resolved),
+        "totalTrades30d":    total_trades_30d,
         "knowledgeScore":    knowledge_score,
         "activeStrategies":  active_strats,
         "regime":            regime,

@@ -870,12 +870,13 @@
                   <th>Fitness</th>
                   <th>Win%</th>
                   <th>Avg P&amp;L%</th>
+                  <th>Max DD</th>
                   <th>Trades</th>
-                  <th>Action</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="src-leaderboard-body">
-                <tr><td colspan="9" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
+                <tr><td colspan="10" style="color:var(--text-muted);text-align:center">Loading…</td></tr>
               </tbody>
             </table>
           </div>
@@ -983,6 +984,50 @@
           <div class="panel-body" id="src-inspector-body" style="min-height:200px">
             <div style="color:var(--text-muted);font-size:0.8rem;padding:1rem">Select a strategy from the leaderboard to view its backtest trades.</div>
           </div>
+        </div>
+      </div>
+
+      <!-- ═══ TRADE RECOMMENDATIONS ═══ -->
+      <div class="panel full-width" id="panel-trade-recs">
+        <div class="panel-header">
+          <span class="panel-title">◆ Trade This Now</span>
+          <span class="panel-tag live-dot" id="recs-regime-label">BULL REGIME</span>
+          <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">5% position each · max 8 open · NSE delivery</span>
+          <button class="panel-action-btn" onclick="loadTradeRecommendations()" style="margin-left:12px">Refresh</button>
+        </div>
+        <div class="panel-body" id="recs-body">
+          <div style="color:var(--text-muted);font-size:0.8rem;padding:1rem">Loading recommendations…</div>
+        </div>
+        <div id="recs-strategy-bar" style="padding:8px 16px;border-top:1px solid var(--border);font-size:0.72rem;color:var(--text-muted);font-family:var(--font-mono)"></div>
+      </div>
+
+      <!-- ═══ STRATEGY DNA VIEWER ═══ -->
+      <div class="panel full-width" id="panel-dna-viewer">
+        <div class="panel-header">
+          <span class="panel-title">◈ Strategy DNA Viewer</span>
+          <span class="panel-tag">How Was This Built?</span>
+          <input id="dna-search-input" type="text" placeholder="Enter strategy ID or click Inspect from leaderboard…"
+            style="margin-left:auto;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:4px;padding:4px 10px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.72rem;width:300px"
+            onkeydown="if(event.key==='Enter')loadStrategyDna(this.value.trim())" />
+          <button class="panel-action-btn" onclick="loadStrategyDna(document.getElementById('dna-search-input').value.trim())" style="margin-left:6px">Inspect</button>
+        </div>
+        <div id="dna-content" style="padding:1rem">
+          <div style="color:var(--text-muted);font-size:0.8rem">Enter a strategy ID above, or click <strong>DNA</strong> in the leaderboard to explore any strategy.</div>
+        </div>
+      </div>
+
+      <!-- ═══ META-LEARNING CONTROL CENTER ═══ -->
+      <div class="panel full-width" id="panel-meta-learning">
+        <div class="panel-header">
+          <span class="panel-title">⬡ Meta-Learning Control Center</span>
+          <span class="panel-tag" id="meta-regime-label">LIVE ADAPTATION</span>
+          <button class="panel-action-btn" onclick="loadMetaLearningState()" style="margin-left:auto">Refresh State</button>
+          <button class="panel-action-btn" onclick="triggerMetaLearning()" style="margin-left:8px">Run Meta-Learn</button>
+          <button class="panel-action-btn" onclick="checkModelRetrain()" style="margin-left:8px">Check Model</button>
+          <button class="panel-action-btn" onclick="forceModelRetrain()" style="margin-left:8px">Retrain Model</button>
+        </div>
+        <div id="meta-content" style="padding:16px">
+          <div style="color:var(--muted);font-size:13px">Click Refresh State to load meta-learning insights.</div>
         </div>
       </div>
 
@@ -2338,7 +2383,7 @@
     </div>
   </div>
 
-  <script src="api.js"></script>
-  <script src="app.js"></script>
+  <script src="api.js?v=20260625"></script>
+  <script src="app.js?v=20260625"></script>
 </body>
 </html>

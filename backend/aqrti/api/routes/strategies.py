@@ -12,6 +12,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from aqrti.database.engine import get_db_dependency
+from aqrti.database.models import (
+    StrategyV2, StrategyVersion, StrategyEvolutionHistory, StrategyBacktestTrade,
+)
 from strategies.strategy_store import (
     get_strategy, list_strategies, get_population_stats,
 )
@@ -86,6 +89,177 @@ def get_leaderboard_endpoint(
     return {"leaderboard": get_leaderboard(db, top_n=top_n, status=status)}
 
 
+@router.get("/stats")
+def get_strategy_stats(db: Session = Depends(get_db_dependency)):
+    """Aggregate stats used by frontend dashboard cards."""
+    total    = db.query(StrategyV2).count()
+    promoted = db.query(StrategyV2).filter(StrategyV2.status == "promoted").count()
+    active   = db.query(StrategyV2).filter(StrategyV2.status == "active").count()
+    shadow   = db.query(StrategyV2).filter(StrategyV2.status == "shadow").count()
+    retired  = db.query(StrategyV2).filter(StrategyV2.status == "retired").count()
+    families = db.query(StrategyV2.family).distinct().count()
+
+    top = (
+        db.query(StrategyV2)
+        .filter(StrategyV2.fitness_score != None)
+        .order_by(StrategyV2.fitness_score.desc())
+        .first()
+    )
+    from sqlalchemy import func as _func
+    avg_fitness_row = db.query(_func.avg(StrategyV2.fitness_score)).filter(
+        StrategyV2.fitness_score != None
+    ).scalar()
+    avg_fitness = round(float(avg_fitness_row), 2) if avg_fitness_row else 0.0
+
+    return {
+        "total":       total,
+        "promoted":    promoted,
+        "active":      active,
+        "shadow":      shadow,
+        "retired":     retired,
+        "families":    families,
+        "avgFitness":  avg_fitness,
+        "topStrategy": {
+            "id":      top.strategy_id,
+            "name":    top.name,
+            "fitness": top.fitness_score,
+            "sharpe":  top.sharpe,
+            "winRate": top.win_rate,
+        } if top else None,
+    }
+
+
+@router.get("/recommendations")
+def get_trade_recommendations(db: Session = Depends(get_db_dependency)):
+    """
+    Real-world actionable trade recommendations.
+    Combines: top promoted strategy, current regime, today's ML predictions.
+    Returns up to 5 specific trades with entry price, stop-loss, target, and position size.
+    """
+    from aqrti.database.models import (
+        MarketRegime, Prediction, DailyPrice, Stock,
+    )
+    from sqlalchemy import func as _func
+
+    # Current market regime
+    regime_row = (
+        db.query(MarketRegime.regime, MarketRegime.date)
+        .order_by(MarketRegime.date.desc())
+        .first()
+    )
+    current_regime = regime_row[0] if regime_row else "BULL"
+    regime_date    = str(regime_row[1]) if regime_row else None
+
+    # Best promoted strategy (allowed in current regime)
+    top_strategy = (
+        db.query(StrategyV2)
+        .filter(
+            StrategyV2.status == "promoted",
+            StrategyV2.fitness_score != None,
+        )
+        .order_by(StrategyV2.fitness_score.desc())
+        .first()
+    )
+
+    # Latest ML predictions — Bullish, high confidence
+    from datetime import date as _date, timedelta as _td
+    cutoff = _date.today() - _td(days=3)
+    predictions = (
+        db.query(Prediction)
+        .filter(
+            Prediction.direction == "Bullish",
+            Prediction.confidence >= 55.0,
+            Prediction.date >= cutoff,
+        )
+        .order_by(Prediction.confidence.desc(), Prediction.expected_return.desc())
+        .limit(20)
+        .all()
+    )
+
+    # Build symbol → latest price map
+    symbols = list({p.symbol for p in predictions})
+    price_rows = (
+        db.query(DailyPrice.symbol, DailyPrice.close, DailyPrice.date)
+        .filter(DailyPrice.symbol.in_(symbols))
+        .order_by(DailyPrice.symbol, DailyPrice.date.desc())
+        .all()
+    )
+    price_map: dict = {}
+    for pr in price_rows:
+        if pr.symbol not in price_map:
+            price_map[pr.symbol] = {"close": pr.close, "date": str(pr.date)}
+
+    # Stock sector map
+    sector_rows = db.query(Stock.symbol, Stock.sector).filter(Stock.symbol.in_(symbols)).all()
+    sector_map = {r.symbol: r.sector for r in sector_rows}
+
+    # Regime-specific stop/target from top strategy DSL
+    strategy_dsl = {}
+    stop_pct   = 5.0   # default 5% stop
+    target_pct = 10.0  # default 10% target
+    if top_strategy:
+        strategy_dsl = _safe_json(top_strategy.dsl_json) or {}
+        if isinstance(strategy_dsl, dict):
+            stop_pct   = abs(strategy_dsl.get("stop_loss_pct",   -stop_pct))
+            target_pct = strategy_dsl.get("take_profit_pct", target_pct)
+
+    # Position sizing: use 5% of portfolio per trade, max 8 open positions
+    POSITION_SIZE_PCT = 5.0
+
+    recs = []
+    for p in predictions:
+        price_info = price_map.get(p.symbol)
+        if not price_info or not price_info["close"]:
+            continue
+        price      = float(price_info["close"])
+        stop_price = round(price * (1 - stop_pct / 100), 2)
+        target_price = round(price * (1 + target_pct / 100), 2)
+        # Use expected_return if larger than default target
+        if p.expected_return and p.expected_return > target_pct:
+            target_price = round(price * (1 + p.expected_return / 100), 2)
+
+        rr_ratio = round((target_price - price) / (price - stop_price), 2) if price > stop_price else 0.0
+
+        recs.append({
+            "symbol":         p.symbol,
+            "sector":         sector_map.get(p.symbol, "—"),
+            "currentPrice":   price,
+            "priceDate":      price_info["date"],
+            "direction":      p.direction,
+            "confidence":     round(p.confidence or 0, 1),
+            "expectedReturn": round(p.expected_return or 0, 2),
+            "entryPrice":     price,
+            "stopLoss":       stop_price,
+            "target":         target_price,
+            "stopPct":        round(stop_pct, 1),
+            "targetPct":      round((target_price - price) / price * 100, 1),
+            "rrRatio":        rr_ratio,
+            "positionSizePct": POSITION_SIZE_PCT,
+            "regime":         current_regime,
+            "strategyId":     top_strategy.strategy_id if top_strategy else None,
+            "strategyName":   top_strategy.name if top_strategy else None,
+            "predictionDate": str(p.date) if p.date else None,
+        })
+        if len(recs) >= 5:
+            break
+
+    return {
+        "recommendations":  recs,
+        "currentRegime":    current_regime,
+        "regimeDate":       regime_date,
+        "topStrategy": {
+            "id":      top_strategy.strategy_id,
+            "name":    top_strategy.name,
+            "fitness": top_strategy.fitness_score,
+            "winRate": top_strategy.win_rate,
+            "sharpe":  top_strategy.sharpe,
+        } if top_strategy else None,
+        "positionSizePct": POSITION_SIZE_PCT,
+        "maxPositions":    8,
+        "totalRecommendations": len(recs),
+    }
+
+
 @router.get("/{strategy_id}")
 def get_strategy_detail(strategy_id: str, db: Session = Depends(get_db_dependency)):
     row = get_strategy(db, strategy_id)
@@ -121,6 +295,193 @@ def get_strategy_detail(strategy_id: str, db: Session = Depends(get_db_dependenc
         "promoted_at":      row.promoted_at.isoformat() if row.promoted_at else None,
         "retired_at":       row.retired_at.isoformat() if row.retired_at else None,
         "created_at":       row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+@router.get("/{strategy_id}/dna")
+def get_strategy_dna(strategy_id: str, db: Session = Depends(get_db_dependency)):
+    """
+    Full Strategy DNA: decoded rules, parent lineage, mutation history,
+    live validation vs backtest, and trade-by-trade breakdown.
+    Used by the Strategy DNA Viewer panel in the UI.
+    """
+    row = get_strategy(db, strategy_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    # ── DSL decoded ──────────────────────────────────────────────
+    dsl = _safe_json(row.dsl_json) or {}
+
+    # Human-readable rule explanation
+    entry_rules = []
+    exit_rules  = []
+    if isinstance(dsl, dict):
+        for c in (dsl.get("entry_conditions") or {}).get("conditions", []):
+            op = c.get("operator", ">")
+            entry_rules.append(
+                f"{c.get('feature','?')} {op} {c.get('threshold','?')}"
+            )
+        for c in (dsl.get("exit_conditions") or {}).get("conditions", []):
+            op = c.get("operator", ">")
+            exit_rules.append(
+                f"{c.get('feature','?')} {op} {c.get('threshold','?')}"
+            )
+
+    # ── Version / mutation history ───────────────────────────────
+    versions = (
+        db.query(StrategyVersion)
+        .filter(StrategyVersion.strategy_id == strategy_id)
+        .order_by(StrategyVersion.version.asc())
+        .all()
+    )
+    version_history = [
+        {
+            "version":      v.version,
+            "change_type":  v.change_type,
+            "change_desc":  v.change_desc,
+            "fitness_score": v.fitness_score,
+            "created_at":   v.created_at.isoformat() if v.created_at else None,
+        }
+        for v in versions
+    ]
+
+    # ── Evolution lineage ────────────────────────────────────────
+    evo = (
+        db.query(StrategyEvolutionHistory)
+        .filter(StrategyEvolutionHistory.child_strategy_id == strategy_id)
+        .order_by(StrategyEvolutionHistory.created_at.asc())
+        .all()
+    )
+    evolution_events = [
+        {
+            "operation":    e.operation,
+            "detail":       _safe_json(e.operation_detail),
+            "parent_ids":   _safe_json(e.parent_strategy_ids),
+            "parent_fitness": e.parent_fitness,
+            "child_fitness":  e.child_fitness,
+            "fitness_delta":  e.fitness_delta,
+            "regime_at":    e.regime_at,
+            "date":         str(e.evolved_date) if e.evolved_date else None,
+        }
+        for e in evo
+    ]
+
+    # ── Parent strategies ────────────────────────────────────────
+    parent_ids = _safe_json(row.parent_ids) or []
+    parents = []
+    for pid in parent_ids[:5]:
+        p = db.query(StrategyV2).filter(StrategyV2.strategy_id == pid).first()
+        if p:
+            parents.append({
+                "strategy_id": p.strategy_id,
+                "name":        p.name,
+                "family":      p.family,
+                "fitness":     p.fitness_score,
+                "status":      p.status,
+            })
+
+    # ── Children this strategy produced ─────────────────────────
+    children_evo = (
+        db.query(StrategyEvolutionHistory)
+        .filter(StrategyEvolutionHistory.parent_strategy_ids.contains(strategy_id))
+        .order_by(StrategyEvolutionHistory.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    children = []
+    for ce in children_evo:
+        c = db.query(StrategyV2).filter(
+            StrategyV2.strategy_id == ce.child_strategy_id
+        ).first()
+        if c:
+            children.append({
+                "strategy_id": c.strategy_id,
+                "name":        c.name,
+                "fitness":     c.fitness_score,
+                "status":      c.status,
+                "operation":   ce.operation,
+            })
+
+    # ── Recent backtest trades ───────────────────────────────────
+    recent_trades = (
+        db.query(StrategyBacktestTrade)
+        .filter(StrategyBacktestTrade.strategy_id == strategy_id)
+        .order_by(StrategyBacktestTrade.exit_date.desc())
+        .limit(20)
+        .all()
+    )
+    trade_rows = [
+        {
+            "symbol":       t.symbol,
+            "entry_date":   str(t.entry_date) if t.entry_date else None,
+            "exit_date":    str(t.exit_date)  if t.exit_date  else None,
+            "entry_price":  t.entry_price,
+            "exit_price":   t.exit_price,
+            "pnl_pct":      round(t.pnl_pct or 0, 4),
+            "exit_reason":  t.exit_reason,
+            "holding_days": t.holding_days,
+            "regime":       getattr(t, "regime_at", None),
+            "signal_source": getattr(t, "signal_source", "backtest"),
+        }
+        for t in recent_trades
+    ]
+
+    # ── Live validation summary ──────────────────────────────────
+    try:
+        from strategies.live_validator import get_live_validation_summary
+        live_validation = get_live_validation_summary(db, strategy_id)
+    except Exception:
+        live_validation = {"available": False}
+
+    # ── Net expectancy (cost-adjusted) ───────────────────────────
+    ROUND_TRIP_COST = 0.28
+    net_expectancy = round((row.expectancy or 0) - ROUND_TRIP_COST, 4)
+
+    return {
+        "strategy_id":      strategy_id,
+        "name":             row.name,
+        "family":           row.family,
+        "generation":       row.generation,
+        "status":           row.status,
+        "status_reason":    row.status_reason,
+        # Fitness breakdown
+        "fitness_score":    row.fitness_score,
+        "sharpe":           row.sharpe,
+        "sortino":          row.sortino,
+        "win_rate":         row.win_rate,
+        "profit_factor":    row.profit_factor,
+        "max_drawdown":     row.max_drawdown,
+        "expectancy":       row.expectancy,
+        "net_expectancy":   net_expectancy,
+        "trade_count":      row.trade_count,
+        "avg_holding_days": row.avg_holding_days,
+        "bull_sharpe":      row.bull_sharpe,
+        "bear_sharpe":      row.bear_sharpe,
+        "sideways_sharpe":  row.sideways_sharpe,
+        "volatile_sharpe":  row.volatile_sharpe,
+        "allowed_regimes":  _safe_json(row.allowed_regimes),
+        "backtest_start":   str(row.backtest_start) if row.backtest_start else None,
+        "backtest_end":     str(row.backtest_end) if row.backtest_end else None,
+        # DNA
+        "entry_rules":      entry_rules,
+        "exit_rules":       exit_rules,
+        "dsl":              dsl,
+        # Params
+        "min_confidence":   dsl.get("min_confidence") if isinstance(dsl, dict) else None,
+        "stop_loss_pct":    dsl.get("stop_loss_pct")  if isinstance(dsl, dict) else None,
+        "take_profit_pct":  dsl.get("take_profit_pct") if isinstance(dsl, dict) else None,
+        "max_holding_days": dsl.get("max_holding_days") if isinstance(dsl, dict) else None,
+        # Lineage
+        "parents":          parents,
+        "children":         children,
+        "version_history":  version_history,
+        "evolution_events": evolution_events,
+        "created_at":       row.created_at.isoformat() if row.created_at else None,
+        "promoted_at":      row.promoted_at.isoformat() if row.promoted_at else None,
+        # Live validation
+        "live_validation":  live_validation,
+        # Sample trades
+        "recent_trades":    trade_rows,
     }
 
 

@@ -50,11 +50,14 @@ def approve_proposal(proposal_id: str, db=None) -> bool:
     if own_session:
         db = get_session_factory()()
     try:
-        db.execute(
+        result = db.execute(
             text("UPDATE feature_proposals SET status = 'approved', approved_at = :now WHERE proposal_id = :pid"),
             {"pid": proposal_id, "now": datetime.utcnow().isoformat()},
         )
         db.commit()
+        if result.rowcount == 0:
+            logger.warning("Feature proposal %s not found", proposal_id)
+            return False
         logger.info("Feature proposal %s approved", proposal_id)
         return True
     except Exception as exc:
@@ -71,12 +74,12 @@ def reject_proposal(proposal_id: str, reason: str = "", db=None) -> bool:
     if own_session:
         db = get_session_factory()()
     try:
-        db.execute(
+        result = db.execute(
             text("UPDATE feature_proposals SET status = 'rejected', rejection_reason = :reason WHERE proposal_id = :pid"),
             {"pid": proposal_id, "reason": reason},
         )
         db.commit()
-        return True
+        return result.rowcount > 0
     except Exception as exc:
         logger.error("Failed to reject proposal %s: %s", proposal_id, exc)
         return False

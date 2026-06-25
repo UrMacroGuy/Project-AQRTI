@@ -22,6 +22,7 @@ from strategies.strategy_memory import (
     evolution_tree_summary,
 )
 from strategies.strategy_registry import count_by_generation
+from strategies.meta_learner import run_meta_learning, compute_meta_state
 
 router = APIRouter()
 
@@ -94,3 +95,34 @@ def get_regime_affinity(db: Session = Depends(get_db_dependency)):
 @router.get("/feature-memory")
 def get_feature_memory(db: Session = Depends(get_db_dependency)):
     return feature_category_memory(db)
+
+
+@router.get("/meta-state")
+def get_meta_state(db: Session = Depends(get_db_dependency)):
+    """Return the current meta-learning state (family weights, bad features, etc.)."""
+    try:
+        state = compute_meta_state(db)
+        return {"available": True, "meta_state": state}
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+
+
+@router.post("/meta-learn")
+def trigger_meta_learning(db: Session = Depends(get_db_dependency)):
+    """
+    Manually trigger a full meta-learning cycle.
+    Reads all signal sources, adjusts weights, persists insights.
+    """
+    try:
+        result = run_meta_learning(db)
+        return {
+            "status":          "ok",
+            "insights_written": result.get("insights_written", 0),
+            "family_weights":  result.get("family_weights", {}),
+            "bad_features":    result.get("bad_features", []),
+            "conf_floor":      result.get("current_conf_floor"),
+            "top_mutation_op": (result.get("ranked_mutation_ops") or [None])[0],
+            "regime":          result.get("current_regime"),
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}

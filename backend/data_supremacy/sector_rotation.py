@@ -70,8 +70,9 @@ def compute_sector_rotation(db: Session, target_date: date | None = None) -> dic
         # RRG quadrant: based on RS vs momentum (change in RS)
         phase = _rrg_phase(rs_20, rs_60)
 
-        # Avg sentiment
-        avg_sentiment = _avg_sector_sentiment(db, symbols, target)
+        # Avg sentiment and volume ratio
+        avg_sentiment    = _avg_sector_sentiment(db, symbols, target)
+        avg_volume_ratio = _avg_sector_volume_ratio(db, symbols, target)
 
         # Top stocks by 20d return
         top_stocks = _top_stocks(db, symbols, target, n=5)
@@ -83,15 +84,16 @@ def compute_sector_rotation(db: Session, target_date: date | None = None) -> dic
         ).first()
 
         if existing_row:
-            existing_row.ret_1d         = ret_1d
-            existing_row.ret_5d         = ret_5d
-            existing_row.ret_20d        = ret_20d
-            existing_row.ret_60d        = ret_60d
-            existing_row.rs_vs_nifty_20d= rs_20
-            existing_row.rs_vs_nifty_60d= rs_60
-            existing_row.rotation_phase = phase
-            existing_row.avg_sentiment  = avg_sentiment
-            existing_row.top_stocks_json= json.dumps(top_stocks)
+            existing_row.ret_1d           = ret_1d
+            existing_row.ret_5d           = ret_5d
+            existing_row.ret_20d          = ret_20d
+            existing_row.ret_60d          = ret_60d
+            existing_row.rs_vs_nifty_20d  = rs_20
+            existing_row.rs_vs_nifty_60d  = rs_60
+            existing_row.rotation_phase   = phase
+            existing_row.avg_sentiment    = avg_sentiment
+            existing_row.avg_volume_ratio = avg_volume_ratio
+            existing_row.top_stocks_json  = json.dumps(top_stocks)
         else:
             row = SectorRotation(
                 rotation_date    = target,
@@ -104,6 +106,7 @@ def compute_sector_rotation(db: Session, target_date: date | None = None) -> dic
                 rs_vs_nifty_60d  = rs_60,
                 rotation_phase   = phase,
                 avg_sentiment    = avg_sentiment,
+                avg_volume_ratio = avg_volume_ratio,
                 top_stocks_json  = json.dumps(top_stocks),
             )
             db.add(row)
@@ -185,16 +188,46 @@ def _rrg_phase(rs_20: float | None, rs_60: float | None) -> str:
 
 
 def _avg_sector_sentiment(db: Session, symbols: list[str], target: date) -> float | None:
-    cutoff = target - timedelta(days=7)
-    from sqlalchemy import func as sqlfunc
+    from datetime import datetime
+    cutoff = datetime.combine(target - timedelta(days=7), datetime.min.time())
+    target_dt = datetime.combine(target + timedelta(days=1), datetime.min.time())
     rows = db.query(SentimentRecord).filter(
         SentimentRecord.entity.in_(symbols),
         SentimentRecord.entity_type == "stock",
         SentimentRecord.timestamp >= cutoff,
-        SentimentRecord.timestamp <= target,
+        SentimentRecord.timestamp < target_dt,
     ).all()
     scores = [r.score for r in rows if r.score is not None]
     return round(sum(scores) / len(scores), 2) if scores else None
+
+
+def _avg_sector_volume_ratio(db: Session, symbols: list[str], target: date) -> float | None:
+    """Ratio of last-5d average volume to 20d average volume — >1.0 means elevated activity."""
+    cutoff_20 = target - timedelta(days=30)
+    rows = db.query(DailyPrice).filter(
+        DailyPrice.symbol.in_(symbols),
+        DailyPrice.date.between(cutoff_20, target),
+        DailyPrice.volume.isnot(None),
+    ).order_by(DailyPrice.date.asc()).all()
+    if not rows:
+        return None
+
+    by_symbol: dict[str, list] = {}
+    for r in rows:
+        by_symbol.setdefault(r.symbol, []).append(r)
+
+    ratios = []
+    for sym_rows in by_symbol.values():
+        if len(sym_rows) < 5:
+            continue
+        vol_20 = [r.volume for r in sym_rows if r.volume]
+        vol_5  = [r.volume for r in sym_rows[-5:] if r.volume]
+        if vol_20 and vol_5:
+            avg_20 = sum(vol_20) / len(vol_20)
+            avg_5  = sum(vol_5)  / len(vol_5)
+            if avg_20 > 0:
+                ratios.append(avg_5 / avg_20)
+    return round(sum(ratios) / len(ratios), 3) if ratios else None
 
 
 def _top_stocks(db: Session, symbols: list[str], target: date, n: int = 5) -> list[dict]:

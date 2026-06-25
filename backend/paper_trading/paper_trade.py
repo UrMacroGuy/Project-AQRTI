@@ -1,11 +1,12 @@
 """
 Paper Trade Manager
 Open, close, and query virtual positions + trades.
-All prices come from the daily_prices table — no live market feeds.
+Prices: DB daily_prices (EOD) with yfinance intraday fallback for open positions.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime
 from typing import Optional
 
@@ -18,8 +19,55 @@ log = get_logger("paper_trade")
 
 PORTFOLIO_NAME = "default"
 
+# NSE symbol → Yahoo Finance ticker map
+_NSE_TO_YF = {
+    "RELIANCE": "RELIANCE.NS", "HDFCBANK": "HDFCBANK.NS", "ICICIBANK": "ICICIBANK.NS",
+    "INFY": "INFY.NS", "TCS": "TCS.NS", "AXISBANK": "AXISBANK.NS",
+    "SBIN": "SBIN.NS", "BAJFINANCE": "BAJFINANCE.NS", "MARUTI": "MARUTI.NS",
+    "TITAN": "TITAN.NS", "WIPRO": "WIPRO.NS", "ONGC": "ONGC.NS",
+    "SUNPHARMA": "SUNPHARMA.NS", "NESTLEIND": "NESTLEIND.NS", "BHARTIARTL": "BHARTIARTL.NS",
+    "KOTAKBANK": "KOTAKBANK.NS", "TATASTEEL": "TATASTEEL.NS", "HINDALCO": "HINDALCO.NS",
+}
+
+# In-process cache: symbol → (price, fetched_at_epoch) — valid for 60s
+import time as _time
+_price_cache: dict[str, tuple[float, float]] = {}
+_CACHE_TTL = 60  # seconds
+
+
+def _live_price_yf(symbol: str) -> Optional[float]:
+    """Fetch current price from yfinance with 60s in-memory cache."""
+    now = _time.time()
+    cached = _price_cache.get(symbol)
+    if cached and (now - cached[1]) < _CACHE_TTL:
+        return cached[0]
+
+    yf_sym = _NSE_TO_YF.get(symbol, f"{symbol}.NS")
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(yf_sym)
+        price = None
+        try:
+            fi = ticker.fast_info
+            price = getattr(fi, "last_price", None)
+            if price is not None:
+                price = float(price)
+        except Exception:
+            pass
+        if price is None:
+            hist = ticker.history(period="1d", interval="1m", auto_adjust=True)
+            if not hist.empty:
+                price = float(hist["Close"].iloc[-1])
+        if price and price > 0:
+            _price_cache[symbol] = (price, now)
+            return price
+    except Exception as e:
+        log.debug("yfinance price fetch failed for %s: %s", symbol, e)
+    return None
+
 
 def _latest_price(db: Session, symbol: str) -> Optional[float]:
+    """Return most recent EOD close from DB."""
     row = (
         db.query(DailyPrice.close)
         .filter(DailyPrice.symbol == symbol)
@@ -27,6 +75,22 @@ def _latest_price(db: Session, symbol: str) -> Optional[float]:
         .first()
     )
     return row[0] if row else None
+
+
+def _current_price(db: Session, symbol: str, entry_price: float) -> float:
+    """
+    Best available price for an open position:
+    1. Live yfinance (60s cache) during market hours
+    2. Latest EOD close from DB
+    3. Entry price as last resort
+    """
+    live = _live_price_yf(symbol)
+    if live and live > 0:
+        return live
+    eod = _latest_price(db, symbol)
+    if eod and eod > 0:
+        return eod
+    return entry_price
 
 
 def open_position(
@@ -125,7 +189,7 @@ def close_position(
     if not pos:
         return None
 
-    exit_price = _latest_price(db, symbol) or pos.entry_price
+    exit_price = _current_price(db, symbol, pos.entry_price)
     gross_pnl     = (exit_price - pos.entry_price) / pos.entry_price * pos.capital_deployed
     gross_pnl_pct = (exit_price - pos.entry_price) / pos.entry_price * 100
     actual_return  = gross_pnl_pct
@@ -153,6 +217,19 @@ def close_position(
         "Closed position: %s  exit=%.2f  pnl=%.2f (%.2f%%)  reason=%s",
         symbol, exit_price, gross_pnl, gross_pnl_pct, exit_reason,
     )
+
+    # Notify live validator so StrategyPerformance gets updated immediately
+    if trade:
+        try:
+            import sys as _sys
+            _backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _backend not in _sys.path:
+                _sys.path.insert(0, _backend)
+            from strategies.live_validator import on_trade_closed
+            on_trade_closed(db, trade)
+        except Exception as _exc:
+            log.debug("live_validator hook failed: %s", _exc)
+
     return {
         "symbol":        symbol,
         "exitPrice":     exit_price,
@@ -178,7 +255,7 @@ def get_open_positions(db: Session) -> list[dict]:
     )
     result = []
     for pos in positions:
-        current_price = _latest_price(db, pos.symbol) or pos.entry_price
+        current_price = _current_price(db, pos.symbol, pos.entry_price)
         unrealized_pct = (current_price - pos.entry_price) / pos.entry_price * 100
         unrealized_pnl = unrealized_pct / 100 * pos.capital_deployed
         current_value  = pos.capital_deployed + unrealized_pnl

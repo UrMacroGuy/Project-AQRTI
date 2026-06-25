@@ -16,7 +16,7 @@ from typing import Optional
 import numpy as np
 from sqlalchemy.orm import Session
 
-from aqrti.database.models import EquityCurvePoint, PaperTrade, PerformanceSnapshot
+from aqrti.database.models import EquityCurvePoint, PaperTrade, PerformanceSnapshot, IndexData
 from aqrti.utils.logger import get_logger
 
 log = get_logger("performance_tracker")
@@ -24,6 +24,26 @@ log = get_logger("performance_tracker")
 PORTFOLIO_NAME  = "default"
 RISK_FREE_RATE  = 0.067    # ~6.7% annual (Indian T-bill proxy)
 TRADING_DAYS    = 252
+
+
+def _get_nifty_close(db: Session) -> Optional[float]:
+    """Fetch today's Nifty50 close from IndexData, falling back to yfinance."""
+    row = (
+        db.query(IndexData.close)
+        .filter(IndexData.index_name == "NIFTY50")
+        .order_by(IndexData.date.desc())
+        .first()
+    )
+    if row and row[0]:
+        return float(row[0])
+    try:
+        import yfinance as yf
+        hist = yf.Ticker("^NSEI").history(period="2d", interval="1d", auto_adjust=True)
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+    except Exception:
+        pass
+    return None
 
 
 def record_equity_point(
@@ -35,6 +55,10 @@ def record_equity_point(
     """Upsert today's equity curve point with daily + cumulative returns."""
     today     = date.today()
     invested  = total_value - cash
+
+    # Auto-fetch Nifty close if not provided
+    if nifty_close is None:
+        nifty_close = _get_nifty_close(db)
 
     # Previous row for daily return calc
     prev = (
