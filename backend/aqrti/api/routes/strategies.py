@@ -8,7 +8,7 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from aqrti.database.engine import get_db_dependency
@@ -197,12 +197,20 @@ def evolve(
 
 @router.post("/admin/bulk-backtest")
 def bulk_backtest(
+    background_tasks: BackgroundTasks,
     batch_size: int = Query(default=200, ge=10, le=500),
     db: Session = Depends(get_db_dependency),
 ):
-    """Backtest up to batch_size unscored candidate strategies."""
+    """Backtest up to batch_size unscored candidate strategies (runs in background)."""
     from strategies.strategy_research_loop import _backtest_unscored
-    return _backtest_unscored(db, max_stocks=batch_size)
+    from aqrti.database.session import get_db_session
+
+    def _run():
+        with get_db_session() as bg_db:
+            _backtest_unscored(bg_db, max_stocks=batch_size)
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "batch_size": batch_size, "message": f"Backtesting up to {batch_size} strategies in background"}
 
 
 @router.post("/admin/rescore")
@@ -217,28 +225,29 @@ def rescore(db: Session = Depends(get_db_dependency)):
 
 @router.post("/admin/full-research-cycle")
 def full_research_cycle(
+    background_tasks: BackgroundTasks,
     generate_n:  int = Query(default=100, ge=10, le=500),
     evolve_n:    int = Query(default=40,  ge=5,  le=200),
     batch_size:  int = Query(default=200, ge=10, le=500),
-    db: Session = Depends(get_db_dependency),
 ):
-    """Run a full strategy research cycle: generate → backtest → score → lifecycle → evolve."""
+    """Run a full strategy research cycle in background: generate → backtest → score → lifecycle → evolve."""
     from strategies.strategy_research_loop import _backtest_unscored
     from strategies.fitness_engine import rescore_all
     from strategies.strategy_lifecycle import run_lifecycle_sweep
+    from aqrti.database.session import get_db_session
 
-    gen    = run_generation_cycle(db, n=generate_n, generation=0)
-    bt     = _backtest_unscored(db, max_stocks=batch_size)
-    rescore = rescore_all(db)
-    lc     = run_lifecycle_sweep(db)
-    evo    = evolve_population(db, n_offspring=evolve_n)
+    def _run():
+        with get_db_session() as bg_db:
+            run_generation_cycle(bg_db, n=generate_n, generation=0)
+            _backtest_unscored(bg_db, max_stocks=batch_size)
+            rescore_all(bg_db)
+            run_lifecycle_sweep(bg_db)
+            evolve_population(bg_db, n_offspring=evolve_n)
 
+    background_tasks.add_task(_run)
     return {
-        "generate":  gen,
-        "backtest":  bt,
-        "rescore":   rescore,
-        "lifecycle": {"promoted": len(lc["promoted"]), "retired": len(lc["retired"])},
-        "evolution": {"created": evo.get("created", 0), "generation": evo.get("generation")},
+        "status":  "started",
+        "message": f"Full research cycle running in background (generate={generate_n}, backtest={batch_size}, evolve={evolve_n})",
     }
 
 

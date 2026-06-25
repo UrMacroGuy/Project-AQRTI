@@ -59,7 +59,7 @@ def get_family_summary(db: Session) -> dict:
             if s["best_fitness"] is None or r.fitness_score > s["best_fitness"]:
                 s["best_fitness"]    = r.fitness_score
                 s["best_strategy_id"] = r.strategy_id
-        if r.sharpe is not None:
+        if r.sharpe is not None and r.status not in ("retired", "archived"):
             s["avg_sharpe"].append(r.sharpe)
 
     for s in summary.values():

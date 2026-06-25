@@ -787,12 +787,10 @@ body {
 
 .chart-container {
   position: relative;
-  min-height: 180px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  height: 200px;
+  width: 100%;
 }
-.chart-container canvas { max-height: 220px; }
+.chart-container canvas { width: 100% !important; height: 100% !important; }
 
 /* ══════════════════════════════════════════════════════════════
    DATA TABLE — Bloomberg dense grid

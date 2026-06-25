@@ -26,17 +26,30 @@ It is **not** a trading bot with real money. It is a research and validation pla
 
 ---
 
+## Current Stats (2026-06-25)
+
+| Metric | Value |
+|---|---|
+| Strategy population | 4,087 total · 847 promoted · 8 families |
+| Best strategy fitness | 67.3 (volatility_play family) |
+| Intelligence Score | 71.5 |
+| Market regime | SIDEWAYS |
+| Agent pipeline | 7 agents · 100% success |
+| Historical regime data | 227 days backfilled (BULL/BEAR/SIDEWAYS/VOLATILE) |
+
+---
+
 ## Key Features
 
 | Feature | Description |
 |---|---|
 | **14-page Intelligence Terminal** | Full dashboard: Overview, Market, Opportunities, News, Sentiment, Strategy Lab, Model Center, Learning, Agents, Paper Trading, Risk, Vault, Intelligence Lab, Data Intelligence |
 | **Live Market Data** | NIFTY 50, BANKNIFTY, sector strength, top movers via yfinance |
-| **ML Prediction Engine** | CatBoost + LightGBM + XGBoost ensemble — trained on Indian market features |
-| **Strategy Evolution** | Genetic algorithm discovers, mutates, and promotes trading strategies automatically |
-| **7 Research Agents** | Market, Pattern, Strategy, Model, News, Risk agents + CRO daily brief |
+| **ML Prediction Engine** | CatBoost + LightGBM + XGBoost ensemble — trained on 148 Indian market features |
+| **Strategy Evolution** | Genetic algorithm: 8 families, 11 mutation ops, 5-dimension fitness scoring, runs every 5 min |
+| **7 Research Agents** | Market, Pattern, Strategy, Model, News, Risk agents + CRO daily brief · all at 100% success |
 | **Paper Trading Engine** | Fully automated open/close positions based on best strategy + confidence threshold |
-| **Self-Learning System** | Tracks failures, extracts lessons, retrains models, adapts confidence calibration |
+| **Self-Learning System** | Tracks failures, extracts lessons, adapts confidence calibration, knowledge score 71.5 |
 | **Intelligence Vault** | Full date-replay: see exactly what AQRTI knew and held on any past date |
 | **Data Intelligence** | FII/DII flows, options PCR, market breadth, earnings calendar, corporate filings |
 | **Risk Engine** | VaR, Sharpe, drawdown history, sector exposure limits, circuit breakers |

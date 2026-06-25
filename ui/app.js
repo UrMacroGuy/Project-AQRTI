@@ -45,352 +45,6 @@ const ChartRegistry = (() => {
 })();
 
 // ═══════════════════════════════════════════════════════════════
-// MOCK DATA STORE
-// Realistic AQRTI backend schemas — ready for API substitution
-// ═══════════════════════════════════════════════════════════════
-const DataStore = {
-
-  system: {
-    portfolioValue: 100000,
-    paperCapitalStart: 100000,
-    dailyPnl: 0,
-    dailyPnlPct: 0,
-    openPositions: 0,
-    deployedCapital: 0,
-    activePredictions: 0,
-    avgConfidence: 0,
-    winRate30d: 0,
-    totalTrades30d: 0,
-    knowledgeScore: 0,
-    knowledgeScoreChange: 0,
-    regime: 'LOADING…',
-    regimeConf: 0,
-    lastUpdateTime: '06:30 AM IST',
-  },
-
-  equityCurve: (() => {
-    const labels = [];
-    const values = [];
-    let val = 100000;
-    const now = new Date('2026-06-22');
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      labels.push(d.toLocaleDateString('en-IN', { day:'2-digit', month:'short' }));
-      val = val * (1 + (Math.random() * 0.025 - 0.007));
-      values.push(Math.round(val));
-    }
-    return { labels, values };
-  })(),
-
-  topPredictions: [
-    { symbol: 'RELIANCE',  direction: 'Bullish', conf: 87, expRet: '+3.4%', risk: 'Low',    strategy: 'Momentum + Event' },
-    { symbol: 'HDFCBANK',  direction: 'Bullish', conf: 84, expRet: '+2.9%', risk: 'Medium', strategy: 'Breakout' },
-    { symbol: 'TCS',       direction: 'Bullish', conf: 82, expRet: '+2.6%', risk: 'Low',    strategy: 'Sector Rotation' },
-    { symbol: 'ICICIBANK', direction: 'Bullish', conf: 79, expRet: '+2.2%', risk: 'Low',    strategy: 'Momentum' },
-    { symbol: 'INFY',      direction: 'Neutral', conf: 74, expRet: '+1.4%', risk: 'Medium', strategy: 'Mean Reversion' },
-    { symbol: 'WIPRO',     direction: 'Bearish', conf: 71, expRet: '-1.8%', risk: 'Low',    strategy: 'Sentiment' },
-    { symbol: 'AXISBANK',  direction: 'Bullish', conf: 76, expRet: '+2.1%', risk: 'Medium', strategy: 'Breakout' },
-    { symbol: 'LTIM',      direction: 'Bullish', conf: 80, expRet: '+2.7%', risk: 'Low',    strategy: 'Momentum + Event' },
-  ],
-
-  market: {
-    nifty50:    { value: 24162.20, change: +203.1,  changePct: +0.84 },
-    banknifty:  { value: 51847.30, change: +573.6,  changePct: +1.12 },
-    vix:        { value: 13.24,    change: -0.31,   changePct: -0.23 },
-    usdinr:     { value: 83.42,    change: -0.07,   changePct: -0.08 },
-    crude:      { value: 78.40,    change: -0.63,   changePct: -0.80 },
-    gold:       { value: 71840,    change: +320,    changePct: +0.45 },
-    breadth:    72,
-    adRatio:    2.47,
-  },
-
-  sectorStrength: [
-    { name: 'FMCG',         score: 88, rs: 91, momentum: 84, returns1d: +1.2 },
-    { name: 'Financial Svcs', score: 85, rs: 87, momentum: 82, returns1d: +1.4 },
-    { name: 'IT',            score: 78, rs: 80, momentum: 76, returns1d: +0.9 },
-    { name: 'Auto',          score: 74, rs: 72, momentum: 77, returns1d: +1.1 },
-    { name: 'Energy',        score: 70, rs: 68, momentum: 73, returns1d: +0.7 },
-    { name: 'Pharma',        score: 65, rs: 67, momentum: 62, returns1d: +0.3 },
-    { name: 'Metal',         score: 58, rs: 55, momentum: 61, returns1d: -0.2 },
-    { name: 'Realty',        score: 52, rs: 50, momentum: 55, returns1d: +0.4 },
-    { name: 'Media',         score: 44, rs: 42, momentum: 47, returns1d: -0.8 },
-    { name: 'PSU Bank',      score: 38, rs: 36, momentum: 41, returns1d: +0.2 },
-  ],
-
-  topMovers: [
-    { symbol: 'RELIANCE',  sector: 'Energy',   price: '2,847.30', change: '+3.2%', volume: '12.4M', dir: 'up' },
-    { symbol: 'AXISBANK',  sector: 'Banking',  price: '1,204.80', change: '+2.8%', volume: '8.7M',  dir: 'up' },
-    { symbol: 'HDFCBANK',  sector: 'Banking',  price: '1,698.50', change: '+2.4%', volume: '9.1M',  dir: 'up' },
-    { symbol: 'LTIM',      sector: 'IT',       price: '5,340.00', change: '+2.1%', volume: '3.2M',  dir: 'up' },
-    { symbol: 'NESTLEIND', sector: 'FMCG',     price: '24,180.00',change: '+1.9%', volume: '0.4M',  dir: 'up' },
-    { symbol: 'WIPRO',     sector: 'IT',       price: '464.25',   change: '-2.1%', volume: '6.8M',  dir: 'down' },
-    { symbol: 'TATASTEEL', sector: 'Metal',    price: '161.40',   change: '-1.8%', volume: '11.2M', dir: 'down' },
-    { symbol: 'ONGC',      sector: 'Energy',   price: '253.60',   change: '-1.4%', volume: '7.4M',  dir: 'down' },
-  ],
-
-  derivSignals: [
-    { signal: 'PCR (NIFTY)',      value: '1.24',  interpretation: 'Bullish Bias' },
-    { signal: 'Max Pain',         value: '24,000', interpretation: 'Support Zone' },
-    { signal: 'OI Change (CE)',   value: '+2.3M', interpretation: 'Call Writing' },
-    { signal: 'OI Change (PE)',   value: '+1.8M', interpretation: 'Put Writing' },
-    { signal: 'ATM IV',           value: '12.4%', interpretation: 'Low IV' },
-    { signal: 'Long Build Up',    value: '34 stocks', interpretation: 'Bullish' },
-    { signal: 'Short Covering',   value: '18 stocks', interpretation: 'Positive' },
-    { signal: 'Short Build Up',   value: '12 stocks', interpretation: 'Bearish Watch' },
-  ],
-
-  opportunities: [
-    { rank:1,  symbol:'RELIANCE',  sector:'Energy',   direction:'Bullish', conf:87, expRet:'+3.4%', risk:'Low',    strategy:'Momentum + Event', sentiment:84, posSize:'5%' },
-    { rank:2,  symbol:'HDFCBANK',  sector:'Banking',  direction:'Bullish', conf:84, expRet:'+2.9%', risk:'Medium', strategy:'Breakout',          sentiment:79, posSize:'4%' },
-    { rank:3,  symbol:'LTIM',      sector:'IT',       direction:'Bullish', conf:82, expRet:'+2.7%', risk:'Low',    strategy:'Momentum + Event', sentiment:76, posSize:'4%' },
-    { rank:4,  symbol:'TCS',       sector:'IT',       direction:'Bullish', conf:80, expRet:'+2.6%', risk:'Low',    strategy:'Sector Rotation',  sentiment:72, posSize:'4%' },
-    { rank:5,  symbol:'ICICIBANK', sector:'Banking',  direction:'Bullish', conf:79, expRet:'+2.2%', risk:'Low',    strategy:'Momentum',         sentiment:78, posSize:'3%' },
-    { rank:6,  symbol:'AXISBANK',  sector:'Banking',  direction:'Bullish', conf:76, expRet:'+2.1%', risk:'Medium', strategy:'Breakout',         sentiment:70, posSize:'3%' },
-    { rank:7,  symbol:'NESTLEIND', sector:'FMCG',     direction:'Bullish', conf:75, expRet:'+1.9%', risk:'Low',    strategy:'Momentum',         sentiment:81, posSize:'3%' },
-    { rank:8,  symbol:'BAJFINANCE',sector:'NBFC',     direction:'Bullish', conf:74, expRet:'+2.3%', risk:'Medium', strategy:'Event Driven',     sentiment:68, posSize:'3%' },
-    { rank:9,  symbol:'INFY',      sector:'IT',       direction:'Neutral', conf:74, expRet:'+1.4%', risk:'Medium', strategy:'Mean Reversion',   sentiment:66, posSize:'2%' },
-    { rank:10, symbol:'MARUTI',    sector:'Auto',     direction:'Bullish', conf:72, expRet:'+1.8%', risk:'Low',    strategy:'Sector Rotation',  sentiment:74, posSize:'3%' },
-    { rank:11, symbol:'SUNPHARMA', sector:'Pharma',   direction:'Bullish', conf:71, expRet:'+1.7%', risk:'Low',    strategy:'Momentum',         sentiment:71, posSize:'3%' },
-    { rank:12, symbol:'WIPRO',     sector:'IT',       direction:'Bearish', conf:71, expRet:'-1.8%', risk:'Low',    strategy:'Sentiment',        sentiment:34, posSize:'2%' },
-    { rank:13, symbol:'TATAMOTORS',sector:'Auto',     direction:'Bullish', conf:70, expRet:'+1.6%', risk:'Medium', strategy:'Breakout',         sentiment:69, posSize:'2%' },
-    { rank:14, symbol:'KOTAKBANK', sector:'Banking',  direction:'Bullish', conf:69, expRet:'+1.4%', risk:'Low',    strategy:'Momentum',         sentiment:72, posSize:'2%' },
-    { rank:15, symbol:'TITAN',     sector:'Consumer', direction:'Bullish', conf:68, expRet:'+1.5%', risk:'Low',    strategy:'Momentum',         sentiment:77, posSize:'2%' },
-  ],
-
-  news: [
-    {
-      id: 'N001', impact: 92, severity: 'critical', sentiment: 'pos',
-      headline: 'HDFCBANK Quarterly Results Beat Estimates — Net Profit Up 18% YoY',
-      summary: 'HDFC Bank reported net profit of ₹16,812 crore vs estimate of ₹15,400 crore. NII grew 12.4% YoY. Asset quality stable.',
-      company: 'HDFCBANK', sector: 'Banking', source: 'NSE Filing', time: '16:42',
-      importance: 95, eventType: 'Earnings',
-    },
-    {
-      id: 'N002', impact: 87, severity: 'critical', sentiment: 'pos',
-      headline: 'RELIANCE Industries Bulk Deal — Institutional Accumulation of ₹840 Crore',
-      summary: 'Large block deal recorded at BSE. Foreign institutional investor acquired 2.8M shares at ₹2,831. Interpreted as strong institutional confidence.',
-      company: 'RELIANCE', sector: 'Energy', source: 'BSE Bulk Deal', time: '15:28',
-      importance: 88, eventType: 'Block Deal',
-    },
-    {
-      id: 'N003', impact: 78, severity: 'high', sentiment: 'neg',
-      headline: 'WIPRO Issues Muted Guidance — Revenue Growth Outlook Cut to 1–3% QoQ',
-      summary: 'Wipro revised Q2 FY27 revenue growth guidance to 1–3% QoQ, below consensus of 4.2%. Management cited client budget freezes in BFSI vertical.',
-      company: 'WIPRO', sector: 'IT', source: 'Reuters', time: '18:04',
-      importance: 82, eventType: 'Guidance',
-    },
-    {
-      id: 'N004', impact: 74, severity: 'high', sentiment: 'pos',
-      headline: 'RBI Keeps Repo Rate Unchanged at 6.25% — Accommodative Stance Maintained',
-      summary: 'MPC voted 4-2 to hold rates. Governor cited softening CPI inflation at 4.1% and resilient GDP growth. Market positive for rate-sensitive sectors.',
-      company: 'MACRO', sector: 'Macro', source: 'RBI', time: '10:00',
-      importance: 90, eventType: 'Regulatory',
-    },
-    {
-      id: 'N005', impact: 68, severity: 'high', sentiment: 'pos',
-      headline: 'BAJFINANCE Announces ₹10,000 Crore QIP — Capital Raise for Growth',
-      summary: 'Bajaj Finance board approved a qualified institutional placement at ₹8,820 per share. Funds earmarked for loan book expansion and technology.',
-      company: 'BAJFINANCE', sector: 'NBFC', source: 'BSE Filing', time: '14:22',
-      importance: 76, eventType: 'Capital Raise',
-    },
-    {
-      id: 'N006', impact: 62, severity: 'medium', sentiment: 'pos',
-      headline: 'Maruti Suzuki Monthly Sales Cross 2 Lakh Units — 3rd Consecutive Record Month',
-      summary: 'MSIL reported 2,04,200 unit sales in May 2026, up 11% YoY. SUV segment grew 18%. Export volume at 31,400 units.',
-      company: 'MARUTI', sector: 'Auto', source: 'Moneycontrol', time: '09:45',
-      importance: 68, eventType: 'Sales Data',
-    },
-    {
-      id: 'N007', impact: 58, severity: 'medium', sentiment: 'neg',
-      headline: 'TATASTEEL Reports Weaker European Steel Margins Due to Energy Costs',
-      summary: 'Tata Steel UK operations impacted by elevated energy prices. EBITDA margin guidance revised to 6–8% from 9–11%.',
-      company: 'TATASTEEL', sector: 'Metal', source: 'ET Markets', time: '11:34',
-      importance: 61, eventType: 'Guidance',
-    },
-    {
-      id: 'N008', impact: 48, severity: 'medium', sentiment: 'neu',
-      headline: 'SEBI Issues New Circular on Algo Trading Risk Frameworks for Brokers',
-      summary: 'Securities regulator mandates enhanced kill-switch controls and real-time risk monitoring for algorithmic trading systems by September 2026.',
-      company: 'SEBI', sector: 'Regulatory', source: 'SEBI Circular', time: '17:20',
-      importance: 55, eventType: 'Regulatory',
-    },
-    {
-      id: 'N009', impact: 42, severity: 'low', sentiment: 'pos',
-      headline: 'Sun Pharma Receives USFDA Approval for Generic Lenalidomide — $1.2B Opportunity',
-      summary: 'US FDA grants final approval for Sun Pharma\'s ANDA for Lenalidomide 5mg capsules. Street estimates ₹340–480 crore annual revenue opportunity.',
-      company: 'SUNPHARMA', sector: 'Pharma', source: 'FDA Database', time: '21:10',
-      importance: 72, eventType: 'Regulatory Approval',
-    },
-    {
-      id: 'N010', impact: 38, severity: 'low', sentiment: 'pos',
-      headline: 'India Manufacturing PMI Rises to 58.4 — Strongest Reading in 14 Months',
-      summary: 'S&P Global India Manufacturing PMI for May 2026 at 58.4, up from 56.1. New orders and export orders both expand sharply.',
-      company: 'MACRO', sector: 'Macro', source: 'S&P Global', time: '10:30',
-      importance: 63, eventType: 'Economic Data',
-    },
-  ],
-
-  sentimentCompany: [
-    { symbol: 'RELIANCE',   score: 84, trend: 'Improving',  velocity: +4.2 },
-    { symbol: 'HDFCBANK',   score: 79, trend: 'Stable',     velocity: +1.1 },
-    { symbol: 'TCS',        score: 76, trend: 'Stable',     velocity: -0.3 },
-    { symbol: 'ICICIBANK',  score: 78, trend: 'Improving',  velocity: +2.8 },
-    { symbol: 'NESTLEIND',  score: 81, trend: 'Improving',  velocity: +3.4 },
-    { symbol: 'LTIM',       score: 73, trend: 'Stable',     velocity: +0.8 },
-    { symbol: 'BAJFINANCE', score: 68, trend: 'Stable',     velocity: +1.4 },
-    { symbol: 'INFY',       score: 66, trend: 'Declining',  velocity: -2.1 },
-    { symbol: 'AXISBANK',   score: 70, trend: 'Stable',     velocity: +0.6 },
-    { symbol: 'SUNPHARMA',  score: 71, trend: 'Improving',  velocity: +2.7 },
-    { symbol: 'MARUTI',     score: 74, trend: 'Stable',     velocity: +0.4 },
-    { symbol: 'TATASTEEL',  score: 41, trend: 'Declining',  velocity: -5.8 },
-    { symbol: 'WIPRO',      score: 34, trend: 'Declining',  velocity: -7.2 },
-    { symbol: 'ONGC',       score: 52, trend: 'Declining',  velocity: -3.1 },
-  ],
-
-  sentimentSector: [
-    { sector: 'FMCG',         score: 83 },
-    { sector: 'Banking',      score: 78 },
-    { sector: 'IT',           score: 64 },
-    { sector: 'Auto',         score: 74 },
-    { sector: 'Pharma',       score: 71 },
-    { sector: 'Energy',       score: 68 },
-    { sector: 'NBFC',         score: 69 },
-    { sector: 'Metal',        score: 42 },
-    { sector: 'Realty',       score: 58 },
-    { sector: 'Media',        score: 47 },
-  ],
-
-  narrativeShifts: [
-    { ticker: 'RELIANCE', direction: 'improving', text: 'Shift from O2C weakness narrative to new energy (green hydrogen, solar) strength story. Institutional tone turning bullish.' },
-    { ticker: 'WIPRO',    direction: 'declining',  text: 'Client budget freeze narrative accelerating. "Cost optimization" language increasing in coverage. Analysts downgrading revenue estimates.' },
-    { ticker: 'HDFCBANK', direction: 'improving', text: 'NIM recovery story gaining traction post-merger integration. Credit quality improving faster than expected.' },
-    { ticker: 'TATASTEEL',direction: 'declining',  text: 'European operations drag story gaining momentum. Multiple sell-side notes citing structural margin pressure.' },
-    { ticker: 'SUNPHARMA',direction: 'improving', text: 'US generics portfolio expanding. Multiple USFDA approvals driving positive re-rating narrative.' },
-  ],
-
-  strategies: [
-    { id:'AQRTI_MOM_001',  family:'Momentum',       status:'institutional', alpha:92, sharpe:2.41, winRate:68, pf:2.14, maxDD:'-6.2%', regime:'Bull', trades:284 },
-    { id:'AQRTI_MOM_004',  family:'Momentum',       status:'institutional', alpha:88, sharpe:2.18, winRate:65, pf:1.98, maxDD:'-7.1%', regime:'Bull',  trades:312 },
-    { id:'AQRTI_MOM_011',  family:'Hybrid',         status:'institutional', alpha:84, sharpe:1.94, winRate:63, pf:1.87, maxDD:'-8.4%', regime:'Bull/Recovery', trades:198 },
-    { id:'AQRTI_BRK_007',  family:'Breakout',       status:'production',   alpha:78, sharpe:1.72, winRate:61, pf:1.74, maxDD:'-9.2%', regime:'Bull',  trades:142 },
-    { id:'AQRTI_EVT_003',  family:'Event Driven',   status:'production',   alpha:75, sharpe:1.64, winRate:58, pf:1.68, maxDD:'-10.1%', regime:'Any',  trades:87  },
-    { id:'AQRTI_SENT_002', family:'Sentiment',      status:'production',   alpha:72, sharpe:1.48, winRate:57, pf:1.62, maxDD:'-11.4%', regime:'Bull', trades:204 },
-    { id:'AQRTI_ROT_005',  family:'Sector Rotation',status:'production',   alpha:71, sharpe:1.44, winRate:59, pf:1.59, maxDD:'-9.8%', regime:'Bull/Recovery', trades:94 },
-    { id:'AQRTI_MRV_009',  family:'Mean Reversion', status:'production',   alpha:68, sharpe:1.38, winRate:62, pf:1.52, maxDD:'-7.6%', regime:'Range', trades:318 },
-    { id:'AQRTI_MOM_014',  family:'Momentum',       status:'paper',        alpha:78, sharpe:1.81, winRate:64, pf:1.79, maxDD:'-8.1%', regime:'Bull',  trades:56  },
-    { id:'AQRTI_HYB_006',  family:'Hybrid',         status:'paper',        alpha:74, sharpe:1.62, winRate:60, pf:1.66, maxDD:'-9.4%', regime:'Bull',  trades:43  },
-    { id:'AQRTI_BRK_019',  family:'Breakout',       status:'shadow',       alpha:68, sharpe:1.44, winRate:58, pf:1.54, maxDD:'-10.8%', regime:'Bull', trades:22  },
-    { id:'AQRTI_SENT_011', family:'Sentiment',      status:'shadow',       alpha:64, sharpe:1.28, winRate:55, pf:1.44, maxDD:'-12.1%', regime:'Any',  trades:31  },
-    { id:'AQRTI_MRV_024',  family:'Mean Reversion', status:'paper',        alpha:61, sharpe:1.18, winRate:60, pf:1.38, maxDD:'-8.7%', regime:'Range', trades:48  },
-    { id:'AQRTI_EVT_017',  family:'Event Driven',   status:'paper',        alpha:66, sharpe:1.34, winRate:56, pf:1.49, maxDD:'-11.2%', regime:'Any',  trades:27  },
-  ],
-
-  models: [
-    { id:'LGBM_DIR_v3',   type:'LightGBM', target:'Direction',     accuracy:68.2, calibration:0.031, weight:'32%', status:'production', trained:'Today 06:28', features:148 },
-    { id:'CATB_DIR_v2',   type:'CatBoost', target:'Direction',     accuracy:64.7, calibration:0.038, weight:'24%', status:'production', trained:'Today 06:31', features:148 },
-    { id:'XGB_DIR_v2',    type:'XGBoost',  target:'Direction',     accuracy:61.4, calibration:0.042, weight:'18%', status:'production', trained:'Today 06:35', features:148 },
-    { id:'LGBM_RET_v2',   type:'LightGBM', target:'Expected Return', accuracy:58.1, calibration:0.044, weight:'14%', status:'production', trained:'Today 06:40', features:132 },
-    { id:'RF_VOL_v1',     type:'Random Forest', target:'Volatility', accuracy:72.4, calibration:0.028, weight:'12%', status:'production', trained:'Today 06:44', features:84 },
-    { id:'LGBM_SENT_v1',  type:'LightGBM', target:'Sentiment',    accuracy:74.8, calibration:0.024, weight:'—',   status:'shadow',     trained:'21 Jun 06:28', features:94 },
-    { id:'REGIME_v3',     type:'CatBoost', target:'Market Regime', accuracy:81.2, calibration:0.019, weight:'—',   status:'production', trained:'Today 06:45', features:62 },
-    { id:'XGB_DIR_v3',    type:'XGBoost',  target:'Direction',    accuracy:63.1, calibration:0.039, weight:'—',   status:'shadow',     trained:'22 Jun 04:10', features:160 },
-  ],
-
-  learning: {
-    knowledgeHistory: (() => {
-      const vals = [38, 41, 43, 44, 47, 48, 50, 52, 54, 55, 57, 58, 58, 60, 61, 62, 62, 63, 63, 64, 64, 65, 65, 65, 66, 66, 67, 67, 67, 67];
-      const labels = [];
-      const now = new Date('2026-06-22');
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now); d.setDate(d.getDate() - i);
-        labels.push(d.toLocaleDateString('en-IN', { day:'2-digit', month:'short' }));
-      }
-      return { labels, values: vals };
-    })(),
-
-    failureCategories: {
-      labels: ['False Bullish', 'False Bearish', 'Regime Error', 'Sentiment Error', 'Data Error', 'Overconfidence', 'Risk Error'],
-      values: [412, 287, 198, 324, 89, 267, 270],
-    },
-
-    recentFailures: [
-      { id:'F-0847', type:'Regime Error',        symbol:'INFY',      desc:'Predicted bullish breakout in early Bear transition. Model missed regime shift signal.', lesson:'Increase regime model weight during high-volatility transitions.' },
-      { id:'F-0846', type:'Overconfidence',      symbol:'WIPRO',     desc:'Conf: 82% on bullish signal. Actual return: -3.4%. Guidance risk not captured.', lesson:'Reduce confidence ceiling on IT stocks during earnings week.' },
-      { id:'F-0845', type:'Sentiment Error',     symbol:'RELIANCE',  desc:'Sentiment model lagged 18hrs on negative news event. Trade entered before signal updated.', lesson:'Implement 2hr news latency buffer before entry signal confirmation.' },
-      { id:'F-0844', type:'False Bullish',       symbol:'TATASTEEL', desc:'Volume breakout signal triggered. No confirmation from macro/sector models.', lesson:'Require sector strength > 60 for breakout strategies in Metal sector.' },
-      { id:'F-0843', type:'Data Error',          symbol:'ONGC',      desc:'Delivery volume feature missing for 2 days due to NSE data issue. Feature defaulted to zero.', lesson:'Add feature health check: flag predictions with critical missing features.' },
-      { id:'F-0842', type:'False Bullish',       symbol:'BAJFINANCE',desc:'Event-driven signal on QIP announcement. Stock fell on dilution concerns.', lesson:'For capital raise events, add dilution-impact score to model input.' },
-    ],
-
-    improvements: [
-      { title:'Regime Weight Increased → LightGBM Direction Model', detail:'Weight boosted from 28% to 32% after 30-day performance review. Accuracy: 66.2% → 68.2%' },
-      { title:'IT Sector Confidence Cap Added', detail:'Max confidence for IT sector during earnings window capped at 74%. Reduces overconfidence failures.' },
-      { title:'2-Hour News Buffer Rule Activated', detail:'System now waits 2hr after high-impact news before confirming entry signal. Reduces early-entry failures.' },
-      { title:'Delivery Volume Feature — Missing Data Handler', detail:'Fallback logic added: use 5-day avg if daily delivery volume missing. Feature no longer defaults to zero.' },
-      { title:'Mean Reversion Strategy — Range Regime Lock', detail:'AQRTI_MRV_009 now blocked in Bull Market regime. Deployed only in Range/High-Volatility. Sharpe: 0.84 → 1.38.' },
-      { title:'XGBoost v3 Promoted to Shadow Mode', detail:'New architecture with 160 features. Accuracy 63.1% in WFV. Begins shadow testing today.' },
-      { title:'Sector Strength Filter Added to Breakout Strategy', detail:'Sector score must be ≥ 60 before breakout signal generated. Reduces false positives by ~18%.' },
-    ],
-  },
-
-  risk: {
-    exposure: 64.8,
-    varDaily: -2840,
-    varPct: -2.72,
-    maxDD30d: -4.3,
-    sharpe: 1.84,
-    sortino: 2.31,
-    profitFactor: 1.74,
-
-    sectorExposure: [
-      { sector: 'Banking',   weight: 18.4 },
-      { sector: 'IT',        weight: 12.2 },
-      { sector: 'Energy',    weight: 10.8 },
-      { sector: 'FMCG',      weight: 8.4  },
-      { sector: 'Auto',      weight: 6.7  },
-      { sector: 'Pharma',    weight: 4.8  },
-      { sector: 'NBFC',      weight: 3.5  },
-      { sector: 'Cash',      weight: 35.2 },
-    ],
-
-    drawdownHistory: (() => {
-      const vals = [0,-0.4,-0.8,-0.6,-1.2,-1.8,-2.1,-1.4,-0.9,-0.4,-1.1,-2.3,-3.1,-4.3,-3.8,-3.2,-2.6,-1.9,-1.2,-0.8,-1.4,-2.0,-2.4,-1.8,-1.1,-0.6,-0.3,-0.7,-1.2,-0.8];
-      const labels = [];
-      const now = new Date('2026-06-22');
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now); d.setDate(d.getDate() - i);
-        labels.push(d.toLocaleDateString('en-IN', { day:'2-digit', month:'short' }));
-      }
-      return { labels, values: vals };
-    })(),
-
-    positions: [
-      { symbol: 'RELIANCE',   weight: '5.0%', var: '−₹142', vol: '18.4%', level: 'Low' },
-      { symbol: 'HDFCBANK',   weight: '4.2%', var: '−₹121', vol: '22.1%', level: 'Medium' },
-      { symbol: 'LTIM',       weight: '4.0%', var: '−₹118', vol: '24.8%', level: 'Medium' },
-      { symbol: 'TCS',        weight: '4.0%', var: '−₹109', vol: '19.2%', level: 'Low' },
-      { symbol: 'ICICIBANK',  weight: '3.8%', var: '−₹98',  vol: '21.4%', level: 'Medium' },
-      { symbol: 'NESTLEIND',  weight: '3.5%', var: '−₹84',  vol: '14.2%', level: 'Low' },
-      { symbol: 'AXISBANK',   weight: '3.4%', var: '−₹102', vol: '23.8%', level: 'Medium' },
-      { symbol: 'BAJFINANCE', weight: '3.2%', var: '−₹128', vol: '26.4%', level: 'High' },
-      { symbol: 'SUNPHARMA',  weight: '2.8%', var: '−₹76',  vol: '18.8%', level: 'Low' },
-      { symbol: 'MARUTI',     weight: '2.6%', var: '−₹88',  vol: '20.4%', level: 'Medium' },
-      { symbol: 'WIPRO',      weight: '2.4%', var: '−₹72',  vol: '22.6%', level: 'Low' },
-      { symbol: 'TATAMOTORS', weight: '2.2%', var: '−₹94',  vol: '28.2%', level: 'High' },
-    ],
-
-    alerts: [
-      { level: 'warning',  title: 'Banking Sector Nearing Exposure Limit', desc: '18.4% exposure vs 25% maximum. HDFCBANK earnings event increases short-term concentration risk.' },
-      { level: 'warning',  title: 'BAJFINANCE — Elevated Volatility', desc: '26.4% annualized vol. Position at upper boundary of risk-adjusted allocation.' },
-      { level: 'info',     title: 'New Position — SUNPHARMA', desc: 'USFDA approval event confirms entry. Risk within normal parameters.' },
-      { level: 'clear',    title: 'Circuit Breakers — All Clear', desc: 'Daily, weekly, and monthly drawdown limits not breached. All systems normal.' },
-      { level: 'info',     title: 'Cash Reserve: 35.2%', desc: 'Healthy cash buffer above 20% minimum requirement. System ready to deploy on new signals.' },
-    ],
-  },
-};
-
-// ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
 function el(id) { return document.getElementById(id); }
@@ -761,589 +415,75 @@ async function hydrateNewsStrip() {
 
 // ── OVERVIEW ──────────────────────────────────────────────────
 function renderOverview() {
-  const s = DataStore.system;
-
-  el('kpi-portfolio').textContent   = `₹${s.portfolioValue.toLocaleString('en-IN')}`;
-  el('kpi-daily-pnl').textContent   = `${s.dailyPnl > 0 ? '+' : ''}₹${Math.abs(s.dailyPnl).toLocaleString('en-IN')}`;
-  el('kpi-daily-pct').textContent   = `${s.dailyPnlPct > 0 ? '+' : ''}${s.dailyPnlPct}%`;
-  el('kpi-positions').textContent   = s.openPositions;
-  el('kpi-predictions').textContent = s.activePredictions;
-  el('kpi-winrate').textContent      = `${s.winRate30d}%`;
-  el('kpi-knowledge').textContent    = `${s.knowledgeScore} / 100`;
-
-  el('kpi-daily-pnl').className = 'kpi-value ' + (s.dailyPnl >= 0 ? 'positive' : 'negative');
-  el('kpi-daily-pct').className = 'kpi-sub '   + (s.dailyPnl >= 0 ? 'positive' : 'negative');
-
-  // Equity Curve
-  ChartRegistry.create('equityCurveChart', {
-    type: 'line',
-    data: {
-      labels: DataStore.equityCurve.labels,
-      datasets: [{
-        data: DataStore.equityCurve.values,
-        borderColor: '#ff8c00',
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.3,
-        fill: true,
-        backgroundColor: (ctx) => {
-          const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-          gradient.addColorStop(0, 'rgba(255,140,0,0.14)');
-          gradient.addColorStop(1, 'rgba(255,140,0,0.00)');
-          return gradient;
-        },
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { display: false }, tooltip: {
-        callbacks: {
-          label: (ctx) => ` ₹${ctx.parsed.y.toLocaleString('en-IN')}`,
-        }
-      }},
-      scales: {
-        x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } },
-        y: {
-          ticks: {
-            callback: v => `₹${(v/1000).toFixed(0)}K`,
-            maxTicksLimit: 5,
-          },
-        },
-      },
-    },
-  });
-
-  // Top Predictions Table
+  // Show loading placeholders — hydrateOverview() fills real data
+  const _set = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+  _set('kpi-portfolio', '…');
+  _set('kpi-daily-pnl', '…');
+  _set('kpi-positions', '…');
+  _set('kpi-predictions', '…');
+  _set('kpi-winrate', '…');
+  _set('kpi-knowledge', '…');
   const tbody = el('top-predictions-body');
-  if (tbody) {
-    tbody.innerHTML = DataStore.topPredictions.map(p => `
-      <tr>
-        <td><strong>${p.symbol}</strong></td>
-        <td>${dirBadge(p.direction)}</td>
-        <td>${confBarHTML(p.conf)}</td>
-        <td class="${p.expRet.startsWith('+') ? 'positive' : 'negative'}">${p.expRet}</td>
-        <td>${riskBadge(p.risk)}</td>
-      </tr>`).join('');
-  }
+  if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px">Loading predictions…</td></tr>';
 }
 
 // ── MARKET ────────────────────────────────────────────────────
 function renderMarket() {
-  // Sector Strength Bar Chart
-  const sect = DataStore.sectorStrength;
-  ChartRegistry.create('sectorStrengthChart', {
-    type: 'bar',
-    data: {
-      labels: sect.map(s => s.name),
-      datasets: [{
-        label: 'Strength Score',
-        data: sect.map(s => s.score),
-        backgroundColor: sect.map(s =>
-          s.score >= 80 ? 'rgba(34,197,94,0.7)'
-          : s.score >= 60 ? 'rgba(255,140,0,0.7)'
-          : s.score >= 45 ? 'rgba(245,158,11,0.6)'
-          : 'rgba(239,68,68,0.6)'
-        ),
-        borderRadius: 4,
-        borderSkipped: false,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { min: 0, max: 100, ticks: { stepSize: 20 } },
-        y: { ticks: { font: { size: 11 } } },
-      },
-    },
-  });
-
-  // Top Movers Table
+  // Delegate to live hydration — hydrateMarket() renders all charts/tables
   const moversBody = el('top-movers-body');
-  if (moversBody) {
-    moversBody.innerHTML = DataStore.topMovers.map(m => `
-      <tr>
-        <td><strong>${m.symbol}</strong></td>
-        <td style="color:var(--text-muted)">${m.sector}</td>
-        <td>${m.price}</td>
-        <td class="${m.dir === 'up' ? 'positive' : 'negative'}">${m.change}</td>
-        <td style="color:var(--text-muted)">${m.volume}</td>
-      </tr>`).join('');
-  }
-
-  // Sector Detail
-  const sectorDetail = el('sector-detail-body');
-  if (sectorDetail) {
-    sectorDetail.innerHTML = DataStore.sectorStrength.map(s => {
-      const col = s.score >= 75 ? 'var(--positive)' : s.score >= 50 ? 'var(--accent)' : s.score >= 35 ? 'var(--warning)' : 'var(--negative)';
-      return `
-        <div class="sector-card">
-          <div class="sector-row">
-            <span class="sector-name">${s.name}</span>
-            <span class="sector-score" style="color:${col}">${s.score}</span>
-          </div>
-          <div class="score-bar-track">
-            <div class="score-bar-fill" style="width:${s.score}%; background:${col}"></div>
-          </div>
-          <div class="sector-meta">
-            <span>RS: ${s.rs}</span>
-            <span>Momentum: ${s.momentum}</span>
-            <span class="${s.returns1d >= 0 ? 'positive' : 'negative'}">${s.returns1d >= 0 ? '+' : ''}${s.returns1d}%</span>
-          </div>
-        </div>`;
-    }).join('');
-  }
-
-  // Deriv Signals
+  if (moversBody) moversBody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px">Loading market data…</td></tr>';
   const derivBody = el('deriv-body');
-  if (derivBody) {
-    derivBody.innerHTML = DataStore.derivSignals.map(d => `
-      <tr>
-        <td style="color:var(--text-muted)">${d.signal}</td>
-        <td><strong>${d.value}</strong></td>
-        <td style="color:var(--info)">${d.interpretation}</td>
-      </tr>`).join('');
-  }
+  if (derivBody) derivBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:16px">Loading…</td></tr>';
 }
 
 // ── OPPORTUNITIES ─────────────────────────────────────────────
 function renderOpportunities() {
+  // Delegate to hydrateOpportunities() which fetches real predictions
   const tbody = el('opportunity-body');
-  if (tbody) {
-    tbody.innerHTML = DataStore.opportunities.map(o => `
-      <tr>
-        <td><strong style="color:var(--accent)">#${o.rank}</strong></td>
-        <td><strong>${o.symbol}</strong></td>
-        <td style="color:var(--text-muted)">${o.sector}</td>
-        <td>${dirBadge(o.direction)}</td>
-        <td>${confBarHTML(o.conf)}</td>
-        <td class="${o.expRet.startsWith('+') ? 'positive' : 'negative'}">${o.expRet}</td>
-        <td>${riskBadge(o.risk)}</td>
-        <td style="color:var(--text-secondary)">${o.strategy}</td>
-        <td class="${sentColor(o.sentiment)}">${o.sentiment}</td>
-        <td><strong>${o.posSize}</strong></td>
-      </tr>`).join('');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);text-align:center;padding:16px">Loading opportunities…</td></tr>';
+  // Wire filter listeners once
+  const confFilter = el('opp-conf-filter');
+  const dirFilter  = el('opp-dir-filter');
+  if (confFilter && !confFilter._wired) {
+    confFilter._wired = true;
+    confFilter.addEventListener('change', () => hydrateOpportunities());
   }
-
-  // Confidence Distribution
-  const confBuckets = [0,0,0,0]; // <60, 60-69, 70-79, 80+
-  DataStore.opportunities.forEach(o => {
-    if (o.conf >= 80) confBuckets[3]++;
-    else if (o.conf >= 70) confBuckets[2]++;
-    else if (o.conf >= 60) confBuckets[1]++;
-    else confBuckets[0]++;
-  });
-
-  ChartRegistry.create('confDistChart', {
-    type: 'doughnut',
-    data: {
-      labels: ['< 60 (Ignore)', '60–69 (Weak)', '70–79 (Good)', '80+ (Strong)'],
-      datasets: [{
-        data: confBuckets,
-        backgroundColor: ['rgba(239,68,68,0.7)', 'rgba(245,158,11,0.7)', 'rgba(255,140,0,0.7)', 'rgba(34,197,94,0.7)'],
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { position: 'bottom' } },
-      cutout: '60%',
-    },
-  });
-
-  // Strategy Breakdown
-  const stratCount = {};
-  DataStore.opportunities.forEach(o => {
-    const fam = o.strategy.split('+')[0].trim();
-    stratCount[fam] = (stratCount[fam] || 0) + 1;
-  });
-
-  ChartRegistry.create('stratBreakdownChart', {
-    type: 'doughnut',
-    data: {
-      labels: Object.keys(stratCount),
-      datasets: [{
-        data: Object.values(stratCount),
-        backgroundColor: ['rgba(255,140,0,0.8)','rgba(0,170,255,0.7)','rgba(34,197,94,0.7)','rgba(245,158,11,0.7)','rgba(239,68,68,0.6)'],
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { position: 'bottom' } },
-      cutout: '60%',
-    },
-  });
-
-  // Filter functionality
-  function applyFilters() {
-    const confFilter = el('opp-conf-filter').value;
-    const dirFilter  = el('opp-dir-filter').value;
-    const rows = tbody.querySelectorAll('tr');
-    rows.forEach((row, i) => {
-      const o = DataStore.opportunities[i];
-      if (!o) return;
-      const confOk = confFilter === 'all'
-        || (confFilter === 'strong' && o.conf >= 80)
-        || (confFilter === 'good'   && o.conf >= 70 && o.conf < 80);
-      const dirOk = dirFilter === 'all'
-        || (dirFilter === 'bullish' && o.direction === 'Bullish')
-        || (dirFilter === 'bearish' && o.direction === 'Bearish');
-      row.style.display = (confOk && dirOk) ? '' : 'none';
-    });
+  if (dirFilter && !dirFilter._wired) {
+    dirFilter._wired = true;
+    dirFilter.addEventListener('change', () => hydrateOpportunities());
   }
-
-  el('opp-conf-filter').addEventListener('change', applyFilters);
-  el('opp-dir-filter').addEventListener('change', applyFilters);
 }
 
 // ── NEWS ──────────────────────────────────────────────────────
 function renderNews() {
-  const sentColors = { pos: 'positive', neg: 'negative', neu: 'neutral' };
-  const sentLabels = { pos: 'Positive', neg: 'Negative', neu: 'Neutral' };
-  const sevMap     = { critical: 'critical', high: 'high', medium: 'medium', low: 'low' };
-
-  function newsItemHTML(item) {
-    return `
-      <div class="news-item">
-        <div class="news-impact-badge ${sevMap[item.severity]}">
-          ${item.impact}
-        </div>
-        <div class="news-content">
-          <div class="news-headline">${item.headline}</div>
-          <div class="news-meta">
-            <span>${item.source}</span>
-            <span>${item.company}</span>
-            <span>${item.sector}</span>
-            <span>${item.eventType}</span>
-            <span>${item.time} IST</span>
-            <span class="news-sentiment-tag ${item.sentiment}">${sentLabels[item.sentiment]}</span>
-          </div>
-        </div>
-      </div>`;
-  }
-
-  // High Impact (impact >= 70)
-  const highImpact = el('news-high-impact');
-  if (highImpact) {
-    highImpact.innerHTML = DataStore.news
-      .filter(n => n.impact >= 70)
-      .map(newsItemHTML)
-      .join('');
-  }
-
-  // All news feed
+  // Delegate to hydrateNews() — all live data from backend
+  const hi = el('news-high-impact');
+  if (hi) hi.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.78rem">Loading news…</div>';
   const feed = el('news-feed');
-  if (feed) {
-    feed.innerHTML = DataStore.news.map(newsItemHTML).join('');
-  }
-
-  // News Sentiment Trend Chart (24hr hourly mock)
-  const hours = Array.from({length: 24}, (_, i) => `${String(i).padStart(2,'0')}:00`);
-  const sentValues = [0.2,0.1,0.3,0.2,0.4,0.3,0.5,0.6,0.7,0.8,0.9,0.7,0.8,0.6,0.7,0.8,0.9,0.7,0.6,0.8,0.7,0.6,0.5,0.5];
-
-  ChartRegistry.create('newsSentimentTrendChart', {
-    type: 'line',
-    data: {
-      labels: hours,
-      datasets: [{
-        label: 'Avg Sentiment',
-        data: sentValues,
-        borderColor: '#ff8c00',
-        borderWidth: 2,
-        pointRadius: 2,
-        pointBackgroundColor: '#ff8c00',
-        tension: 0.4,
-        fill: true,
-        backgroundColor: 'rgba(255,140,0,0.06)',
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { min: -1, max: 1, ticks: { stepSize: 0.5, callback: v => v > 0 ? `+${v}` : v } },
-        x: { ticks: { maxTicksLimit: 8 } },
-      },
-    },
-  });
+  if (feed) feed.innerHTML = '';
 }
 
 // ── SENTIMENT ─────────────────────────────────────────────────
 function renderSentiment() {
-  const sentData = DataStore.sentimentCompany;
-  const top = sentData.slice(0, 10);
-
-  ChartRegistry.create('companySentimentChart', {
-    type: 'bar',
-    data: {
-      labels: top.map(s => s.symbol),
-      datasets: [{
-        label: 'Sentiment Score',
-        data: top.map(s => s.score),
-        backgroundColor: top.map(s =>
-          s.score >= 70 ? 'rgba(34,197,94,0.7)'
-          : s.score >= 50 ? 'rgba(255,140,0,0.7)'
-          : 'rgba(239,68,68,0.6)'
-        ),
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { min: 0, max: 100, ticks: { stepSize: 25 } },
-        x: { ticks: { font: { size: 10 } } },
-      },
-    },
-  });
-
-  ChartRegistry.create('sectorSentimentChart', {
-    type: 'radar',
-    data: {
-      labels: DataStore.sentimentSector.map(s => s.sector),
-      datasets: [{
-        label: 'Sector Sentiment',
-        data: DataStore.sentimentSector.map(s => s.score),
-        borderColor: '#ff8c00',
-        backgroundColor: 'rgba(255,140,0,0.08)',
-        pointBackgroundColor: '#ff8c00',
-        borderWidth: 1.5,
-        pointRadius: 3,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        r: {
-          min: 0, max: 100,
-          ticks: { stepSize: 25, backdropColor: 'transparent' },
-          grid: { color: 'rgba(255,255,255,0.06)' },
-          angleLines: { color: 'rgba(255,255,255,0.06)' },
-        }
-      },
-    },
-  });
-
-  // Velocity items
+  // Delegate to hydrateSentiment() — live backend data
   const velBody = el('sentiment-velocity-body');
-  if (velBody) {
-    const sorted = [...sentData].sort((a,b) => Math.abs(b.velocity) - Math.abs(a.velocity)).slice(0, 10);
-    velBody.innerHTML = sorted.map(s => {
-      const isPos = s.velocity > 0;
-      const barW  = Math.min(Math.abs(s.velocity) / 10 * 100, 100);
-      const color  = isPos ? 'var(--positive)' : 'var(--negative)';
-      return `
-        <div class="velocity-item">
-          <span class="velocity-symbol">${s.symbol}</span>
-          <div class="velocity-bar-wrap">
-            <div class="score-bar-track">
-              <div class="score-bar-fill" style="width:${barW}%; background:${color}"></div>
-            </div>
-          </div>
-          <span class="velocity-label" style="color:${color}">${isPos ? '+' : ''}${s.velocity.toFixed(1)}</span>
-        </div>`;
-    }).join('');
-  }
-
-  // Narrative Shifts
+  if (velBody) velBody.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.78rem">Loading…</div>';
   const narrativeBody = el('narrative-shifts-body');
-  if (narrativeBody) {
-    narrativeBody.innerHTML = DataStore.narrativeShifts.map(n => `
-      <div class="narrative-item">
-        <div class="narrative-header">
-          <span class="narrative-ticker">${n.ticker}</span>
-          <span class="narrative-direction ${n.direction}">${n.direction === 'improving' ? '▲ Improving' : '▼ Declining'}</span>
-        </div>
-        <div class="narrative-text">${n.text}</div>
-      </div>`).join('');
-  }
+  if (narrativeBody) narrativeBody.innerHTML = '';
 }
 
 // ── STRATEGY LAB ──────────────────────────────────────────────
 function renderStrategy() {
+  // Delegate to hydrateStrategyResearch() — live backend data
   const tbody = el('strategy-body');
-  if (tbody) {
-    tbody.innerHTML = DataStore.strategies.map(s => `
-      <tr>
-        <td><strong style="font-family:var(--font-mono);font-size:0.72rem">${s.id}</strong></td>
-        <td style="color:var(--text-secondary)">${s.family}</td>
-        <td>${statusBadge(s.status)}</td>
-        <td><strong class="accent">${s.alpha}</strong></td>
-        <td class="${s.sharpe >= 1.5 ? 'positive' : 'neutral'}">${s.sharpe.toFixed(2)}</td>
-        <td>${s.winRate}%</td>
-        <td class="${s.pf >= 1.8 ? 'positive' : s.pf >= 1.5 ? 'neutral' : 'warning'}">${s.pf.toFixed(2)}</td>
-        <td class="negative">${s.maxDD}</td>
-        <td style="color:var(--text-muted)">${s.regime}</td>
-        <td style="color:var(--text-muted)">${s.trades}</td>
-      </tr>`).join('');
-  }
-
-  // Population pie
-  const popCounts = {};
-  DataStore.strategies.forEach(s => { popCounts[s.status] = (popCounts[s.status] || 0) + 1; });
-  const popLabels = { institutional: '★ Institutional', production: 'Production', paper: 'Paper', shadow: 'Shadow' };
-  const popColors = ['rgba(255,140,0,0.85)', 'rgba(34,197,94,0.7)', 'rgba(245,158,11,0.7)', 'rgba(0,170,255,0.7)'];
-
-  ChartRegistry.create('strategyPopChart', {
-    type: 'doughnut',
-    data: {
-      labels: Object.keys(popCounts).map(k => popLabels[k] || k),
-      datasets: [{
-        data: Object.values(popCounts),
-        backgroundColor: popColors,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { position: 'bottom' } },
-      cutout: '55%',
-    },
-  });
-
-  // Fitness score distribution scatter
-  const scatter = DataStore.strategies.map(s => ({ x: s.sharpe, y: s.alpha }));
-  ChartRegistry.create('fitnessDist', {
-    type: 'scatter',
-    data: {
-      datasets: [{
-        label: 'Alpha vs Sharpe',
-        data: scatter,
-        backgroundColor: scatter.map((_, i) => {
-          const st = DataStore.strategies[i].status;
-          return st === 'institutional' ? 'rgba(255,140,0,0.9)'
-            : st === 'production'  ? 'rgba(34,197,94,0.7)'
-            : st === 'paper'       ? 'rgba(245,158,11,0.7)'
-            : 'rgba(0,170,255,0.7)';
-        }),
-        pointRadius: 7,
-        pointHoverRadius: 10,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => {
-              const s = DataStore.strategies[ctx.dataIndex];
-              return ` ${s.id} | α:${s.alpha} | SR:${s.sharpe.toFixed(2)}`;
-            }
-          }
-        }
-      },
-      scales: {
-        x: { title: { display: true, text: 'Sharpe Ratio', color: '#94a3b8' }, min: 1, max: 2.8 },
-        y: { title: { display: true, text: 'Alpha Score',  color: '#94a3b8' }, min: 55, max: 100 },
-      },
-    },
-  });
+  if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);text-align:center;padding:16px">Loading strategies…</td></tr>';
 }
 
 // ── MODEL CENTER ──────────────────────────────────────────────
 function renderModel() {
-  // Bar chart: model accuracies
-  const prodModels = DataStore.models.filter(m => m.status === 'production');
-  ChartRegistry.create('modelAccChart', {
-    type: 'bar',
-    data: {
-      labels: prodModels.map(m => m.id),
-      datasets: [{
-        label: 'Accuracy %',
-        data: prodModels.map(m => m.accuracy),
-        backgroundColor: prodModels.map(m =>
-          m.accuracy >= 70 ? 'rgba(34,197,94,0.7)'
-          : m.accuracy >= 60 ? 'rgba(255,140,0,0.7)'
-          : 'rgba(245,158,11,0.6)'
-        ),
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { min: 50, max: 85, ticks: { callback: v => `${v}%` } },
-        y: { ticks: { font: { size: 10 } } },
-      },
-    },
-  });
-
-  // Calibration curve
-  const perfectCalib  = [10,20,30,40,50,60,70,80,90,100];
-  const actualCalib   = [12,19,31,38,52,61,68,81,87,96];
-  ChartRegistry.create('calibrationChart', {
-    type: 'line',
-    data: {
-      labels: perfectCalib.map(v => `${v}%`),
-      datasets: [
-        {
-          label: 'Perfect Calibration',
-          data: perfectCalib,
-          borderColor: 'rgba(255,255,255,0.2)',
-          borderDash: [4, 4],
-          borderWidth: 1,
-          pointRadius: 0,
-          tension: 0,
-        },
-        {
-          label: 'AQRTI Ensemble',
-          data: actualCalib,
-          borderColor: '#ff8c00',
-          borderWidth: 2,
-          pointRadius: 4,
-          pointBackgroundColor: '#ff8c00',
-          tension: 0.2,
-          fill: false,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { position: 'bottom' } },
-      scales: {
-        x: { title: { display: true, text: 'Predicted Confidence', color: '#94a3b8' } },
-        y: { title: { display: true, text: 'Actual Accuracy',       color: '#94a3b8' }, min: 0, max: 100 },
-      },
-    },
-  });
-
-  // Model Registry Table
+  // Delegate to hydrateModelCenter() — live ML registry from backend
   const tbody = el('model-registry-body');
-  if (tbody) {
-    tbody.innerHTML = DataStore.models.map(m => `
-      <tr>
-        <td><strong style="font-family:var(--font-mono);font-size:0.72rem">${m.id}</strong></td>
-        <td style="color:var(--text-muted)">${m.type}</td>
-        <td style="color:var(--text-secondary)">${m.target}</td>
-        <td class="${m.accuracy >= 65 ? 'positive' : m.accuracy >= 55 ? 'neutral' : 'warning'}">${m.accuracy}%</td>
-        <td class="${m.calibration <= 0.035 ? 'positive' : 'warning'}">${m.calibration.toFixed(3)}</td>
-        <td><strong>${m.weight}</strong></td>
-        <td>${statusBadge(m.status)}</td>
-        <td style="color:var(--text-muted)">${m.trained}</td>
-        <td style="color:var(--text-muted)">${m.features}</td>
-      </tr>`).join('');
-  }
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted);text-align:center;padding:16px">Loading model registry…</td></tr>';
 }
 
 // ── LEARNING CENTER ───────────────────────────────────────────
@@ -1387,9 +527,7 @@ async function renderLearning() {
     }
   } else {
     // Mock fallback — KPIs stay as static HTML defaults
-    scoreHistory = DataStore.learning.knowledgeHistory.labels.map((l, i) => ({
-      date: l, overall_score: DataStore.learning.knowledgeHistory.values[i],
-    }));
+    scoreHistory = [];
   }
 
   // ── Intelligence Score Growth ─────────────────────────────
@@ -1398,10 +536,10 @@ async function renderLearning() {
   ChartRegistry.create('knowledgeGrowthChart', {
     type: 'line',
     data: {
-      labels: growthLabels.length ? growthLabels : DataStore.learning.knowledgeHistory.labels,
+      labels: growthLabels.length ? growthLabels : [],
       datasets: [{
         label: 'Intelligence Score',
-        data: growthVals.length ? growthVals : DataStore.learning.knowledgeHistory.values,
+        data: growthVals.length ? growthVals : [],
         borderColor: '#ff8c00',
         borderWidth: 2,
         pointRadius: 0,
@@ -1453,8 +591,8 @@ async function renderLearning() {
 
   // ── Failure Category Chart ────────────────────────────────
   const byCat    = liveData?.failuresByCategory || {};
-  const catKeys  = Object.keys(byCat).length ? Object.keys(byCat) : DataStore.learning.failureCategories.labels;
-  const catVals  = Object.keys(byCat).length ? Object.values(byCat) : DataStore.learning.failureCategories.values;
+  const catKeys  = Object.keys(byCat).length ? Object.keys(byCat) : [];
+  const catVals  = Object.keys(byCat).length ? Object.values(byCat) : [];
   ChartRegistry.create('failureCatChart', {
     type: 'bar',
     data: {
@@ -1514,9 +652,7 @@ async function renderLearning() {
   // ── Failures Table ────────────────────────────────────────
   const tbody = el('failure-table-body');
   if (tbody) {
-    const rows = failures.length ? failures : DataStore.learning.recentFailures.map(f => ({
-      date: '—', symbol: f.symbol, category: f.type, severity: 'medium', rootCause: f.desc, resolved: false,
-    }));
+    const rows = failures.length ? failures : [];
     const sevColor = { critical: '#ef4444', high: '#f59e0b', medium: '#60a5fa', low: '#6b7280' };
     tbody.innerHTML = rows.map(f => `
       <tr>
@@ -1653,17 +789,8 @@ async function renderLearning() {
             <div class="improvement-sub">${l.recommendation?.slice(0, 120) || l.description?.slice(0, 120) || '—'}</div>
           </div>
         </div>`).join('');
-    } else if (liveData) {
-      lessonsBody.innerHTML = '<div style="color:rgba(255,255,255,0.35);font-size:0.8rem">No lessons generated yet — run the learning loop.</div>';
     } else {
-      lessonsBody.innerHTML = DataStore.learning.improvements.map(i => `
-        <div class="improvement-item">
-          <div class="improvement-dot"></div>
-          <div>
-            <div class="improvement-title">${i.title}</div>
-            <div class="improvement-sub">${i.detail}</div>
-          </div>
-        </div>`).join('');
+      lessonsBody.innerHTML = '<div style="color:rgba(255,255,255,0.35);font-size:0.8rem">No lessons generated yet — run the learning loop.</div>';
     }
   }
 
@@ -1688,88 +815,12 @@ async function renderLearning() {
   }
 }
 
-// ── RISK CENTER ───────────────────────────────────────────────
+// -- RISK CENTER (delegates to hydrateRisk)
 function renderRisk() {
-  // Sector Exposure Doughnut
-  const exp = DataStore.risk.sectorExposure;
-  ChartRegistry.create('sectorExposureChart', {
-    type: 'doughnut',
-    data: {
-      labels: exp.map(e => e.sector),
-      datasets: [{
-        data: exp.map(e => e.weight),
-        backgroundColor: [
-          'rgba(255,140,0,0.8)', 'rgba(34,197,94,0.6)', 'rgba(59,130,246,0.6)',
-          'rgba(245,158,11,0.6)', 'rgba(239,68,68,0.6)', 'rgba(147,51,234,0.6)',
-          'rgba(236,72,153,0.6)', 'rgba(255,255,255,0.1)',
-        ],
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.06)',
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: {
-        legend: { position: 'right', labels: { font: { size: 11 } } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}%` } },
-      },
-      cutout: '50%',
-    },
-  });
-
-  // Drawdown History
-  ChartRegistry.create('drawdownChart', {
-    type: 'line',
-    data: {
-      labels: DataStore.risk.drawdownHistory.labels,
-      datasets: [{
-        label: 'Drawdown %',
-        data: DataStore.risk.drawdownHistory.values,
-        borderColor: '#ef4444',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.3,
-        fill: true,
-        backgroundColor: 'rgba(239,68,68,0.12)',
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { max: 0, ticks: { callback: v => `${v}%` } },
-        x: { ticks: { maxTicksLimit: 8 } },
-      },
-    },
-  });
-
-  // Position risk table
-  const tbody = el('risk-position-body');
-  if (tbody) {
-    tbody.innerHTML = DataStore.risk.positions.map(p => `
-      <tr>
-        <td><strong>${p.symbol}</strong></td>
-        <td>${p.weight}</td>
-        <td class="negative">${p.var}</td>
-        <td>${p.vol}</td>
-        <td>${riskBadge(p.level)}</td>
-      </tr>`).join('');
-  }
-
-  // Risk Alerts
-  const alertsBody = el('risk-alerts-body');
-  if (alertsBody) {
-    alertsBody.innerHTML = DataStore.risk.alerts.map(a => `
-      <div class="risk-alert ${a.level}">
-        <div class="risk-alert-title">${a.title}</div>
-        <div class="risk-alert-sub">${a.desc}</div>
-      </div>`).join('');
-  }
+  // Delegate entirely to hydrateRisk() -- live backend data only, no mock data
+  hydrateRisk();
 }
 
-// ═══════════════════════════════════════════════════════════════
 // LAZY RENDER — Render page on first activation
 // ═══════════════════════════════════════════════════════════════
 const rendered = new Set();
@@ -2074,7 +1125,7 @@ async function hydrateMarketRegime() {
 
   const topbarRegime = el('topbar-regime');
   if (topbarRegime) {
-    topbarRegime.textContent = data.regime || DataStore.system.regime;
+    topbarRegime.textContent = data.regime || 'LOADING…';
   }
 
   const pill = document.getElementById('regime-pill');
@@ -2330,14 +1381,14 @@ async function hydrateOverviewPredictions() {
 
   if (regime) {
     const topbarRegime = el('topbar-regime');
-    if (topbarRegime) topbarRegime.textContent = regime.regime || DataStore.system.regime;
+    if (topbarRegime) topbarRegime.textContent = regime.regime || 'LOADING…';
     const pill = document.getElementById('regime-pill');
     if (pill) pill.className = 'regime-badge badge-' + (regime.regime || '').toLowerCase().replace(/\s+/g, '-');
   }
 
   if (summary && summary.available) {
     const predCountEl = el('kpi-predictions');
-    if (predCountEl) predCountEl.textContent = summary.total || DataStore.system.activePredictions;
+    if (predCountEl) predCountEl.textContent = summary.total || '0';
 
     const confEl = el('kpi-avg-conf');
     if (confEl && summary.avgConfidence != null) confEl.textContent = `Avg Conf: ${summary.avgConfidence}%`;
@@ -2404,93 +1455,13 @@ if (typeof Api !== 'undefined') {
 // PHASE 4: PAPER PORTFOLIO PAGE RENDERER + HYDRATION
 // ═══════════════════════════════════════════════════════════════
 
-// ── Static renderer (mock data) ───────────────────────────────
+// ── Paper Portfolio renderer ─────────────────────────────────
 function renderPaperPortfolio() {
-  const s = DataStore.system;
-  const pv = el('pp-kpi-value');
-  if (pv) pv.textContent = `₹${s.portfolioValue.toLocaleString('en-IN')}`;
-  const cash = s.portfolioValue - s.deployedCapital;
-  const cashEl = el('pp-kpi-cash');
-  if (cashEl) cashEl.textContent = `₹${cash.toLocaleString('en-IN')}`;
-  const cashPctEl = el('pp-kpi-cash-pct');
-  if (cashPctEl) cashPctEl.textContent = `${(cash / s.portfolioValue * 100).toFixed(1)}% of Portfolio`;
-  const retEl = el('pp-kpi-return');
-  if (retEl) {
-    const ret = (s.portfolioValue - s.paperCapitalStart) / s.paperCapitalStart * 100;
-    retEl.textContent = `${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%`;
-    retEl.className = 'kpi-sub ' + (ret >= 0 ? 'positive' : 'negative');
-  }
-  const posEl = el('pp-kpi-positions');
-  if (posEl) posEl.textContent = s.openPositions;
-  const invEl = el('pp-kpi-invested');
-  if (invEl) invEl.textContent = `₹${s.deployedCapital.toLocaleString('en-IN')} Deployed`;
-  const shrEl = el('pp-kpi-sharpe');
-  if (shrEl) { shrEl.textContent = DataStore.risk.sharpe; shrEl.className = 'kpi-value positive'; }
-  const wrEl = el('pp-kpi-winrate');
-  if (wrEl) { wrEl.textContent = `${s.winRate30d}%`; wrEl.className = 'kpi-value positive'; }
-  const trEl = el('pp-kpi-trades');
-  if (trEl) trEl.textContent = `${s.totalTrades30d} Closed Trades`;
-  const ddEl = el('pp-kpi-maxdd');
-  if (ddEl) ddEl.textContent = `${DataStore.risk.maxDD30d}%`;
-
-  // Equity curve chart
-  ChartRegistry.create('ppEquityCurveChart', {
-    type: 'line',
-    data: {
-      labels: DataStore.equityCurve.labels,
-      datasets: [{
-        data: DataStore.equityCurve.values,
-        borderColor: '#ff8c00',
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.3,
-        fill: true,
-        backgroundColor: (ctx) => {
-          const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-          g.addColorStop(0, 'rgba(255,140,0,0.14)');
-          g.addColorStop(1, 'rgba(255,140,0,0.00)');
-          return g;
-        },
-      }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: true,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ₹${ctx.parsed.y.toLocaleString('en-IN')}` }}},
-      scales: {
-        x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }},
-        y: { ticks: { callback: v => `₹${(v/1000).toFixed(0)}K`, maxTicksLimit: 5 }},
-      },
-    },
-  });
-
-  // Allocation doughnut (from mock risk data)
-  const exp = DataStore.risk.sectorExposure;
-  ChartRegistry.create('ppAllocationChart', {
-    type: 'doughnut',
-    data: {
-      labels: exp.map(e => e.sector),
-      datasets: [{
-        data: exp.map(e => e.weight),
-        backgroundColor: [
-          'rgba(255,140,0,0.8)','rgba(34,197,94,0.6)','rgba(59,130,246,0.6)',
-          'rgba(245,158,11,0.6)','rgba(239,68,68,0.6)','rgba(147,51,234,0.6)',
-          'rgba(236,72,153,0.6)','rgba(255,255,255,0.1)',
-        ],
-        borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
-      }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: true,
-      plugins: { legend: { position: 'right', labels: { font: { size: 11 }}}, tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}%` }}},
-      cutout: '50%',
-    },
-  });
-
-  // Positions table — cleared here, filled by hydratePaperPortfolio()
+  // Delegate entirely to hydratePaperPortfolio() — live backend data
   const pbody = el('pp-full-positions-body');
-  if (pbody) pbody.innerHTML = `<tr><td colspan="7" style="color:var(--text-muted);text-align:center">Loading positions…</td></tr>`;
-
-  // Analytics cleared — filled by hydratePaperPortfolio()
+  if (pbody) pbody.innerHTML = '<tr><td colspan="12" style="color:var(--text-muted);text-align:center;padding:16px">Loading positions…</td></tr>';
+  const tbody = el('pp-trades-body');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="13" style="color:var(--text-muted);text-align:center;padding:16px">Loading trades…</td></tr>';
 }
 
 async function triggerPaperCycle() {
@@ -2778,63 +1749,6 @@ async function hydratePaperPortfolioStrip() {
 // STRATEGY RESEARCH CENTER — Phase 6
 // ═══════════════════════════════════════════════════════════════
 
-const MOCK_STRATEGY_DATA = {
-  population: {
-    stats: { total: 186, active_count: 12, avg_fitness: 51.3, max_fitness: 84.2, candidate: 110, shadow: 40, promoted: 24, active: 12 },
-    by_family: {
-      momentum:       { alive: 38, dead: 19, survival_rate: 66.7 },
-      mean_reversion: { alive: 22, dead: 31, survival_rate: 41.5 },
-      breakout:       { alive: 29, dead: 14, survival_rate: 67.4 },
-      sentiment_driven: { alive: 18, dead: 22, survival_rate: 45.0 },
-      regime_adaptive: { alive: 35, dead: 8,  survival_rate: 81.4 },
-      volume_surge:   { alive: 20, dead: 17, survival_rate: 54.1 },
-      volatility_play:{ alive: 14, dead: 12, survival_rate: 53.8 },
-      hybrid:         { alive: 10, dead: 9,  survival_rate: 52.6 },
-    },
-    leaderboard: [
-      { strategy_id: 'abc001', name: 'MOM_GEN3_001', family: 'momentum',       status: 'active',    fitness_score: 84.2, sharpe: 2.31, win_rate: 67, trade_count: 142 },
-      { strategy_id: 'abc002', name: 'REG_GEN2_007', family: 'regime_adaptive', status: 'promoted',  fitness_score: 79.1, sharpe: 1.97, win_rate: 62, trade_count: 88  },
-      { strategy_id: 'abc003', name: 'BRK_GEN4_003', family: 'breakout',        status: 'promoted',  fitness_score: 74.8, sharpe: 1.82, win_rate: 59, trade_count: 67  },
-      { strategy_id: 'abc004', name: 'MOM_GEN3_009', family: 'momentum',        status: 'shadow',    fitness_score: 71.3, sharpe: 1.74, win_rate: 58, trade_count: 54  },
-      { strategy_id: 'abc005', name: 'VOL_GEN1_002', family: 'volatility_play', status: 'candidate', fitness_score: 66.7, sharpe: 1.55, win_rate: 55, trade_count: 31  },
-    ],
-  },
-  evo_tree: {
-    total_events: 347,
-    by_operation: {
-      threshold_shift:  { total: 89,  positive_pct: 61, avg_fitness_delta:  3.1 },
-      operator_flip:    { total: 42,  positive_pct: 48, avg_fitness_delta:  0.8 },
-      feature_swap:     { total: 67,  positive_pct: 55, avg_fitness_delta:  2.4 },
-      rule_add:         { total: 38,  positive_pct: 42, avg_fitness_delta: -0.5 },
-      rule_remove:      { total: 31,  positive_pct: 58, avg_fitness_delta:  2.9 },
-      regime_expand:    { total: 22,  positive_pct: 45, avg_fitness_delta:  0.3 },
-      param_adjust:     { total: 58,  positive_pct: 64, avg_fitness_delta:  3.8 },
-    },
-  },
-  regime_affinity: {
-    momentum:        { regime_sharpe: { BULL: 1.92, BEAR: 0.31, SIDEWAYS: 0.82, VOLATILE: 0.94 } },
-    mean_reversion:  { regime_sharpe: { BULL: 0.71, BEAR: 1.44, SIDEWAYS: 1.62, VOLATILE: 1.11 } },
-    breakout:        { regime_sharpe: { BULL: 1.65, BEAR: 0.42, SIDEWAYS: 0.55, VOLATILE: 1.38 } },
-    regime_adaptive: { regime_sharpe: { BULL: 1.48, BEAR: 1.31, SIDEWAYS: 1.29, VOLATILE: 1.22 } },
-  },
-  graveyard: [
-    { name: 'MOM_GEN0_014', family: 'momentum',       final_fitness: 22.1, failure_reason: 'low_fitness', regime_at_death: 'SIDEWAYS', lifespan_days: 14 },
-    { name: 'SEN_GEN1_003', family: 'sentiment_driven', final_fitness: 28.7, failure_reason: 'drawdown',   regime_at_death: 'BEAR',    lifespan_days: 42 },
-    { name: 'BRK_GEN2_011', family: 'breakout',       final_fitness: 25.4, failure_reason: 'low_fitness', regime_at_death: 'BULL',    lifespan_days: 7  },
-  ],
-  resurrection: [
-    { strategy_id: 'dead001', name: 'MOM_GEN1_008', family: 'momentum', final_fitness: 51.2, died_in_regime: 'BEAR', current_regime: 'BULL' },
-    { strategy_id: 'dead002', name: 'BRK_GEN0_002', family: 'breakout', final_fitness: 46.8, died_in_regime: 'SIDEWAYS', current_regime: 'BULL' },
-  ],
-  research: {
-    feature_analysis:  { title: 'Feature Category Analysis',     summary: 'Momentum features lead with avg fitness 63.2. Sentiment features lag at 41.1.', recommendations: "Increase momentum features in next generation." },
-    regime_analysis:   { title: 'Regime Performance Analysis',   summary: 'BULL regime generates highest avg Sharpe (1.67) across all families.',          recommendations: "Focus evolution on BULL-regime strategies." },
-    family_survival:   { title: 'Family Survival Analysis',      summary: 'regime_adaptive most resilient (81.4%). mean_reversion most fragile (41.5%).',   recommendations: "Cross-breed with regime_adaptive strategies." },
-    evolution_summary: { title: 'Evolution Operations',          summary: 'param_adjust yields best avg fitness delta (+3.8). rule_add hurts (-0.5).',       recommendations: "Increase param_adjust proportion." },
-    population_health: { title: 'Population Health',             summary: 'Population: 186 strategies, 12 active, avg fitness 51.3.',                        recommendations: "Population is healthy. Continue evolution." },
-  },
-};
-
 async function hydrateStrategyResearch() {
   const el = id => document.getElementById(id);
 
@@ -2847,16 +1761,7 @@ async function hydrateStrategyResearch() {
   let resurrect = await Api.resurrectionCandidates();
   let research = await Api.latestResearch();
 
-  const useMock = !pop;
-  if (useMock) {
-    pop      = { ...MOCK_STRATEGY_DATA.population };
-    leaders  = { leaderboard: MOCK_STRATEGY_DATA.population.leaderboard };
-    evoTree  = MOCK_STRATEGY_DATA.evo_tree;
-    affinity = MOCK_STRATEGY_DATA.regime_affinity;
-    graveD   = { graveyard: MOCK_STRATEGY_DATA.graveyard };
-    resurrect = { candidates: MOCK_STRATEGY_DATA.resurrection };
-    research = MOCK_STRATEGY_DATA.research;
-  }
+
 
   // ── KPIs ──────────────────────────────────────────────────────
   const stats = pop.stats || {};
@@ -2901,7 +1806,8 @@ async function hydrateStrategyResearch() {
   // ── Family Population Chart ───────────────────────────────────
   const familyData = pop.by_family || {};
   const famLabels  = Object.keys(familyData);
-  const famAlive   = famLabels.map(f => familyData[f].alive || 0);
+  // API returns count/active_count per family; graveyard count not split by family here
+  const famAlive   = famLabels.map(f => familyData[f].count || familyData[f].alive || 0);
   const famDead    = famLabels.map(f => familyData[f].dead  || 0);
   ChartRegistry.create('srcFamilyChart', {
     type: 'bar',

@@ -83,19 +83,18 @@ async function apiPost(endpoint, body = {}) {
 }
 
 async function apiPostRaw(url, body = {}) {
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(API_CONFIG.TIMEOUT),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch (err) {
-    console.warn(`[AQRTI API POST RAW] ${url} failed:`, err.message);
-    return null;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try { const j = await res.json(); detail = j.detail || JSON.stringify(j); } catch {}
+    throw new Error(`HTTP ${res.status}${detail ? ': ' + detail : ''}`);
   }
+  return await res.json();
 }
 
 

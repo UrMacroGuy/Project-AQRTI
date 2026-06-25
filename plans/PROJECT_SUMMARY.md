@@ -1,8 +1,22 @@
-# PROJECT AQRTI — Phase 1 Complete
-## Intelligence Terminal: Architecture, Component Map & Backend Integration Plan
+# PROJECT AQRTI — Current State
+## Intelligence Terminal: Architecture, Component Map & System Status
 
-Version: 1.0 — Phase 1 UI Shell
-Date: 22 June 2026
+Version: 3.0 — Post Phase 8 (Strategy Engine Overhaul + Agent System)
+Last Updated: 2026-06-25
+
+---
+
+## CURRENT STATUS
+
+All phases through Phase 8 are complete and running. The system is live with:
+
+- **4,087 strategies** in the population (momentum, mean_reversion, breakout, hybrid, regime_adaptive, sentiment_driven, volatility_play, volume_surge)
+- **847 promoted strategies** across all 8 families, fitness scores 15–67
+- **7 research agents** at 100% success rate, running daily pipeline
+- **227 days of historical market regime data** backfilled (BULL/BEAR/SIDEWAYS/VOLATILE)
+- **5-minute strategy backtest loop** running autonomously, clearing ~100 unscored strategies per cycle
+- **Paper trading** active with open positions, full trade history
+- **Intelligence Score: 71.5**, regime: SIDEWAYS
 
 ---
 
@@ -11,371 +25,137 @@ Date: 22 June 2026
 ```
 Project AQRTI/
 ├── ui/
-│   ├── index.html          ← Shell: layout, nav, all 9 page sections
-│   ├── style.css           ← Terminal design system: colors, layout, components
-│   └── app.js              ← Data, charts, renderers, navigation logic
-├── package.json            ← npm scripts: start, dev, build
-├── PROJECT_SUMMARY.md      ← This file
-└── [spec docs].md          ← AQRTI architecture documentation
+│   ├── index.html          ← Single-page shell: 14 page sections
+│   ├── style.css           ← Terminal design system (CSS custom properties)
+│   ├── app.js              ← Navigation, charts, live hydration (all 14 pages)
+│   └── api.js              ← API layer — all calls to FastAPI backend
+│
+├── backend/
+│   ├── main.py             ← FastAPI entry point (port 8000)
+│   ├── aqrti/
+│   │   ├── api/routes/     ← 50+ REST API endpoints
+│   │   ├── database/       ← SQLAlchemy models + SQLite (aqrti.db, WAL mode)
+│   │   └── data/scheduler.py ← APScheduler: daily pipeline + 5-min strategy loop
+│   ├── ml/                 ← CatBoost + LightGBM + XGBoost ensemble
+│   ├── strategies/         ← Genetic algorithm strategy engine
+│   │   ├── strategy_generator.py    ← 8-family DSL generator
+│   │   ├── strategy_backtester.py   ← Signal-driven 365-day backtest
+│   │   ├── fitness_engine.py        ← 5-dimension composite scoring
+│   │   ├── evolution_engine.py      ← Tournament selection, crossover
+│   │   ├── mutation_engine.py       ← 11 mutation ops including confidence_adjust
+│   │   ├── strategy_lifecycle.py    ← candidate → shadow → promoted → retired
+│   │   └── strategy_research_loop.py ← Family-balanced backtest allocation
+│   ├── agents/             ← 7 research agents + CRO + daily brief
+│   ├── paper_trading/      ← Paper engine, execution, performance tracking
+│   ├── learning/           ← Failure analysis, lessons, knowledge scoring
+│   ├── intelligence_training/ ← Regime datasets, meta-learning
+│   ├── data_supremacy/     ← FII/DII, options PCR, breadth, sector rotation
+│   ├── vault/              ← Snapshot archiving, date replay, backup
+│   ├── sentiment/          ← News NLP, sentiment scoring, velocity
+│   ├── news/               ← RSS ingestion + article processing
+│   └── features/           ← Feature store, 148 features per stock
+│
+├── plans/                  ← Architecture docs (this folder)
+├── AQRTI_USER_GUIDE.md     ← Plain-English user guide
+├── CHANGELOG.md            ← Session-by-session change log
+└── package.json            ← npm scripts: dev server + backend launcher
 ```
 
 ---
 
-## ARCHITECTURE EXPLANATION
-
-### Design Philosophy
-The terminal is built as a **single-page application** with no framework dependencies.
-Vanilla JS + Chart.js only. This keeps it fast, auditable, and easy to connect to a Python/FastAPI backend later.
-
-### Three-Layer Architecture
+## THREE-LAYER UI ARCHITECTURE
 
 ```
-index.html          → Structure Layer
-    ↓
-style.css           → Presentation Layer (CSS custom properties = design tokens)
-    ↓
-app.js              → Logic Layer
-    ├── DataStore   → Centralized mock data (mirrors future API schemas)
-    ├── ChartRegistry → Prevents canvas reuse errors; owns all Chart.js instances
-    ├── Page Renderers → One function per page, fully independent
-    └── Navigation  → Lazy rendering: pages only rendered on first visit
+index.html   →  Structure Layer      (14 page sections, semantic HTML)
+style.css    →  Presentation Layer   (CSS tokens, swap theme in :root {})
+app.js       →  Logic Layer
+               ├── DataStore         → Fallback mock data (mirrors API schemas)
+               ├── ChartRegistry     → Owns all Chart.js instances, prevents canvas errors
+               ├── Page Renderers    → One hydration function per page
+               ├── Hydration Layer   → Async live-data fetchers called on page visit
+               └── Navigation        → Re-hydrates on every visit
+api.js       →  API Layer            → apiFetch / apiPost → localhost:8000/api/v1
 ```
-
-### Key Architectural Decisions
-
-1. **Lazy Rendering**: Pages render on first navigation, not on load. Prevents 9x chart initialization on startup.
-2. **ChartRegistry**: Every chart is registered by canvas ID. Re-navigating to a page destroys and recreates the chart cleanly.
-3. **DataStore**: All mock data lives in one module-scoped object. Replacing each property with an API call requires changing one line per data type.
-4. **CSS Custom Properties**: Every color, spacing, and font is a design token. The entire theme can be modified in `:root {}` without touching component CSS.
 
 ---
 
-## UI COMPONENT MAP
+## STRATEGY ENGINE ARCHITECTURE
 
-### Global Components
-| Component | Location | Description |
+### Fitness Engine (5 Dimensions)
+| Dimension | Weight | What It Measures |
 |---|---|---|
-| Sidebar + Nav | `index.html: .sidebar` | Fixed left navigation, group labels, active state, live clock |
-| Topbar | `index.html: .topbar` | Page breadcrumb, live index tickers, regime badge, date |
-| KPI Row | `.kpi-row` + `.kpi-card` | Metric summary cards used on every page |
-| Panel | `.panel` + `.panel-header` + `.panel-body` | Universal content container |
-| Data Table | `.data-table` | Styled tables with hover states |
-| Confidence Bar | `.conf-bar-wrap` | Inline bar + percentage for confidence visualization |
-| Badge / Pill | `.badge .badge-*` | Direction, risk, status, sentiment labels |
-| Health Item | `.health-item` | System component status rows |
-| Alert Item | `.alert-item` | Structured alert with icon + title + subtitle |
+| Profitability | 30% | Sharpe (cap 3.0), profit factor (cap 4.0), total return |
+| Consistency | 25% | Win rate vs 55% target, expectancy |
+| Robustness | 20% | Works across multiple regimes, drawdown penalty |
+| Regime Adaptability | 15% | Performs in current regime (SIDEWAYS) |
+| Longevity | 10% | Trade count ≥ 8 to qualify, full credit at 30+ |
 
-### Page-Specific Components
-| Page | Key Components |
-|---|---|
-| Overview | Equity Curve (Chart.js line), Top Predictions table, Market Regime display, System Health grid, Today's Alerts |
-| Market Intelligence | Sector Strength (horizontal bar chart), Top Movers table, Sector Detail cards with score bars, Derivatives signals table |
-| Opportunity Rankings | Full opportunity table (15 rows), Confidence filter + Direction filter dropdowns, Confidence Distribution (doughnut), Strategy Breakdown (doughnut) |
-| News Intelligence | High-impact event cards (impact ≥ 70), News Sentiment Trend (24hr line chart), Full news feed with impact badges |
-| Sentiment Center | Company Sentiment (vertical bar), Sector Sentiment (radar chart), Sentiment Velocity bars, Narrative Shifts list |
-| Strategy Lab | Strategy Leaderboard table (14 strategies), Population pie chart, Alpha vs Sharpe scatter plot |
-| Model Center | Model Accuracy (horizontal bar), Calibration Curve (line), Model Registry table |
-| Learning Center | Knowledge Score Growth (line chart), Failure Category breakdown (bar chart), Recent Failures log, Improvements log |
-| Risk Center | Sector Exposure (doughnut), Drawdown History (area chart), Position Risk table, Risk Alerts |
+### Strategy Lifecycle States
+```
+candidate → [backtest] → shadow → [fitness ≥ 20 + trades ≥ 8] → promoted → [human approve] → active
+                                    [fitness < 8] → retired → graveyard
+```
+
+### Backtest Engine
+- 365-day historical window using real price data
+- ML predictions (primary signal) + RSI+EMA fallback
+- Per-day regime lookup from `MarketRegime` table (227 days backfilled)
+- Family-balanced allocation: each of 8 families gets proportional batch slots
+- Runs every 5 minutes via APScheduler (100 strategies per cycle)
 
 ---
 
-## MOCK DATA STRUCTURE — FUTURE API CONTRACTS
+## AGENT SYSTEM
 
-Each field below maps directly to the AQRTI database schema and backend response format.
+| Agent | Last Run | Status | Findings |
+|---|---|---|---|
+| CRO (Chief Research Officer) | 2026-06-25 | ✅ success | 2 (aggregated brief) |
+| Market Research | 2026-06-25 | ✅ success | 4 |
+| Model Research | 2026-06-25 | ✅ success | 6 (2 high-urgency) |
+| News Research | 2026-06-25 | ✅ success | 3 (high-urgency detected) |
+| Pattern Research | 2026-06-25 | ✅ success | 6 |
+| Risk Research | 2026-06-25 | ✅ success | 4 |
+| Strategy Research | 2026-06-25 | ✅ success | 8 |
 
-### GET /api/v1/overview
-```json
-{
-  "portfolioValue": 104328,
-  "paperCapitalStart": 100000,
-  "dailyPnl": 1284,
-  "dailyPnlPct": 1.25,
-  "openPositions": 12,
-  "deployedCapital": 67420,
-  "activePredictions": 48,
-  "avgConfidence": 79.2,
-  "winRate30d": 63.4,
-  "totalTrades30d": 142,
-  "knowledgeScore": 67,
-  "regime": "BULL MARKET",
-  "regimeConf": 88
-}
-```
-
-### GET /api/v1/market
-```json
-{
-  "indices": {
-    "nifty50":   { "value": 24162.20, "change": 203.1, "changePct": 0.84 },
-    "banknifty": { "value": 51847.30, "change": 573.6, "changePct": 1.12 }
-  },
-  "breadth": 72,
-  "vix": 13.24,
-  "sectorStrength": [
-    { "name": "FMCG", "score": 88, "rs": 91, "momentum": 84, "returns1d": 1.2 }
-  ],
-  "topMovers": [
-    { "symbol": "RELIANCE", "sector": "Energy", "price": "2847.30", "change": "+3.2%", "volume": "12.4M", "direction": "up" }
-  ]
-}
-```
-
-### GET /api/v1/predictions
-```json
-[
-  {
-    "rank": 1,
-    "symbol": "RELIANCE",
-    "sector": "Energy",
-    "direction": "Bullish",
-    "confidence": 87,
-    "expectedReturn": 3.4,
-    "risk": "Low",
-    "strategy": "Momentum + Event",
-    "sentimentScore": 84,
-    "positionSize": "5%",
-    "reasoning": "Strong sector trend, positive sentiment, earnings momentum, institutional activity detected."
-  }
-]
-```
-
-### GET /api/v1/news
-```json
-[
-  {
-    "id": "N001",
-    "headline": "HDFCBANK Quarterly Results Beat Estimates",
-    "summary": "Net Profit ₹16,812 crore vs estimate ₹15,400 crore...",
-    "company": "HDFCBANK",
-    "sector": "Banking",
-    "source": "NSE Filing",
-    "timestamp": "2026-06-22T16:42:00+05:30",
-    "sentiment": "positive",
-    "sentimentScore": 0.84,
-    "impactScore": 92,
-    "importanceScore": 95,
-    "eventType": "Earnings"
-  }
-]
-```
-
-### GET /api/v1/sentiment
-```json
-{
-  "market": { "label": "Optimistic", "score": 71, "fearGreed": 63 },
-  "companies": [
-    { "symbol": "RELIANCE", "score": 84, "trend": "Improving", "velocity": 4.2 }
-  ],
-  "sectors": [
-    { "sector": "FMCG", "score": 83 }
-  ],
-  "narrativeShifts": [
-    { "ticker": "RELIANCE", "direction": "improving", "description": "Shift from O2C to new energy story." }
-  ]
-}
-```
-
-### GET /api/v1/strategies
-```json
-[
-  {
-    "id": "AQRTI_MOM_001",
-    "family": "Momentum",
-    "status": "institutional",
-    "alphaScore": 92,
-    "sharpe": 2.41,
-    "sortino": 2.94,
-    "winRate": 68,
-    "profitFactor": 2.14,
-    "maxDrawdown": -6.2,
-    "regime": "Bull",
-    "tradeCount": 284,
-    "created": "2025-01-14",
-    "lastUpdated": "2026-06-22"
-  }
-]
-```
-
-### GET /api/v1/models
-```json
-[
-  {
-    "id": "LGBM_DIR_v3",
-    "type": "LightGBM",
-    "target": "Direction",
-    "accuracy": 68.2,
-    "calibrationECE": 0.031,
-    "ensembleWeight": 0.32,
-    "status": "production",
-    "lastTrained": "2026-06-22T06:28:00+05:30",
-    "featuresUsed": 148
-  }
-]
-```
-
-### GET /api/v1/learning
-```json
-{
-  "knowledgeScore": 67,
-  "knowledgeHistory": [
-    { "date": "2026-05-24", "score": 38 }
-  ],
-  "failureCategories": {
-    "falseBullish": 412,
-    "falseBearish": 287,
-    "regimeError": 198,
-    "sentimentError": 324,
-    "dataError": 89,
-    "overconfidence": 267,
-    "riskError": 270
-  },
-  "recentFailures": [
-    {
-      "id": "F-0847",
-      "category": "Regime Error",
-      "symbol": "INFY",
-      "description": "Predicted bullish breakout in early Bear transition.",
-      "lesson": "Increase regime model weight during high-volatility transitions.",
-      "severity": "medium",
-      "resolved": true
-    }
-  ]
-}
-```
-
-### GET /api/v1/risk
-```json
-{
-  "exposure": 64.8,
-  "varDaily": -2840,
-  "varPct": -2.72,
-  "maxDrawdown30d": -4.3,
-  "sharpe": 1.84,
-  "sortino": 2.31,
-  "profitFactor": 1.74,
-  "sectorExposure": [
-    { "sector": "Banking", "weight": 18.4, "limit": 25.0 }
-  ],
-  "positions": [
-    {
-      "symbol": "RELIANCE",
-      "weight": 5.0,
-      "var": -142,
-      "volatility": 18.4,
-      "riskLevel": "Low"
-    }
-  ],
-  "circuitBreakers": {
-    "daily": { "triggered": false, "limit": -3.0, "current": -0.8 },
-    "weekly": { "triggered": false, "limit": -6.0, "current": -2.1 },
-    "monthly": { "triggered": false, "limit": -12.0, "current": -4.3 }
-  }
-}
-```
+All agents run via `POST /api/v1/agents/admin/run-pipeline` or automatically in the daily scheduler (Step 9).
 
 ---
 
-## BACKEND INTEGRATION PLAN
+## CURRENT STRATEGY POPULATION (2026-06-25)
 
-### Phase 2: Connect Data APIs
+| Family | Total | Backtested | Best Fitness | Avg Sharpe |
+|---|---|---|---|---|
+| momentum | 877 | 530 (60%) | 60.6 | −3.6 |
+| regime_adaptive | 483 | 74 (15%) | 42.1 | −2.0 |
+| hybrid | 475 | 100 (21%) | 46.3 | −1.7 |
+| volatility_play | 507 | 10 (2%) | 67.3 | — |
+| sentiment_driven | 449 | 101 (22%) | 32.8 | −2.4 |
+| breakout | 446 | 111 (25%) | 25.7 | −5.9 |
+| mean_reversion | 429 | 103 (24%) | 38.4 | −1.5 |
+| volume_surge | 421 | 93 (22%) | 57.0 | −11.2 |
 
-Replace `DataStore.*` properties with fetch calls to a Python FastAPI backend.
-
-#### Step 1 — Create API Layer (api.js)
-```javascript
-// api.js — Add this file to ui/ in Phase 2
-const API_BASE = 'http://localhost:8000/api/v1';
-
-async function fetchJSON(endpoint) {
-  const res = await fetch(`${API_BASE}${endpoint}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
-
-export const Api = {
-  overview:     () => fetchJSON('/overview'),
-  market:       () => fetchJSON('/market'),
-  predictions:  () => fetchJSON('/predictions'),
-  news:         () => fetchJSON('/news'),
-  sentiment:    () => fetchJSON('/sentiment'),
-  strategies:   () => fetchJSON('/strategies'),
-  models:       () => fetchJSON('/models'),
-  learning:     () => fetchJSON('/learning'),
-  risk:         () => fetchJSON('/risk'),
-  equityCurve:  () => fetchJSON('/portfolio/equity-curve'),
-};
-```
-
-#### Step 2 — Replace DataStore
-In `app.js`, change each renderer to:
-```javascript
-async function renderOverview() {
-  const data = await Api.overview();
-  // use data.portfolioValue instead of DataStore.system.portfolioValue
-}
-```
-
-#### Step 3 — Auto-Refresh
-```javascript
-// Add to app.js init: refresh active page data every 5 minutes
-setInterval(() => renderPage(currentPage, forceRefresh = true), 5 * 60 * 1000);
-```
-
-### Phase 3: Real-Time Streaming
-
-Replace poll-based refresh with WebSocket for live feeds:
-- Ticker updates (topbar indices)
-- News feed (new articles)
-- Alert notifications
-
-```javascript
-const ws = new WebSocket('ws://localhost:8000/ws/stream');
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === 'ticker_update') updateTopbarTicker(msg.data);
-  if (msg.type === 'new_alert')     prependAlert(msg.data);
-  if (msg.type === 'new_news')      prependNewsItem(msg.data);
-};
-```
+~3,000 unscored candidates remain. The 5-minute scheduler loop clears ~100/cycle.
 
 ---
 
-## TECH STACK
+## ADMIN ENDPOINTS (KEY)
 
-| Layer | Technology |
-|---|---|
-| UI Shell | Vanilla HTML5 + CSS3 + ES2022 JS |
-| Charts | Chart.js 4.4 (CDN) |
-| Fonts | JetBrains Mono (mono) + Inter (sans) |
-| Future API | Python FastAPI + SQLite/PostgreSQL |
-| Future Real-Time | FastAPI WebSockets |
-| Future Auth | JWT (for multi-user, if needed) |
-
----
-
-## WHAT PHASE 1 DELIVERS
-
-- Complete 9-page Intelligence Terminal UI shell
-- All navigation and page routing functional
-- All chart types rendered with realistic mock data
-- All AQRTI entities represented: RELIANCE, TCS, INFY, HDFCBANK, ICICIBANK, WIPRO, AXISBANK, LTIM, etc.
-- All confidence scores, sentiment values, risk metrics, strategy names match AQRTI backend schemas
-- Filter controls on Opportunity Rankings page
-- Lazy rendering for performance
-- Live NSE clock in sidebar
-- Market regime badge in topbar
-- System health indicators
-- Alert system
-- Zero generic admin-dashboard appearance
-
-## WHAT PHASE 1 DOES NOT DO
-
-- No real data connections (intentional — backend not built yet)
-- No autonomous trading (Phase 10 of roadmap)
-- No model training (Phase 3 of roadmap)
-- No strategy discovery engine (Phase 5 of roadmap)
+| Endpoint | Method | What It Does |
+|---|---|---|
+| `/api/v1/strategies/admin/bulk-backtest?batch_size=N` | POST | Backtest N unscored strategies (background, instant return) |
+| `/api/v1/strategies/admin/rescore` | POST | Recompute all fitness scores + lifecycle sweep |
+| `/api/v1/strategies/admin/full-research-cycle` | POST | generate + backtest + rescore + lifecycle + evolve (background) |
+| `/api/v1/strategies/admin/generate?n=N` | POST | Generate N new candidate strategies |
+| `/api/v1/strategies/admin/evolve?n_offspring=N` | POST | Evolve N offspring via tournament selection |
+| `/api/v1/agents/admin/run-pipeline` | POST | Run all 7 agents + CRO |
+| `/api/v1/agents/admin/register-all` | POST | Register all agents in DB |
+| `POST /admin/intelligence` | POST | Full 12-step daily pipeline |
 
 ---
 
-*The terminal is ready for progressive real system connection as each AQRTI backend module is built.*
+## KNOWN ISSUES / BACKLOG
+
+- ML model outputs mostly Bearish/Neutral with negative `expectedReturn` — paper trading uses `abs(expectedReturn)` as workaround; real fix requires model retrain
+- `volatility_play` backtest coverage still low (2%) — scheduler will clear over time
+- Options Intelligence shows `status: no_data` — scraper not run
+- Learning/Knowledge tab lessons populate only when paper positions close (all 4 currently open)

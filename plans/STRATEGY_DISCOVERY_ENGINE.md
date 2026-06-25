@@ -3,7 +3,15 @@
 # PROJECT AQRTI
 ## Autonomous Quantitative Research & Trading Intelligence
 
-Version: 1.0
+Version: 2.0 — Live (Phase 5 + 8b Complete)
+Last Updated: 2026-06-25
+
+## CURRENT STATE
+- **4,087 strategies** in DB across 8 families
+- **847 promoted**, running 5-min backtest loop (100/cycle, family-balanced)
+- **Best fitness: 67.3** (volatility_play), 60.6 (momentum), 57.0 (volume_surge)
+- Historical regimes backfilled: 227 days of BULL/BEAR/SIDEWAYS/VOLATILE data
+- All admin endpoints non-blocking (FastAPI BackgroundTasks)
 
 ---
 

@@ -1,6 +1,9 @@
 # AQRTI Intelligence Terminal — User Guide
 ### For someone new to the stock market
 
+> **Last updated: 2026-06-25**
+> Current state: Intelligence Score 71.5 · Regime SIDEWAYS · 4,087 strategies · 847 promoted · 7 agents healthy
+
 ---
 
 ## What is AQRTI?

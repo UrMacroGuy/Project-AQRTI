@@ -56,6 +56,8 @@ def get_agent_performance(
 
     agent_stats: dict[str, dict] = {}
     for r in rows:
+        if r.status == "cancelled":
+            continue  # exclude cancelled (expired/stale) tasks from stats
         aid = r.agent_id
         if aid not in agent_stats:
             agent_stats[aid] = {

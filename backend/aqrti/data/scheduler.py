@@ -179,8 +179,9 @@ def _daily_job():
 def _strategy_loop_job():
     """
     Continuous strategy research micro-loop — runs every 5 minutes.
-    Generates new candidates, backtests unscored ones, scores, evolves.
-    Keeps the strategy population growing between daily pipeline runs.
+    Priority: clear the backtest backlog first. Only generates new candidates
+    when the backlog is small (< 200 unscored). Uses family-balanced backtest
+    selection so all families get evaluated proportionally.
     """
     import sys, os
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -191,55 +192,46 @@ def _strategy_loop_job():
         from aqrti.database.session import get_db_session
         from aqrti.database.models import StrategyV2
         from strategies.strategy_generator import run_generation_cycle
-        from strategies.strategy_backtester import backtest_and_update
         from strategies.fitness_engine import score_all_strategies
         from strategies.evolution_engine import evolve_population
-        from strategies.strategy_dsl import StrategyDSL
-        from datetime import date, timedelta
+        from strategies.strategy_research_loop import _backtest_unscored
 
-        # Step 1: Generate 20 new candidates
+        # How many unscored candidates are waiting?
         with get_db_session() as db:
-            gen = run_generation_cycle(db, n=20, generation=0)
-        new_count = gen.get("persisted", 0)
+            unscored = db.query(StrategyV2).filter(
+                StrategyV2.fitness_score.is_(None),
+                StrategyV2.status.in_(["candidate", "shadow"]),
+                StrategyV2.dsl_json.isnot(None),
+            ).count()
 
-        # Step 2: Backtest up to 30 unscored strategies
-        end_date   = date.today()
-        start_date = end_date - timedelta(days=365)
-        backtested = 0
-        errors = 0
+        new_count = 0
+        # Only generate when backlog is small — otherwise we fall further behind
+        if unscored < 200:
+            with get_db_session() as db:
+                gen = run_generation_cycle(db, n=20, generation=0)
+            new_count = gen.get("persisted", 0)
+
+        # Backtest 100 per cycle, family-balanced across all families
         with get_db_session() as db:
-            rows = (
-                db.query(StrategyV2)
-                .filter(
-                    StrategyV2.fitness_score.is_(None),
-                    StrategyV2.status.in_(["candidate", "shadow"]),
-                    StrategyV2.dsl_json.isnot(None),
-                )
-                .limit(30)
-                .all()
-            )
-            for row in rows:
-                try:
-                    dsl = StrategyDSL.from_json(row.dsl_json)
-                    backtest_and_update(db, dsl, start_date=start_date, end_date=end_date)
-                    backtested += 1
-                except Exception as exc:
-                    errors += 1
-                    scheduler_logger.debug("Backtest skip %s: %s", row.strategy_id, exc)
+            bt = _backtest_unscored(db, max_stocks=100)
+        backtested = bt.get("backtested", 0)
 
-        # Step 3: Score everything
+        # Score everything that has trades but no score
         with get_db_session() as db:
             scored = score_all_strategies(db)
 
-        # Step 4: Evolve 10 offspring
-        with get_db_session() as db:
-            evo = evolve_population(db, n_offspring=10)
+        # Evolve only when backlog is manageable
+        evo_count = 0
+        if unscored < 500:
+            with get_db_session() as db:
+                evo = evolve_population(db, n_offspring=10)
+            evo_count = evo.get("created", 0)
 
         scheduler_logger.info(
-            "Strategy loop — generated=%d backtested=%d scored=%d evolved=%d",
-            new_count, backtested,
+            "Strategy loop — unscored=%d generated=%d backtested=%d scored=%d evolved=%d",
+            unscored, new_count, backtested,
             scored.get("scored", 0),
-            evo.get("created", 0),
+            evo_count,
         )
     except Exception as exc:
         scheduler_logger.error("Strategy loop failed: %s", exc)

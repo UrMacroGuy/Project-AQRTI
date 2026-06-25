@@ -109,6 +109,7 @@ def run_daily_pipeline(db: Session) -> dict:
                 assigned_by = "scheduler",
                 priority    = 3,
             )
+            task.started_at = datetime.utcnow()
             db.commit()
             tasks[agent_id] = task.task_id
 

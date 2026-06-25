@@ -489,7 +489,7 @@
             <span class="panel-title">Sector Strength Rankings</span>
             <span class="panel-tag">RSI + RS + Momentum Score</span>
           </div>
-          <div class="panel-body chart-container">
+          <div class="panel-body chart-container" style="height:280px">
             <canvas id="sectorStrengthChart"></canvas>
           </div>
         </div>
@@ -2076,7 +2076,7 @@
               <div>10. Train Meta Models</div>
             </div>
             <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn-sm" onclick="runIntelligencePipeline()">▶ Run Full Pipeline</button>
+              <button class="btn-sm" onclick="runIntelligencePipeline(this)">▶ Run Full Pipeline</button>
               <div id="il-pipeline-status" style="font-size:0.75rem;color:var(--text-muted);align-self:center"></div>
             </div>
             <div id="il-pipeline-result" style="margin-top:10px;font-size:0.74rem;color:var(--text-secondary)"></div>

@@ -1,4 +1,42 @@
-﻿## [2026-06-25] — Strategy Engine Overhaul: Better Scoring, More Diverse Strategies
+﻿## [2026-06-25] — Session Summary
+- Strategy population: 3,469 → 4,087 (+618) · Promoted: 516 → 847 (+331)
+- All 8 families now get fair backtest coverage (family-balanced allocation)
+- Historical regimes backfilled: 227 days — volatility_play unlocked (best fitness 67.3)
+- 7 research agents: all 100% success, avg duration tracked
+- Bulk backtest + full-research-cycle: non-blocking (BackgroundTasks)
+- Scheduler loop: generates only when backlog < 200, clears 100/cycle
+
+---
+
+## [2026-06-25] — Strategy Backtest Overhaul: All Families Now Evaluated
+
+### Root Cause Found
+- **Only 1 historical regime row in DB** (2026-06-24 SIDEWAYS) — all 365-day backtests ran against SIDEWAYS-only history, so strategies restricted to VOLATILE/BEAR/BULL got 0 trades
+- **Backtest queue starved non-momentum families** — no ORDER BY meant SQLite insertion order always filled batches with momentum/mean_reversion
+
+### Fixes
+- **Backfilled 227 days of historical market regimes** (`MarketRegime` table) using 20-day return + volatility classification: BULL=16d, BEAR=62d, SIDEWAYS=127d, VOLATILE=23d — all families now fire in their relevant regimes
+- **Family-balanced backtest allocation** (`_backtest_unscored`): slots distributed proportionally across all 8 families — volatility_play went from 0 backtested → 67.3 best fitness (highest of any family)
+- **Scheduler loop fixed** (`_strategy_loop_job`): stops generating new candidates when backlog > 200; uses family-balanced `_backtest_unscored`; only evolves when backlog < 500 — net ~100 strategies cleared per 5-min cycle
+- **Re-backtested 39 zero-trade strategies** with full regime history — all now producing real trade data
+- **Promoted 51 new strategies** after rescore with full regime data (total promoted: 847)
+
+---
+
+## [2026-06-25] — Bug Fixes: Family Chart, Avg Sharpe Corruption, Non-Blocking Backtest
+
+### Bugs Fixed
+- **Family Population Chart showing all zeros** — API returns `count` per family, chart used `alive`; fixed in `ui/app.js` to use `count || alive`
+- **avg_sharpe wildly negative per family** — retired strategies with Sharpe ≈ −60 (from 2-trade samples) were included in family averages; fixed in `strategy_registry.py` to exclude retired/archived status
+- **New admin endpoints returning 404** — backend running old compiled code; restarted process (PID 4740 → 5784)
+- **Bulk backtest timing out HTTP client** — endpoint was synchronous, blocking for 600s+ on 300 strategies; made `bulk-backtest` and `full-research-cycle` non-blocking using FastAPI `BackgroundTasks` — both now return instantly and run server-side
+- **volatility_play family never backtested** — `_backtest_unscored` had no ORDER BY so SQLite insertion order always filled the batch with momentum/mean_reversion; fixed to allocate slots proportionally per family so all 8 families get coverage
+- **Agent success rate reported as 25-45%** — 21 stale `pending` tasks from prior sessions inflated the denominator; cancelled them and excluded `cancelled` status from `get_agent_performance()` in `task_history.py`
+- **Agent avg_duration_secs always null** — `agent_scheduler.py` set `completed_at` but never `started_at`; fixed to stamp `started_at` before calling `execute()`
+
+---
+
+## [2026-06-25] — Strategy Engine Overhaul: Better Scoring, More Diverse Strategies
 
 ### Problems Fixed
 - **All strategies scoring identically** — fitness was calibrated for Sharpe ≥ 2.0 (unrealistic); all Indian equity strategies scored 8–54 regardless of actual performance

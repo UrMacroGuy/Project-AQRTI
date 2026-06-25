@@ -2,61 +2,61 @@
 **Regime:** SIDEWAYS  |  **Knowledge Score:** 71.5
 
 ## Market Summary
-Regime: SIDEWAYS. Market: UNKNOWN (conf=0%). 1 findings. News research: 0 findings. No critical alerts. [!] Regime change detected: Regime Mismatch: 25 strategies not suited for SIDEWAYS
+Regime: SIDEWAYS. Market: UNKNOWN (conf=0%). 1 findings. News research: 0 findings. No critical alerts. [!] Regime change detected: Regime Mismatch: 67 strategies not suited for SIDEWAYS
 
 ## Top Opportunities
+- strategy_research: Leading Family: mean_reversion (avg fitness=20.3)
 - strategy_research: Leading Family: momentum (avg fitness=30.0)
 - strategy_research: Leading Family: momentum (avg fitness=36.0)
 - strategy_research: Leading Family: momentum (avg fitness=34.6)
 - market_research: Sector Rotation: Metal leading (+2.4%), IT lagging (-3.8%)
-- market_research: Sector Rotation: Pharma leading, IT lagging
 
 ## Major Risks
-- [HIGH] risk_research: Sector Concentration: Energy = 100% of open positions
-- [HIGH] risk_research: Market Risk: Universe Volatility 2531.0% ann., 1-day VaR -2.68%
-- [HIGH] risk_research: Max Single-Day Loss: -8.4% (TCS) in 30d
-- [HIGH] strategy_research: Strategy Population: 156 active, avg fitness 25.4
+- [HIGH] strategy_research: Strategy Population: 458 active, avg fitness 17.8
 - [HIGH] strategy_research: Strategy Decay: MeanRev_RSI36.7 fitness=19.9
 - [HIGH] strategy_research: Strategy Decay: Sentiment_GT65.4 fitness=21.3
 - [HIGH] strategy_research: Strategy Decay: Momentum_return_5d_3.7 fitness=17.4
 - [HIGH] strategy_research: Strategy Decay: Hybrid_rsi_14_sentim fitness=21.0
+- [HIGH] strategy_research: Strategy Decay: Momentum_momentum_20d_3.4 fitness=17.5
+- [HIGH] model_research: Low Win Rate in Performance Snapshot: 0.0%
+- [HIGH] news_research: Unusual News Volume: 103 articles today (7d avg 15)
 
 ## Model Insights
 - Low Win Rate in Performance Snapshot: 0.0% — Overall win rate from performance snapshot is 0.0% (target ≥55%).
+- Low Win Rate in Performance Snapshot: 0.0% — Overall win rate from performance snapshot is 0.0% (target ≥55%).
+- Model Registry: 6 active of 6 total models — Model registry contains 6 model versions. 6 are active (is_active=True), 0 are inactive/shadow.
 - Model Registry: 6 active of 6 total models — Model registry contains 6 model versions. 6 are active (is_active=True), 0 are inactive/shadow.
 - Model Drift: All Clear — No significant drift detected across 0 models.
-- Best Active Model: catboost/direction — 87.5% (Good) — Highest-performing active model is catboost (task=direction), primary metric=87.5%.
-- Prediction Volume: 18 predictions (30d), avg confidence 72.0% — 18 predictions generated in last 30 days. High confidence (≥80%): 0, Medium (65-79%): 18, Low (<65%): 0.
 
 ## Strategy Insights
-- Strategy Population: 156 active, avg fitness 25.4 — Active population: 156 strategies, 972 candidates, 7 in graveyard. Average fitness=25.4 (target ≥55).
+- Strategy Population: 458 active, avg fitness 17.8 — Active population: 458 strategies, 2178 candidates, 13 in graveyard. Average fitness=17.8 (target ≥55).
 - Strategy Decay: MeanRev_RSI36.7 fitness=19.9 — Strategy MeanRev_RSI36.7 has fitness 19.9 (sharpe=-2.1339, win_rate=42.68292682926829%).
 - Strategy Decay: Sentiment_GT65.4 fitness=21.3 — Strategy Sentiment_GT65.4 has fitness 21.3 (sharpe=-1.672, win_rate=49.074074074074076%).
 - Strategy Decay: Momentum_return_5d_3.7 fitness=17.4 — Strategy Momentum_return_5d_3.7 has fitness 17.4 (sharpe=-2.961, win_rate=42.30769230769231%).
 - Strategy Decay: Hybrid_rsi_14_sentim fitness=21.0 — Strategy Hybrid_rsi_14_sentim has fitness 21.0 (sharpe=-0.9485, win_rate=47.78761061946903%).
 
 ## Research Findings
-- risk_research: Sector Concentration: Energy = 100% of open positions
-- risk_research: Market Risk: Universe Volatility 2531.0% ann., 1-day VaR -2.68%
-- risk_research: Max Single-Day Loss: -8.4% (TCS) in 30d
-- strategy_research: Strategy Population: 156 active, avg fitness 25.4
+- strategy_research: Strategy Population: 458 active, avg fitness 17.8
 - strategy_research: Strategy Decay: MeanRev_RSI36.7 fitness=19.9
 - strategy_research: Strategy Decay: Sentiment_GT65.4 fitness=21.3
 - strategy_research: Strategy Decay: Momentum_return_5d_3.7 fitness=17.4
 - strategy_research: Strategy Decay: Hybrid_rsi_14_sentim fitness=21.0
 - strategy_research: Strategy Decay: Momentum_momentum_20d_3.4 fitness=17.5
 - model_research: Low Win Rate in Performance Snapshot: 0.0%
+- news_research: Unusual News Volume: 103 articles today (7d avg 15)
+- market_research: Elevated Market Volatility: 1251.3% annualised
+- risk_research: Sector Concentration: Energy = 100% of open positions
 
 ## Lessons Learned
 _None_
 
 ## Action Items (Human Review Required)
-- [REVIEW]: Sector Concentration: Energy = 100% of open positions
-- [REVIEW]: Market Risk: Universe Volatility 2531.0% ann., 1-day VaR -2.68%
-- [REVIEW]: Max Single-Day Loss: -8.4% (TCS) in 30d
-- [REVIEW]: Strategy Population: 156 active, avg fitness 25.4
+- [REVIEW]: Strategy Population: 458 active, avg fitness 17.8
 - [REVIEW]: Strategy Decay: MeanRev_RSI36.7 fitness=19.9
 - [REVIEW]: Strategy Decay: Sentiment_GT65.4 fitness=21.3
+- [REVIEW]: Strategy Decay: Momentum_return_5d_3.7 fitness=17.4
+- [REVIEW]: Strategy Decay: Hybrid_rsi_14_sentim fitness=21.0
+- [REVIEW]: Strategy Decay: Momentum_momentum_20d_3.4 fitness=17.5
 
 ---
 _Generated by AQRTI CRO Agent at 2026-06-24T05:34:58.012860_

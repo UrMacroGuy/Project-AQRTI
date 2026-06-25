@@ -42,18 +42,56 @@ log = get_logger("strategy_research_loop")
 
 
 def _backtest_unscored(db, max_stocks: int = 200) -> dict:
-    """Backtest all candidates that have no fitness score yet."""
-    rows = (
-        db.query(StrategyV2)
+    """Backtest all candidates that have no fitness score yet.
+    Selects proportionally across families so no family is starved."""
+    import random as _random
+    from sqlalchemy import func as _func
+
+    # Count unscored per family
+    family_counts = dict(
+        db.query(StrategyV2.family, _func.count())
         .filter(
             StrategyV2.fitness_score.is_(None),
             StrategyV2.status.in_(["candidate", "shadow"]),
             StrategyV2.dsl_json.isnot(None),
             StrategyV2.family.isnot(None),
         )
-        .limit(max_stocks)
+        .group_by(StrategyV2.family)
         .all()
     )
+
+    if not family_counts:
+        return {"backtested": 0, "errors": 0, "total_queued": 0}
+
+    # Allocate slots proportionally but give each family at least 1 slot
+    total_unscored = sum(family_counts.values())
+    per_family_alloc: dict[str, int] = {}
+    remaining = max_stocks
+    for fam, cnt in sorted(family_counts.items()):
+        alloc = max(1, round(max_stocks * cnt / total_unscored))
+        alloc = min(alloc, cnt, remaining)
+        per_family_alloc[fam] = alloc
+        remaining -= alloc
+        if remaining <= 0:
+            break
+
+    # Fetch per family and shuffle within each
+    rows: list = []
+    for fam, alloc in per_family_alloc.items():
+        fam_rows = (
+            db.query(StrategyV2)
+            .filter(
+                StrategyV2.fitness_score.is_(None),
+                StrategyV2.status.in_(["candidate", "shadow"]),
+                StrategyV2.dsl_json.isnot(None),
+                StrategyV2.family == fam,
+            )
+            .limit(alloc)
+            .all()
+        )
+        rows.extend(fam_rows)
+
+    _random.shuffle(rows)
     tested = 0
     errors = 0
     end_date   = date.today()

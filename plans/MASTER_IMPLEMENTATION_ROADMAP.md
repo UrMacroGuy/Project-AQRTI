@@ -1,129 +1,228 @@
-# MASTER_IMPLEMENTATION_ROADMAP.md
-
+# MASTER IMPLEMENTATION ROADMAP
 # PROJECT AQRTI
-## Build Roadmap
 
-Version: 1.0
-
----
-
-## PHASES
-
-### PHASE 0: FOUNDATION
-- **Duration:** Week 1
-- **Deliverables:**
-  - Project Structure
-  - Database Setup
-  - Configuration System
-  - Logging System
-  - Environment Setup
-
-### PHASE 1: DATA PLATFORM
-- **Duration:** Weeks 2-4
-- **Deliverables:**
-  - Market Data Pipeline
-  - Historical Data Storage
-  - Feature Store
-  - Data Validation
-  - Data Dashboard
-
-### PHASE 2: BACKTESTING PLATFORM
-- **Duration:** Weeks 5-6
-- **Deliverables:**
-  - Strategy Engine
-  - Backtesting Engine
-  - Walk Forward Validation
-  - Reporting System
-
-### PHASE 3: PREDICTION ENGINE
-- **Duration:** Weeks 7-9
-- **Deliverables:**
-  - LightGBM
-  - XGBoost
-  - CatBoost
-  - Meta Ranker
-  - Confidence Engine
-
-### PHASE 4: NEWS & SENTIMENT
-- **Duration:** Weeks 10-12
-- **Deliverables:**
-  - News Collection
-  - Event Detection
-  - Sentiment Engine
-  - Impact Scoring
-
-### PHASE 5: STRATEGY DISCOVERY
-- **Duration:** Weeks 13-16
-- **Deliverables:**
-  - Strategy Generator
-  - Mutation Engine
-  - Strategy Scoring
-  - Strategy Lifecycle
-
-### PHASE 6: LEARNING SYSTEM
-- **Duration:** Weeks 17-20
-- **Deliverables:**
-  - Knowledge Base
-  - Failure Analysis
-  - Confidence Calibration
-  - Adaptive Weighting
-
-### PHASE 7: PAPER TRADING
-- **Duration:** Weeks 21-24
-- **Deliverables:**
-  - Virtual Portfolio
-  - Daily Reports
-  - Performance Analytics
-  - Readiness Scoring
-
-### PHASE 8: TERMINAL
-- **Duration:** Weeks 25-28
-- **Deliverables:**
-  - Dashboard
-  - Analytics Center
-  - Research Interface
-  - Monitoring
-
-### PHASE 9: PRODUCTION VALIDATION
-- **Duration:** 60-120 Days
-- **Requirements:**
-  - Paper Trading Success
-  - Stable Performance
-  - Risk Validation
-  - Model Validation
-
-### PHASE 10: REAL CAPITAL
-- **Initial Capital:** ₹5,000
-- **Scale Only If:**
-  - Positive Expectancy
-  - Controlled Drawdowns
-  - Consistent Results
+Last Updated: 2026-06-25
 
 ---
 
-## SUCCESS METRICS
+## PHASE STATUS OVERVIEW
 
-- Prediction Quality
-- Strategy Quality
-- Risk Quality
-- Portfolio Quality
-- Learning Quality
-
----
-
-## OBJECTIVES
-
-### YEAR 1 OBJECTIVE
-Build a profitable research platform.
-
-### YEAR 2 OBJECTIVE
-Build a self-improving trading intelligence system.
-
-### YEAR 3 OBJECTIVE
-Build an institutional-grade autonomous quantitative research platform.
+| Phase | Name | Status | Completed |
+|---|---|---|---|
+| 0 | Foundation | ✅ Done | Project structure, DB, config, logging |
+| 1 | UI Shell | ✅ Done | 14-page terminal, all chart types, navigation |
+| 2 | Data Platform | ✅ Done | Market data, feature store, 148 features |
+| 3 | ML Prediction Engine | ✅ Done | CatBoost + LightGBM + XGBoost ensemble |
+| 4 | News & Sentiment | ✅ Done | RSS ingestion, NLP scoring, sentiment velocity |
+| 5 | Strategy Discovery | ✅ Done | 8-family genetic algorithm, 4,000+ strategies |
+| 6 | Learning System | ✅ Done | Failure analysis, knowledge score 71.5 |
+| 7 | Paper Trading | ✅ Done | Auto open/close, full analytics |
+| 8 | Research Agents | ✅ Done | 7 agents at 100% success, daily briefs |
+| 8b | Strategy Engine Overhaul | ✅ Done | Fitness recalibration, historical regimes, family-balanced backtest |
+| 9 | Production Validation | 🔄 In Progress | Paper trading running, ML needs retrain |
+| 10 | Real Capital | ⏳ Pending | Requires Phase 9 success metrics |
 
 ---
 
-## FINAL MISSION
+## PHASE 0 — FOUNDATION ✅
+- SQLite database with WAL mode (`backend/aqrti.db`)
+- SQLAlchemy ORM models: StrategyV2, DailyPrice, MLPrediction, AgentTask, MarketRegime, etc.
+- APScheduler for daily pipeline automation
+- Logging system (`aqrti/utils/logger.py`)
+- Configuration via pydantic-settings (`aqrti/config/settings.py`)
 
-AQRTI should become a continuously learning system that discovers opportunities, validates ideas, manages risk, and compounds knowledge faster than a human trader can.
+---
+
+## PHASE 1 — UI SHELL ✅
+- 14-page single-page terminal (no framework, vanilla JS + Chart.js)
+- Three-layer architecture: HTML structure / CSS tokens / JS logic
+- ChartRegistry prevents canvas reuse errors
+- DataStore with fallback mock data mirroring API schemas
+- Navigation with per-page hydration (re-fetches live data on every visit)
+- Pages: Overview, Market, Opportunities, News, Sentiment, Strategy Lab, Model Center, Learning, Research Ops, Paper Trading, Risk, Intelligence Vault, Intelligence Lab, Data Intelligence
+
+---
+
+## PHASE 2 — DATA PLATFORM ✅
+- yfinance daily OHLCV ingestion for 20-stock NSE universe
+- 148 engineered features per stock (RSI, EMA, ATR, Bollinger, volume ratios, etc.)
+- Feature store with incremental updates
+- `DailyPrice`, `FeatureRow` models
+- Market regime classification: BULL / BEAR / SIDEWAYS / VOLATILE
+- **Historical regime backfill:** 227 days computed from price data (2025-06-25 to 2026-06-22)
+
+---
+
+## PHASE 3 — ML PREDICTION ENGINE ✅
+- CatBoost + LightGBM + XGBoost ensemble
+- Walk-forward cross-validation
+- Direction prediction (Bullish / Bearish / Neutral)
+- Confidence calibration with ECE tracking
+- Intelligence Score: 71.5
+- **Known issue:** models output mostly Bearish/Neutral — retrain needed with balanced regime data
+
+---
+
+## PHASE 4 — NEWS & SENTIMENT ✅
+- RSS feed ingestion from NSE/BSE/financial news sources
+- NLP sentiment scoring per article and company
+- Sentiment velocity tracking
+- Fear/greed index computation
+- Narrative shift detection
+
+---
+
+## PHASE 5 — STRATEGY DISCOVERY ✅
+
+### Generator
+- 8 families: momentum, mean_reversion, breakout, sentiment_driven, regime_adaptive, volume_surge, volatility_play, hybrid
+- DSL (Domain-Specific Language) defines entry/exit conditions, regime filters, confidence thresholds, SL/TP/holding params
+- `min_confidence` range 50–68 (biased low to fire more signals)
+
+### Backtest Engine
+- Signal-driven: ML predictions (primary) + RSI+EMA fallback
+- 365-day historical window
+- Per-day regime lookup from `MarketRegime` table
+- Family-balanced batch allocation (proportional slots, all families covered)
+
+### Fitness Engine (5 dimensions)
+- Profitability 30%: Sharpe (cap 3.0), profit factor (cap 4.0), total return
+- Consistency 25%: win rate vs 55% target, expectancy
+- Robustness 20%: regime breadth, drawdown penalty
+- Regime Adaptability 15%: performance in current regime
+- Longevity 10%: trade count (≥8 required, full credit at 30+)
+- Targets calibrated for Indian equity: Sharpe 1.0, PF 1.8, win rate 55%
+
+### Evolution Engine
+- Tournament selection (size 5), 200-parent pool with family diversity cap (30/family)
+- 65% mutation / 35% crossover
+- 11 mutation ops: threshold_shift (2×), operator_flip, feature_swap, rule_add, rule_remove, regime_expand, regime_restrict, param_adjust (2×), confidence_adjust
+- Micro-nudge fallback ensures every child has unique DSL hash
+
+### Lifecycle
+- `candidate → shadow → promoted → [human] → active`
+- Promotion: fitness ≥ 20, trades ≥ 8
+- Retirement: fitness < 8
+- Graveyard stores lessons from retired strategies
+
+### Population (2026-06-25)
+- 4,087 total | 847 promoted | ~3,000 unscored backlog
+- Best fitness by family: volatility_play 67.3, momentum 60.6, volume_surge 57.0
+
+---
+
+## PHASE 6 — LEARNING SYSTEM ✅
+- Failure analysis: categories, severity, lessons extracted
+- Knowledge score tracking (currently 71.5)
+- Confidence calibration updates
+- Lesson generation on position close
+
+---
+
+## PHASE 7 — PAPER TRADING ✅
+- Virtual portfolio: ₹1,00,000 starting capital
+- Auto open/close based on top strategy + ML confidence
+- Full trade history with entry/exit detail, strategy name, P&L
+- Equity curve, performance analytics
+- Circuit breakers: −3% daily / −6% weekly / −12% monthly
+
+---
+
+## PHASE 8 — RESEARCH AGENTS ✅
+
+### 7 Agents
+| Agent | Role | Avg Duration |
+|---|---|---|
+| CRO | Aggregates briefs, writes daily intelligence report | ~0.1s |
+| Market Research | Macro, breadth, sector rotation, regime | ~0.1s |
+| Model Research | Drift, calibration, feature importance | ~0.1s |
+| News Research | Breaking news, narrative shifts | ~0.1s |
+| Pattern Research | Price patterns, recurring setups | ~0.1s |
+| Risk Research | Portfolio concentration, tail risk, drawdown | ~0.1s |
+| Strategy Research | Decay detection, resurrection candidates | ~0.2s |
+
+- Daily pipeline: `POST /api/v1/agents/admin/run-pipeline`
+- All agents 100% success rate (stale pending tasks cleared)
+- `started_at` / `completed_at` timestamps tracked for duration stats
+
+---
+
+## PHASE 8b — STRATEGY ENGINE OVERHAUL ✅ (2026-06-25)
+
+### Problems fixed
+- All strategies scoring identically (calibration targets too high for Indian equity)
+- Evolution had no parents (MIN_PARENT_FITNESS 40 → 15)
+- Volatility_play getting 0 trades (only 1 regime row in DB — all SIDEWAYS)
+- Backtest queue starving non-momentum families (no ORDER BY = insertion order)
+- Bulk backtest blocking HTTP client for 10+ minutes
+
+### Key changes
+- `fitness_engine.py`: TARGET_SHARPE 2.0→1.0, TARGET_WIN_RATE 65%→55%, soft Sharpe floor
+- `strategy_research_loop.py`: family-balanced allocation replaces insertion-order query
+- `scheduler.py`: stops generating when backlog >200; 100 balanced backtests per 5-min cycle
+- `strategies.py` routes: bulk-backtest + full-research-cycle run in FastAPI BackgroundTasks
+- `MarketRegime` table: 227 historical days backfilled (BULL 16d, BEAR 62d, SIDEWAYS 127d, VOLATILE 23d)
+- `strategy_registry.py`: avg_sharpe excludes retired/archived strategies
+- `agent_scheduler.py`: stamps `started_at` on task start for duration tracking
+- `task_history.py`: excludes `cancelled` tasks from success rate
+
+---
+
+## PHASE 9 — PRODUCTION VALIDATION 🔄
+
+### Requirements
+- [ ] Paper trading > 60 days with positive expectancy
+- [ ] Model direction accuracy ≥ 65% (currently needs retrain)
+- [ ] Strategy win rate ≥ 55% sustained
+- [ ] Max drawdown < 10%
+- [ ] Sharpe ≥ 1.0 on paper portfolio
+- [ ] Options Intelligence data populated
+- [ ] All 8 strategy families fully backtested (volatility_play at 2% coverage)
+
+### Known gaps
+- ML model outputs biased Bearish/Neutral — needs retrain on balanced data
+- Options Intelligence scraper not run (shows `no_data`)
+- Volatility_play backtest coverage: 2% → needs automated clearing
+
+---
+
+## PHASE 10 — REAL CAPITAL ⏳
+
+- Initial capital: ₹5,000
+- Requires Phase 9 all green
+- Scale only on: positive expectancy, controlled drawdowns, consistent Sharpe > 1.0
+
+---
+
+## AUTONOMOUS DAILY PIPELINE (12 STEPS)
+
+Runs via APScheduler after NSE close (configurable cron):
+
+```
+1.  Ingest market data (yfinance OHLCV for 20 stocks)
+2.  Feature engineering (incremental update, 148 features)
+3.  News ingestion (RSS feeds)
+4.  Sentiment scoring (NLP, fear/greed, velocity)
+5.  ML predictions (CatBoost + LightGBM + XGBoost ensemble)
+6.  Paper trading cycle (open/close positions)
+7.  Daily learning loop (failure analysis, lessons, knowledge score)
+8.  Strategy research (generate + backtest + score + evolve)
+9.  Multi-agent research pipeline (all 7 agents + CRO brief)
+10. Intelligence Vault archive (snapshot, predictions, briefs)
+11. Data Supremacy layer (FII/DII, options, breadth, sector rotation)
+12. Historical Intelligence Training
+```
+
+Plus continuous: **Strategy loop every 5 minutes** (100 balanced backtests + evolve 10 offspring when backlog < 500).
+
+---
+
+## YEAR OBJECTIVES
+
+| Year | Goal |
+|---|---|
+| Year 1 | Profitable research platform (in progress — paper trading live) |
+| Year 2 | Self-improving trading intelligence system |
+| Year 3 | Institutional-grade autonomous quantitative research platform |
+
+**Final Mission:** AQRTI becomes a continuously learning system that discovers opportunities, validates ideas, manages risk, and compounds knowledge faster than a human trader can.
