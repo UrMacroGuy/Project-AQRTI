@@ -225,7 +225,7 @@ def _technical_signal(closes: list[float]) -> dict:
             score -= 8
 
     # Recent momentum (5-day)
-    if len(closes) >= 6:
+    if len(closes) >= 6 and closes[-6] != 0:
         mom = (closes[-1] - closes[-6]) / closes[-6] * 100
         if mom > 3:
             score += 6
@@ -537,6 +537,8 @@ def backtest_strategy(
             if cur_price is None:
                 continue
 
+            if pos["entry_price"] <= 0:
+                continue
             pnl_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
             exit_reason = ""
 
@@ -610,7 +612,7 @@ def backtest_strategy(
             entry_price = _price_on(db, sym, d, look_ahead=1)
             if entry_price is None:
                 entry_price = _price_before(db, sym, d)
-            if entry_price is None:
+            if entry_price is None or entry_price <= 0:
                 continue
 
             entry_cost_pct = _transaction_cost("buy", sym)
@@ -626,7 +628,7 @@ def backtest_strategy(
     # Force-close remaining positions at end_date
     for sym, pos in open_positions.items():
         cur_price = _price_before(db, sym, end_date)
-        if cur_price is None:
+        if cur_price is None or pos["entry_price"] <= 0:
             continue
         pnl_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
         exit_cost_pct = _transaction_cost("sell", sym) * 100
