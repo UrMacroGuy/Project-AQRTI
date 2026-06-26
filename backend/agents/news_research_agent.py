@@ -27,9 +27,17 @@ from agents.agent_registry import register_agent_class
 log = get_logger("agent.news_research")
 
 STOCK_UNIVERSE = [
+    # Original 20
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "WIPRO", "AXISBANK",
     "LTIM", "NESTLEIND", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TATASTEEL",
     "TATAMOTORS", "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
+    # Expanded 30
+    "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
+    "BAJAJFINSV", "NTPC", "ADANIENT", "ADANIPORTS", "JSWSTEEL",
+    "TECHM", "COALINDIA", "BPCL", "HDFCLIFE", "SBILIFE",
+    "INDUSINDBK", "M&M", "DIVISLAB", "DRREDDY", "EICHERMOT",
+    "HEROMOTOCO", "CIPLA", "BRITANNIA", "APOLLOHOSP", "TRENT",
+    "GRASIM", "SHREECEM", "BEL", "POWERGRID", "ASIANPAINT",
 ]
 
 SOURCE_FRIENDLY = {

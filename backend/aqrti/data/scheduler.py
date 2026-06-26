@@ -38,6 +38,14 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 1 — Market data failed: %s", exc)
 
+    # Step 1B: Bhavcopy supplement — adds delivery volume from NSE CDN
+    try:
+        from data_supremacy.bhavcopy_scraper import run_daily_bhavcopy
+        bv = run_daily_bhavcopy()
+        scheduler_logger.info("Step 1B — Bhavcopy: status=%s inserted=%s", bv.get("status"), bv.get("inserted", 0))
+    except Exception as exc:
+        scheduler_logger.error("Step 1B — Bhavcopy failed: %s", exc)
+
     # Step 2: Features
     try:
         from features.feature_generator import run_incremental_feature_generation

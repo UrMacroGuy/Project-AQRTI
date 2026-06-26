@@ -130,13 +130,24 @@ def build_symbol_dataset(
         return None
 
     # Drop rows where too many features are NaN
-    feature_cols = [c for c in merged.columns if c not in ["date"] + LABEL_COLUMNS]
+    # Use get_feature_columns to also exclude _x/_y label merge artifacts
+    feature_cols = get_feature_columns(merged)
     nan_ratio = merged[feature_cols].isnull().mean(axis=1)
     merged = merged[nan_ratio <= MAX_NAN_RATIO].copy()
 
     if len(merged) < MIN_ROWS_PER_SYMBOL:
         log.debug("Skipping %s — only %d rows after NaN filter", symbol, len(merged))
         return None
+
+    # Drop any _x/_y label merge artifacts that would cause data leakage
+    leaky_cols = []
+    for lbl in LABEL_COLUMNS:
+        for suffix in ("_x", "_y"):
+            col = f"{lbl}{suffix}"
+            if col in merged.columns:
+                leaky_cols.append(col)
+    if leaky_cols:
+        merged = merged.drop(columns=leaky_cols)
 
     merged.insert(0, "symbol", symbol)
     merged = merged.sort_values("date").reset_index(drop=True)
@@ -174,7 +185,7 @@ def build_full_dataset(version: int = 1) -> pd.DataFrame:
     combined = combined.sort_values(["date", "symbol"]).reset_index(drop=True)
 
     log.info(
-        "Full dataset: %d rows, %d symbols, date range %s → %s",
+        "Full dataset: %d rows, %d symbols, date range %s to %s",
         len(combined),
         combined["symbol"].nunique(),
         combined["date"].min(),
@@ -184,8 +195,12 @@ def build_full_dataset(version: int = 1) -> pd.DataFrame:
 
 
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
-    """Return feature column names (exclude symbol, date, label columns)."""
-    return [c for c in df.columns if c not in ["symbol", "date"] + LABEL_COLUMNS]
+    """Return feature column names (exclude symbol, date, label columns and their merge suffixes)."""
+    # Build exclusion set: exact labels + _x/_y suffixes produced by pd.merge when both sides have the same column
+    excluded = {"symbol", "date"}
+    for lbl in LABEL_COLUMNS:
+        excluded.update({lbl, f"{lbl}_x", f"{lbl}_y"})
+    return [c for c in df.columns if c not in excluded]
 
 
 def fill_feature_nans(df: pd.DataFrame) -> pd.DataFrame:

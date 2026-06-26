@@ -90,7 +90,7 @@
           <span class="nav-label">Live Prices</span>
           <span class="nav-badge positive" id="badge-live">LIVE</span>
         </li>
-        <li class="nav-item" data-page="screener" onclick="renderPage('screener')">
+        <li class="nav-item" data-page="screener">
           <span class="nav-icon">▦</span>
           <span class="nav-label">Screener</span>
         </li>
@@ -778,7 +778,7 @@
     <!-- ────────────────────────────────────────────────
          PAGE: EQUITY SCREENER
     ──────────────────────────────────────────────── -->
-    <div id="page-screener" class="page" style="display:none">
+    <div id="page-screener" class="page">
       <div class="page-header"><span class="page-title">EQUITY SCREENER</span><span class="page-sub">Filter NSE universe by technicals</span></div>
       <div class="kpi-row" id="screener-kpi-row">
         <div class="kpi-card"><div class="kpi-label">UNIVERSE</div><div class="kpi-value" id="scr-total">18</div><div class="kpi-sub">stocks</div></div>
@@ -1069,6 +1069,15 @@
          PAGE: STRATEGY RESEARCH CENTER
     ──────────────────────────────────────────────── -->
     <section class="page" id="page-strategy">
+
+      <!-- Page header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:0.78rem;color:var(--text-muted)">Strategy evolution, leaderboard &amp; intelligence</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="src-status-label" style="font-size:0.7rem;color:var(--text-muted)"></span>
+          <button class="panel-action-btn" onclick="hydrateStrategyResearch()" style="background:rgba(0,170,255,0.12);border-color:rgba(0,170,255,0.35)">&#8635; Refresh</button>
+        </div>
+      </div>
 
       <!-- KPI Row -->
       <div class="kpi-row">
@@ -2766,7 +2775,7 @@
     </div>
   </div>
 
-  <script src="api.js?v=20260625"></script>
-  <script src="app.js?v=20260625"></script>
+  <script src="api.js?v=20260626"></script>
+  <script src="app.js?v=20260626"></script>
 </body>
 </html>

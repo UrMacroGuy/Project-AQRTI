@@ -181,7 +181,9 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
                 try:
                     probas = model.predict_proba(X_test)
                     from sklearn.metrics import roc_auc_score
-                    auc = float(roc_auc_score(y_test, probas[:, 1])) if probas.shape[1] > 1 else 0.5
+                    # predict_proba returns 1D array of P(class=1) for classifiers
+                    prob_pos = probas if probas.ndim == 1 else probas[:, 1]
+                    auc = float(roc_auc_score(y_test, prob_pos))
                 except Exception:
                     auc = 0.5
                 test_metrics = {"accuracy": accuracy, "auc_roc": auc, "n_test": len(y_test)}
@@ -294,8 +296,8 @@ def _record_lesson(db: Session, accuracy_check: dict, retrain_result: dict) -> N
         category    = "model",
         event_type  = "model_retrained",
         description = (
-            f"Model retrained due to accuracy degradation. "
-            f"Old win_rate={win_rate:.1f}%. "
+            f"Model retrained. "
+            f"win_rate={win_rate_str}. "
             f"New model: {retrain_result.get('model', 'N/A')} "
             f"v{retrain_result.get('version', '?')} "
             f"accuracy={retrain_result.get('accuracy', 0):.3f}."

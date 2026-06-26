@@ -56,32 +56,106 @@ POSITION_SIZE   = 0.05    # 5% of capital per trade
 MAX_OPEN_TRADES = 8       # max concurrent positions
 
 
-def _transaction_cost(side: str = "buy") -> float:
+def _detect_exchange(symbol: str) -> str:
+    """Detect exchange from symbol suffix."""
+    if symbol.endswith(".NS") or symbol.endswith(".BO"):
+        return "NSE"
+    if symbol.endswith(".L"):
+        return "LSE"
+    if symbol.endswith(".T"):
+        return "TSE"
+    if symbol.endswith(".HK"):
+        return "HKEX"
+    if symbol.endswith((".DE", ".PA", ".AS", ".MI", ".MC")):
+        return "EU"
+    if symbol.endswith(".SW"):
+        return "SIX"
+    if symbol.endswith((".AX",)):
+        return "ASX"
+    if symbol.endswith((".TO", ".V")):
+        return "TSX"
+    if symbol.endswith(".SA"):
+        return "BVMF"
+    if symbol.endswith(".KS"):
+        return "KRX"
+    if symbol.endswith((".SS", ".SZ")):
+        return "SSE"
+    # No suffix = US (NYSE/NASDAQ)
+    return "US"
+
+
+# Round-trip cost by exchange (realistic inclusive of all taxes + slippage)
+_EXCHANGE_ROUND_TRIP_COST = {
+    "NSE":  0.0028,  # 0.28% — STT + brokerage + exchange + stamp + GST + slippage
+    "US":   0.0010,  # 0.10% — SEC fee + FINRA + slippage (zero commission brokers)
+    "LSE":  0.0055,  # 0.55% — UK Stamp Duty 0.5% + broker + slippage
+    "TSE":  0.0015,  # 0.15% — Japan: low cost, minor consumption tax
+    "HKEX": 0.0030,  # 0.30% — HK Stamp Duty 0.13% each side + broker
+    "EU":   0.0020,  # 0.20% — varies by country; conservative average
+    "SIX":  0.0025,  # 0.25% — Swiss stamp duty + broker
+    "ASX":  0.0025,  # 0.25% — Australia: brokerage + minor levy
+    "TSX":  0.0020,  # 0.20% — Canada: brokerage + minor levy
+    "BVMF": 0.0035,  # 0.35% — Brazil: IOF + CPMF-equivalent + slippage
+    "KRX":  0.0025,  # 0.25% — Korea: securities tax + brokerage
+    "SSE":  0.0030,  # 0.30% — China: stamp duty + brokerage
+}
+
+
+def _transaction_cost(side: str = "buy", symbol: str = "") -> float:
     """
     Total one-way transaction cost as a fraction of trade value.
-    side: 'buy' or 'sell'
-    Returns a positive fraction (e.g. 0.00145 = 0.145%)
+    Uses exchange-aware cost model based on symbol suffix.
     """
-    brokerage    = BROKERAGE
-    exchange     = EXCHANGE_CHARGE
-    sebi         = SEBI_CHARGE
-    gst          = (brokerage + exchange + sebi) * GST_RATE
-    stt          = STT_BUY if side == "buy" else STT_SELL
-    stamp        = STAMP_DUTY if side == "buy" else 0.0
-    slippage     = SLIPPAGE_ENTRY if side == "buy" else SLIPPAGE_EXIT
-    return brokerage + exchange + sebi + gst + stt + stamp + slippage
+    exchange = _detect_exchange(symbol)
+    round_trip = _EXCHANGE_ROUND_TRIP_COST.get(exchange, 0.0020)
+    # Split ~60/40 buy/sell (buy has stamp duties in some exchanges)
+    return round_trip * 0.55 if side == "buy" else round_trip * 0.45
 
 
-# Pre-compute round-trip cost (used in P&L calc)
-ROUND_TRIP_COST = _transaction_cost("buy") + _transaction_cost("sell")
-# ≈ 0.145% buy + 0.135% sell = 0.28% round-trip (realistic for NSE delivery)
+def _round_trip_cost(symbol: str = "") -> float:
+    """Total round-trip cost for a symbol."""
+    exchange = _detect_exchange(symbol)
+    return _EXCHANGE_ROUND_TRIP_COST.get(exchange, 0.0020)
+
+
+# Default round-trip cost for NSE (backwards compat)
+ROUND_TRIP_COST = _EXCHANGE_ROUND_TRIP_COST["NSE"]
+# ≈ 0.28% round-trip (realistic for NSE delivery)
 
 STOCK_UNIVERSE = [
+    # Original 20
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
     "WIPRO", "AXISBANK", "LTIM", "NESTLEIND", "BAJFINANCE",
     "MARUTI", "SUNPHARMA", "TATASTEEL", "TATAMOTORS", "KOTAKBANK",
     "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
+    # Expanded 30
+    "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
+    "BAJAJFINSV", "NTPC", "ADANIENT", "ADANIPORTS", "JSWSTEEL",
+    "TECHM", "COALINDIA", "BPCL", "HDFCLIFE", "SBILIFE",
+    "INDUSINDBK", "M&M", "DIVISLAB", "DRREDDY", "EICHERMOT",
+    "HEROMOTOCO", "CIPLA", "BRITANNIA", "APOLLOHOSP", "TRENT",
+    "GRASIM", "SHREECEM", "BEL", "POWERGRID", "ASIANPAINT",
 ]
+
+
+def get_backtest_universe(db: Session, min_price_rows: int = 50) -> list[str]:
+    """
+    Return all active symbols that have sufficient price history for backtesting.
+    Falls back to STOCK_UNIVERSE if DB query returns nothing.
+    """
+    from aqrti.database.models import Stock
+    from sqlalchemy import func as _func
+    rows = (
+        db.query(DailyPrice.symbol)
+        .filter(DailyPrice.symbol.in_(
+            db.query(Stock.symbol).filter(Stock.active == True).scalar_subquery()
+        ))
+        .group_by(DailyPrice.symbol)
+        .having(_func.count(DailyPrice.date) >= min_price_rows)
+        .all()
+    )
+    result = [r[0] for r in rows]
+    return result if result else STOCK_UNIVERSE
 
 
 # ── Technical helpers ─────────────────────────────────────────
@@ -419,7 +493,7 @@ def backtest_strategy(
     Exit:  stop-loss | take-profit | max-hold | bearish signal flip
     """
     if universe is None:
-        universe = STOCK_UNIVERSE
+        universe = get_backtest_universe(db)
     if allowed_regimes is None:
         allowed_regimes = ["BULL", "SIDEWAYS", "BEAR", "VOLATILE"]
 
@@ -481,8 +555,7 @@ def backtest_strategy(
                     exit_reason = "bearish_flip"
 
             if exit_reason:
-                # Real NSE cost: entry already inflated by slippage; deduct exit costs
-                exit_cost_pct = _transaction_cost("sell") * 100
+                exit_cost_pct = _transaction_cost("sell", sym) * 100
                 net_pnl = pnl_pct - exit_cost_pct
                 t = TradeRecord(
                     symbol        = sym,
@@ -540,8 +613,7 @@ def backtest_strategy(
             if entry_price is None:
                 continue
 
-            # Inflate entry price by full buy-side cost (STT+brokerage+slippage+stamp+GST+SEBI)
-            entry_cost_pct = _transaction_cost("buy")
+            entry_cost_pct = _transaction_cost("buy", sym)
             open_positions[sym] = {
                 "entry_date":   d,
                 "entry_price":  entry_price * (1 + entry_cost_pct),
@@ -557,7 +629,7 @@ def backtest_strategy(
         if cur_price is None:
             continue
         pnl_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
-        exit_cost_pct = _transaction_cost("sell") * 100
+        exit_cost_pct = _transaction_cost("sell", sym) * 100
         net_pnl = pnl_pct - exit_cost_pct
         t = TradeRecord(
             symbol        = sym,

@@ -58,24 +58,35 @@ def _fetch_nse_today() -> list[dict] | None:
     Fetch today's FII/DII data from NSE.
     NSE returns a list of 2 objects: one for DII, one for FII/FPI.
     Format: [{buyValue, sellValue, netValue, category, date}, ...]
+    Requires cookie session: visit homepage first, then call API.
     """
     import requests
-    headers = {
+    base_headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
+            "Chrome/124.0.0.0 Safari/537.36"
         ),
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.nseindia.com/",
-        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
     }
     try:
         s = requests.Session()
-        s.headers.update(headers)
-        r = s.get(NSE_FII_URL, timeout=12)
+        s.headers.update(base_headers)
+        # Establish cookie session by visiting homepage
+        s.get("https://www.nseindia.com", timeout=15,
+              headers={"Accept": "text/html,application/xhtml+xml,*/*"})
+        time.sleep(1.5)
+        # Now call the FII/DII API with proper referer
+        r = s.get(NSE_FII_URL, timeout=15, headers={
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.nseindia.com/reports-indices-historical-vix",
+            "X-Requested-With": "XMLHttpRequest",
+        })
         if r.status_code == 200 and r.content:
             return r.json()
+        logger.warning("NSE FII returned status %d", r.status_code)
     except Exception as exc:
         logger.warning("NSE FII fetch failed: %s", exc)
     return None

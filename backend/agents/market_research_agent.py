@@ -26,23 +26,36 @@ from agents.agent_registry import register_agent_class
 log = get_logger("agent.market_research")
 
 STOCK_UNIVERSE = [
+    # Original 20
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "WIPRO", "AXISBANK",
     "LTIM", "NESTLEIND", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TATASTEEL",
     "TATAMOTORS", "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
+    # Expanded 30
+    "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
+    "BAJAJFINSV", "NTPC", "ADANIENT", "ADANIPORTS", "JSWSTEEL",
+    "TECHM", "COALINDIA", "BPCL", "HDFCLIFE", "SBILIFE",
+    "INDUSINDBK", "M&M", "DIVISLAB", "DRREDDY", "EICHERMOT",
+    "HEROMOTOCO", "CIPLA", "BRITANNIA", "APOLLOHOSP", "TRENT",
+    "GRASIM", "SHREECEM", "BEL", "POWERGRID", "ASIANPAINT",
 ]
 
 SECTOR_MAP = {
-    "RELIANCE": "Energy",   "ONGC": "Energy",
-    "TCS": "IT",            "INFY": "IT",      "WIPRO": "IT",      "LTIM": "IT",
-    "HDFCBANK": "Banking",  "ICICIBANK": "Banking", "AXISBANK": "Banking",
-    "KOTAKBANK": "Banking", "SBIN": "Banking",
-    "BAJFINANCE": "NBFC",
-    "MARUTI": "Auto",       "TATAMOTORS": "Auto",
-    "SUNPHARMA": "Pharma",
-    "TATASTEEL": "Metal",   "HINDALCO": "Metal",
-    "NESTLEIND": "FMCG",
-    "TITAN": "Consumer",
+    "RELIANCE": "Energy",    "ONGC": "Energy",       "COALINDIA": "Energy",  "BPCL": "Energy",
+    "TCS": "IT",             "INFY": "IT",           "WIPRO": "IT",          "LTIM": "IT",
+    "HCLTECH": "IT",         "TECHM": "IT",
+    "HDFCBANK": "Banking",   "ICICIBANK": "Banking", "AXISBANK": "Banking",
+    "KOTAKBANK": "Banking",  "SBIN": "Banking",      "INDUSINDBK": "Banking",
+    "BAJFINANCE": "NBFC",    "BAJAJFINSV": "NBFC",   "HDFCLIFE": "Insurance", "SBILIFE": "Insurance",
+    "MARUTI": "Auto",        "TATAMOTORS": "Auto",   "M&M": "Auto",
+    "EICHERMOT": "Auto",     "HEROMOTOCO": "Auto",
+    "SUNPHARMA": "Pharma",   "DRREDDY": "Pharma",    "CIPLA": "Pharma",      "DIVISLAB": "Pharma",
+    "TATASTEEL": "Metal",    "HINDALCO": "Metal",    "JSWSTEEL": "Metal",
+    "NESTLEIND": "FMCG",     "ITC": "FMCG",          "HINDUNILVR": "FMCG",   "BRITANNIA": "FMCG",
+    "TITAN": "Consumer",     "TRENT": "Consumer",    "ASIANPAINT": "Consumer", "APOLLOHOSP": "Healthcare",
     "BHARTIARTL": "Telecom",
+    "LT": "Infra",           "ADANIPORTS": "Infra",  "POWERGRID": "Power",   "NTPC": "Power",
+    "ULTRACEMCO": "Cement",  "GRASIM": "Cement",     "SHREECEM": "Cement",
+    "ADANIENT": "Conglomerate", "BEL": "Defence",
 }
 
 

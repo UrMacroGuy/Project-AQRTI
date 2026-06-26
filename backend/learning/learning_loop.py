@@ -84,10 +84,6 @@ def _backfill_prediction_outcomes(db, days: int = 30) -> dict:
 
         actual = round((end_row[0] - start_row[0]) / start_row[0] * 100, 4)
         p.actual_return = actual
-        p.was_correct = (
-            (p.direction == "Bullish" and actual > 0) or
-            (p.direction == "Bearish" and actual < 0)
-        )
         filled += 1
 
     if filled:

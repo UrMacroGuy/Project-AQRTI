@@ -12,14 +12,14 @@ Regime: SIDEWAYS. Market: SIDEWAYS (conf=55%). 5 findings. News research: 8 find
 - news_research: Sector Themes: Auto leading, IT under pressure
 
 ## Major Risks
+- [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
+- [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
+- [CRITICAL] strategy_research: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum]
 - [CRITICAL] cro: Daily Brief Issued — 2026-06-26
 - [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
-- [CRITICAL] strategy_research: Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid]
-- [CRITICAL] strategy_research: Critical Decay: VolSurge_2.41x_Del56.2 fitness=8.0 [volume_surge]
+- [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
+- [CRITICAL] strategy_research: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum]
 - [CRITICAL] cro: Daily Brief Issued — 2026-06-26
-- [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
-- [CRITICAL] strategy_research: Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid]
-- [CRITICAL] strategy_research: Critical Decay: VolSurge_2.41x_Del56.2 fitness=8.0 [volume_surge]
 
 ## Model Insights
 - Live Trade Win Rate: 14.3% (2/14 trades) — Paper trading: 14 closed trades in 30d, win rate=14.3%, avg return=-0.24%.
@@ -30,37 +30,37 @@ Regime: SIDEWAYS. Market: SIDEWAYS (conf=55%). 5 findings. News research: 8 find
 
 ## Strategy Insights
 - Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum] — QualMom_momentum_5.28 (quality_momentum) fitness=0.0, sharpe=-29.62, win_rate=0.0%, trades=6, drawdown=-21.4%.
-- Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid] — Hybrid_delive_sentim (hybrid) fitness=8.0, sharpe=-4.15, win_rate=28.6%, trades=7, drawdown=-16.8%.
-- Critical Decay: VolSurge_2.41x_Del56.2 fitness=8.0 [volume_surge] — VolSurge_2.41x_Del56.2 (volume_surge) fitness=8.0, sharpe=-22.31, win_rate=20.0%, trades=5, drawdown=-11.1%.
+- Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum] — QualMom_momentum_4.62 (quality_momentum) fitness=0.0, sharpe=-24.73, win_rate=0.0%, trades=5, drawdown=-24.3%.
+- Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum] — QualMom_relative_5.05 (quality_momentum) fitness=0.0, sharpe=-25.11, win_rate=0.0%, trades=5, drawdown=-20.3%.
 - Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum] — QualMom_momentum_5.28 (quality_momentum) fitness=0.0, sharpe=-29.62, win_rate=0.0%, trades=6, drawdown=-21.4%.
-- Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid] — Hybrid_delive_sentim (hybrid) fitness=8.0, sharpe=-4.15, win_rate=28.6%, trades=7, drawdown=-16.8%.
+- Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum] — QualMom_momentum_4.62 (quality_momentum) fitness=0.0, sharpe=-24.73, win_rate=0.0%, trades=5, drawdown=-24.3%.
 
 ## Research Findings
+- strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
+- strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
+- strategy_research: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum]
 - cro: Daily Brief Issued — 2026-06-26
 - strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
-- strategy_research: Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid]
-- strategy_research: Critical Decay: VolSurge_2.41x_Del56.2 fitness=8.0 [volume_surge]
+- strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
+- strategy_research: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum]
 - cro: Daily Brief Issued — 2026-06-26
 - strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
-- strategy_research: Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid]
-- strategy_research: Critical Decay: VolSurge_2.41x_Del56.2 fitness=8.0 [volume_surge]
-- strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
-- strategy_research: Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid]
+- strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
 
 ## Lessons Learned
-- [portfolio] Trade Loss — TATASTEEL
-- [portfolio] Trade Loss — TATASTEEL
-- [portfolio] Trade Loss — TATASTEEL
-- [portfolio] Trade Loss — TATASTEEL
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
 - [portfolio] Trade Loss — TATASTEEL
 
 ## Action Items (Human Review Required)
+- [URGENT]: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum] -- requires immediate human review
+- [URGENT]: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum] -- requires immediate human review
+- [URGENT]: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum] -- requires immediate human review
 - [URGENT]: Daily Brief Issued — 2026-06-26 -- requires immediate human review
 - [URGENT]: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum] -- requires immediate human review
-- [URGENT]: Critical Decay: Hybrid_delive_sentim fitness=8.0 [hybrid] -- requires immediate human review
-- [URGENT]: Critical Decay: VolSurge_2.41x_Del56.2 fitness=8.0 [volume_surge] -- requires immediate human review
-- [URGENT]: Daily Brief Issued — 2026-06-26 -- requires immediate human review
-- [URGENT]: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum] -- requires immediate human review
+- [URGENT]: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum] -- requires immediate human review
 
 ---
 _Generated by AQRTI CRO Agent at 2026-06-26T05:39:33.067584_

@@ -31,17 +31,22 @@ SECTOR_CONC_ALERT  = 40.0
 EXPOSURE_ALERT     = 80.0
 
 SECTOR_MAP = {
-    "RELIANCE": "Energy",   "ONGC": "Energy",
-    "TCS": "IT",            "INFY": "IT",      "WIPRO": "IT",      "LTIM": "IT",
-    "HDFCBANK": "Banking",  "ICICIBANK": "Banking", "AXISBANK": "Banking",
-    "KOTAKBANK": "Banking", "SBIN": "Banking",
-    "BAJFINANCE": "NBFC",
-    "MARUTI": "Auto",       "TATAMOTORS": "Auto",
-    "SUNPHARMA": "Pharma",
-    "TATASTEEL": "Metal",   "HINDALCO": "Metal",
-    "NESTLEIND": "FMCG",
-    "TITAN": "Consumer",
+    "RELIANCE": "Energy",    "ONGC": "Energy",       "COALINDIA": "Energy",  "BPCL": "Energy",
+    "TCS": "IT",             "INFY": "IT",           "WIPRO": "IT",          "LTIM": "IT",
+    "HCLTECH": "IT",         "TECHM": "IT",
+    "HDFCBANK": "Banking",   "ICICIBANK": "Banking", "AXISBANK": "Banking",
+    "KOTAKBANK": "Banking",  "SBIN": "Banking",      "INDUSINDBK": "Banking",
+    "BAJFINANCE": "NBFC",    "BAJAJFINSV": "NBFC",   "HDFCLIFE": "Insurance", "SBILIFE": "Insurance",
+    "MARUTI": "Auto",        "TATAMOTORS": "Auto",   "M&M": "Auto",
+    "EICHERMOT": "Auto",     "HEROMOTOCO": "Auto",
+    "SUNPHARMA": "Pharma",   "DRREDDY": "Pharma",    "CIPLA": "Pharma",      "DIVISLAB": "Pharma",
+    "TATASTEEL": "Metal",    "HINDALCO": "Metal",    "JSWSTEEL": "Metal",
+    "NESTLEIND": "FMCG",     "ITC": "FMCG",          "HINDUNILVR": "FMCG",   "BRITANNIA": "FMCG",
+    "TITAN": "Consumer",     "TRENT": "Consumer",    "ASIANPAINT": "Consumer", "APOLLOHOSP": "Healthcare",
     "BHARTIARTL": "Telecom",
+    "LT": "Infra",           "ADANIPORTS": "Infra",  "POWERGRID": "Power",   "NTPC": "Power",
+    "ULTRACEMCO": "Cement",  "GRASIM": "Cement",     "SHREECEM": "Cement",
+    "ADANIENT": "Conglomerate", "BEL": "Defence",
 }
 
 STOCK_UNIVERSE = list(SECTOR_MAP.keys())

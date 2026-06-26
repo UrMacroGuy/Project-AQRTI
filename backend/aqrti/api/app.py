@@ -53,7 +53,7 @@ from aqrti.api.routes import stress_test as stress_test_router
 from aqrti.api.routes import universe as universe_router
 from aqrti.config.settings import get_settings
 from aqrti.database.engine import init_db, checkpoint_wal
-from aqrti.data.market_data import run_daily_ingestion
+from aqrti.data.market_data import run_daily_ingestion, run_new_symbol_backfill
 from aqrti.data.scheduler import start_scheduler, stop_scheduler
 from aqrti.utils.logger import api_logger
 import threading
@@ -111,6 +111,10 @@ def _run_boot_sequence():
     # Step 1 — Market Data
     _boot_step("market_data", "running")
     try:
+        # Backfill 3-year history for any new symbols before normal incremental ingest
+        bf = run_new_symbol_backfill(years=3)
+        if bf["backfilled"]:
+            api_logger.info("Boot — Backfilled %d rows for %d new symbols", bf["backfilled"], len(bf["symbols"]))
         report = run_daily_ingestion()
         _boot_step("market_data", "done", f"status={report.get('status','?')}")
         api_logger.info("Boot step 1 — Market data: %s", report.get("status"))
@@ -219,13 +223,33 @@ def _run_boot_sequence():
         _boot_step("learning", "error", str(e))
         api_logger.error("Boot step 9 — Learning failed: %s", e)
 
-    # Step 10 — Rescore all strategies with corrected fitness parameters
+    # Step 10 — Fix inflated-Sharpe strategies (backtested before the POSITION_SIZE bug fix)
+    #           and rescore everything with corrected fitness parameters
     try:
         from strategies.fitness_engine import rescore_all
-        from aqrti.database.engine import get_session_factory
         from strategies.strategy_lifecycle import run_lifecycle_sweep
+        from strategies.strategy_backtester import backtest_and_update
+        from aqrti.database.engine import get_session_factory
         _db = get_session_factory()()
         try:
+            # Re-backtest any strategy with Sharpe > 5 (clearly from the old bug)
+            from aqrti.database.models import StrategyV2
+            import json
+            stale = _db.query(StrategyV2).filter(StrategyV2.sharpe > 5).all()
+            api_logger.info("Boot step 10 — Re-backtesting %d inflated-Sharpe strategies", len(stale))
+            rebt = 0
+            for s in stale:
+                try:
+                    dsl = json.loads(s.dsl_json) if s.dsl_json else {}
+                    dsl["strategy_id"] = s.strategy_id
+                    backtest_and_update(_db, dsl)
+                    rebt += 1
+                except Exception as _be:
+                    api_logger.debug("Re-backtest %s failed: %s", s.strategy_id, _be)
+            _db.commit()
+            api_logger.info("Boot step 10 — Re-backtested %d strategies", rebt)
+
+            # Rescore all with corrected MIN_TRADES/TARGET_TRADES
             r = rescore_all(_db)
             lc = run_lifecycle_sweep(_db)
             _db.commit()
@@ -236,7 +260,7 @@ def _run_boot_sequence():
         finally:
             _db.close()
     except Exception as e:
-        api_logger.error("Boot step 10 — Rescore failed: %s", e)
+        api_logger.error("Boot step 10 — Rescore/rebacktest failed: %s", e)
 
     with _BOOT_LOCK:
         _BOOT_STATUS["booting"] = False

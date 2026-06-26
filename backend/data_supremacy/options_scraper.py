@@ -15,6 +15,7 @@ if backend_dir not in sys.path:
 import json
 import time
 import logging
+import requests
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -22,7 +23,6 @@ from sqlalchemy.orm import Session
 
 from aqrti.database.models import OptionsChain
 from data_supremacy.scraper_base import (
-    make_session, safe_get, safe_json, nse_headers,
     record_source_health,
 )
 
@@ -35,16 +35,52 @@ INDICES_TO_SCRAPE = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
 TOP_EQUITY_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
+def _nse_session() -> requests.Session:
+    """Create a requests session with NSE cookies by visiting the homepage first."""
+    import requests as req
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Cache-Control": "max-age=0",
+    }
+    s = req.Session()
+    s.headers.update(headers)
+    try:
+        s.get("https://www.nseindia.com", timeout=15)
+        time.sleep(1.5)
+        s.get("https://www.nseindia.com/option-chain", timeout=15)
+        time.sleep(1.0)
+    except Exception:
+        pass
+    return s
+
+
 def scrape_option_chain(db: Session, symbol: str = "NIFTY",
                          is_index: bool = True) -> dict:
     t0 = time.time()
-    session = make_session()
-    safe_get(session, "https://www.nseindia.com", headers={"Accept": "text/html"})
-    time.sleep(1)
+    session = _nse_session()
 
     url = NSE_OPTION_CHAIN_URL if is_index else NSE_EQUITY_OC_URL
-    resp = safe_get(session, url, params={"symbol": symbol}, headers=nse_headers())
-    data = safe_json(resp)
+    api_headers = {
+        "Referer": "https://www.nseindia.com/option-chain",
+        "Accept": "application/json, text/plain, */*",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    try:
+        resp = session.get(url, params={"symbol": symbol}, headers=api_headers, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("NSE options %s failed: %s", symbol, exc)
+        data = None
 
     if not data:
         record_source_health(db, "options", "down",

@@ -51,8 +51,9 @@ class XGBoostModel(BaseModel):
         if self._is_classification:
             return xgb.XGBClassifier(
                 objective="binary:logistic",
-                eval_metric="logloss",
+                eval_metric="auc",
                 use_label_encoder=False,
+                scale_pos_weight=1.0,   # will be overridden in _fit_impl
                 **params,
             )
         else:
@@ -70,6 +71,13 @@ class XGBoostModel(BaseModel):
         y_val: Optional[pd.Series],
     ) -> None:
         early_rounds = self.hyperparams.get("early_stopping_rounds", 50)
+
+        # Balance classes by reweighting minority class
+        if self._is_classification:
+            n_neg = int((y_train == 0).sum())
+            n_pos = int((y_train == 1).sum())
+            if n_pos > 0 and n_neg > 0:
+                self._model.set_params(scale_pos_weight=n_neg / n_pos)
 
         fit_kwargs: dict = {"verbose": False}
         if X_val is not None and y_val is not None:

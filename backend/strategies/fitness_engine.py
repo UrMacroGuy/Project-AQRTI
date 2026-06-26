@@ -52,8 +52,8 @@ W_LONGEVITY        = 0.05
 TARGET_SHARPE        = 1.2     # raised — Nifty50 long-only ≈ 0.8; must beat it
 TARGET_PROFIT_FACTOR = 2.0     # raised — must clear cost friction
 TARGET_WIN_RATE      = 55.0    # 55% realistic for trend-following on Indian equities
-TARGET_TRADES        = 100     # 100+ trades in 3-year window = statistically meaningful
-MIN_TRADES           = 10      # hard floor — below this, longevity = 0
+TARGET_TRADES        = 200     # 200+ trades in 3-year window = statistically meaningful
+MIN_TRADES           = 50      # hard floor — below this, longevity = 0
 
 # ── Cost model constants (match backtester) ───────────────────
 ROUND_TRIP_COST_PCT  = 0.28    # % — realistic NSE delivery round-trip
@@ -122,7 +122,10 @@ def cost_efficiency_score(
     if trade_count < MIN_TRADES:
         return 0.0
 
-    net_expectancy = expectancy - ROUND_TRIP_COST_PCT
+    # expectancy from backtester is already net-of-cost (cost deducted per trade)
+    # Apply a small additional buffer for live-vs-backtest slippage variance
+    LIVE_BUFFER_PCT = 0.10   # 0.10% buffer — assumes live may be slightly worse
+    net_expectancy = expectancy - LIVE_BUFFER_PCT
     if net_expectancy < 0:
         return 0.0
 
@@ -227,7 +230,7 @@ def compute_fitness(
         "regime_adaptability": s_regime,
         "longevity":           s_long,
         "current_regime":      current_regime,
-        "net_expectancy":      round(expectancy - ROUND_TRIP_COST_PCT, 4),
+        "net_expectancy":      round(expectancy - 0.10, 4),   # live-buffer adjusted
     }
 
 

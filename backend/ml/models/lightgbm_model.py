@@ -50,7 +50,12 @@ class LightGBMModel(BaseModel):
                   if k != "early_stopping_rounds"}
 
         if self._is_classification:
-            return lgb.LGBMClassifier(objective="binary", **params)
+            return lgb.LGBMClassifier(
+                objective="binary",
+                is_unbalance=True,
+                metric="auc",
+                **params,
+            )
         else:
             return lgb.LGBMRegressor(objective="regression_l1", **params)
 

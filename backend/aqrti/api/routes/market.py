@@ -547,6 +547,65 @@ def get_sector_breadth(db: Session = Depends(get_db_dependency)):
     return {"sectors": sectors_result}
 
 
+@router.post("/backfill/bhavcopy")
+def trigger_bhavcopy_backfill(
+    years: int = Query(default=2, ge=1, le=5),
+    db: Session = Depends(get_db_dependency),
+):
+    """
+    Trigger NSE Bhavcopy historical backfill.
+    Downloads daily bhavcopies (OHLCV + delivery volume) from NSE archives.
+    years=2 fills last 2 years; years=5 fills full 5Y history (~1200 days, ~30 min).
+    Runs in background thread — returns immediately with job status.
+    """
+    import threading
+    from datetime import date, timedelta
+    from data_supremacy.bhavcopy_scraper import run_historical_backfill
+
+    from_date = date.today() - timedelta(days=365 * years)
+    to_date   = date.today() - timedelta(days=1)
+
+    def _run():
+        try:
+            result = run_historical_backfill(from_date=from_date, to_date=to_date)
+            import logging
+            logging.getLogger("bhavcopy_scraper").info("Backfill job done: %s", result)
+        except Exception as e:
+            import logging
+            logging.getLogger("bhavcopy_scraper").error("Backfill job failed: %s", e)
+
+    t = threading.Thread(target=_run, daemon=True, name="bhavcopy_backfill")
+    t.start()
+
+    return {
+        "status":    "started",
+        "from_date": str(from_date),
+        "to_date":   str(to_date),
+        "message":   f"Backfill running in background for {years} years of data. Check server logs for progress.",
+    }
+
+
+@router.get("/backfill/status")
+def get_backfill_status(db: Session = Depends(get_db_dependency)):
+    """Return current price data coverage stats."""
+    from sqlalchemy import func as sqlfunc
+    total   = db.query(sqlfunc.count(DailyPrice.id)).scalar()
+    min_dt  = db.query(sqlfunc.min(DailyPrice.date)).scalar()
+    max_dt  = db.query(sqlfunc.max(DailyPrice.date)).scalar()
+    symbols = db.query(sqlfunc.count(DailyPrice.symbol.distinct())).scalar()
+    with_delivery = db.query(sqlfunc.count(DailyPrice.id)).filter(
+        DailyPrice.delivery_volume != None
+    ).scalar()
+    return {
+        "total_rows":       total,
+        "symbols_covered":  symbols,
+        "date_from":        str(min_dt) if min_dt else None,
+        "date_to":          str(max_dt) if max_dt else None,
+        "rows_with_delivery": with_delivery,
+        "delivery_coverage_pct": round(with_delivery / total * 100, 1) if total else 0,
+    }
+
+
 @router.get("/ohlcv/{symbol}")
 def get_stock_ohlcv(
     symbol: str,

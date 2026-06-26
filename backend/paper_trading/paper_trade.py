@@ -21,12 +21,25 @@ PORTFOLIO_NAME = "default"
 
 # NSE symbol → Yahoo Finance ticker map
 _NSE_TO_YF = {
-    "RELIANCE": "RELIANCE.NS", "HDFCBANK": "HDFCBANK.NS", "ICICIBANK": "ICICIBANK.NS",
-    "INFY": "INFY.NS", "TCS": "TCS.NS", "AXISBANK": "AXISBANK.NS",
-    "SBIN": "SBIN.NS", "BAJFINANCE": "BAJFINANCE.NS", "MARUTI": "MARUTI.NS",
-    "TITAN": "TITAN.NS", "WIPRO": "WIPRO.NS", "ONGC": "ONGC.NS",
-    "SUNPHARMA": "SUNPHARMA.NS", "NESTLEIND": "NESTLEIND.NS", "BHARTIARTL": "BHARTIARTL.NS",
-    "KOTAKBANK": "KOTAKBANK.NS", "TATASTEEL": "TATASTEEL.NS", "HINDALCO": "HINDALCO.NS",
+    # Original 20
+    "RELIANCE":   "RELIANCE.NS",   "HDFCBANK":   "HDFCBANK.NS",   "ICICIBANK":  "ICICIBANK.NS",
+    "INFY":       "INFY.NS",       "TCS":        "TCS.NS",        "AXISBANK":   "AXISBANK.NS",
+    "SBIN":       "SBIN.NS",       "BAJFINANCE": "BAJFINANCE.NS", "MARUTI":     "MARUTI.NS",
+    "TITAN":      "TITAN.NS",      "WIPRO":      "WIPRO.NS",      "ONGC":       "ONGC.NS",
+    "SUNPHARMA":  "SUNPHARMA.NS",  "NESTLEIND":  "NESTLEIND.NS",  "BHARTIARTL": "BHARTIARTL.NS",
+    "KOTAKBANK":  "KOTAKBANK.NS",  "TATASTEEL":  "TATASTEEL.NS",  "HINDALCO":   "HINDALCO.NS",
+    "TATAMOTORS": "TATAMOTORS.NS", "LTIM":       "LTIM.NS",
+    # Expanded 30
+    "HCLTECH":    "HCLTECH.NS",    "ITC":        "ITC.NS",        "LT":         "LT.NS",
+    "HINDUNILVR": "HINDUNILVR.NS", "ULTRACEMCO": "ULTRACEMCO.NS", "BAJAJFINSV": "BAJAJFINSV.NS",
+    "NTPC":       "NTPC.NS",       "ADANIENT":   "ADANIENT.NS",   "ADANIPORTS": "ADANIPORTS.NS",
+    "JSWSTEEL":   "JSWSTEEL.NS",   "TECHM":      "TECHM.NS",      "COALINDIA":  "COALINDIA.NS",
+    "BPCL":       "BPCL.NS",       "HDFCLIFE":   "HDFCLIFE.NS",   "SBILIFE":    "SBILIFE.NS",
+    "INDUSINDBK": "INDUSINDBK.NS", "M&M":        "M&M.NS",        "DIVISLAB":   "DIVISLAB.NS",
+    "DRREDDY":    "DRREDDY.NS",    "EICHERMOT":  "EICHERMOT.NS",  "HEROMOTOCO": "HEROMOTOCO.NS",
+    "CIPLA":      "CIPLA.NS",      "BRITANNIA":  "BRITANNIA.NS",  "APOLLOHOSP": "APOLLOHOSP.NS",
+    "TRENT":      "TRENT.NS",      "GRASIM":     "GRASIM.NS",     "SHREECEM":   "SHREECEM.NS",
+    "BEL":        "BEL.NS",        "POWERGRID":  "POWERGRID.NS",  "ASIANPAINT": "ASIANPAINT.NS",
 }
 
 # In-process cache: symbol → (price, fetched_at_epoch) — valid for 60s

@@ -48,7 +48,12 @@ class CatBoostModel(BaseModel):
                   if k != "early_stopping_rounds"}
 
         if self._is_classification:
-            return CatBoostClassifier(loss_function="Logloss", eval_metric="AUC", **params)
+            return CatBoostClassifier(
+                loss_function="Logloss",
+                eval_metric="AUC",
+                auto_class_weights="Balanced",
+                **params,
+            )
         else:
             return CatBoostRegressor(loss_function="MAE", eval_metric="MAE", **params)
 

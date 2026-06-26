@@ -23,26 +23,58 @@ from aqrti.utils.logger import data_logger
 
 # ── Stock Universe Seed Data ──────────────────────────────────
 STOCK_META: dict[str, dict] = {
-    "RELIANCE":   {"name": "Reliance Industries Ltd",       "sector": "Energy",    "industry": "Oil & Gas",        "nifty": True},
-    "TCS":        {"name": "Tata Consultancy Services Ltd", "sector": "IT",        "industry": "IT Services",       "nifty": True},
-    "INFY":       {"name": "Infosys Ltd",                   "sector": "IT",        "industry": "IT Services",       "nifty": True},
-    "HDFCBANK":   {"name": "HDFC Bank Ltd",                 "sector": "Banking",   "industry": "Private Bank",      "nifty": True},
-    "ICICIBANK":  {"name": "ICICI Bank Ltd",                "sector": "Banking",   "industry": "Private Bank",      "nifty": True},
-    "WIPRO":      {"name": "Wipro Ltd",                     "sector": "IT",        "industry": "IT Services",       "nifty": True},
-    "AXISBANK":   {"name": "Axis Bank Ltd",                 "sector": "Banking",   "industry": "Private Bank",      "nifty": True},
-    "LTIM":       {"name": "LTIMindtree Ltd",               "sector": "IT",        "industry": "IT Services",       "nifty": True},
-    "NESTLEIND":  {"name": "Nestle India Ltd",              "sector": "FMCG",      "industry": "Food Products",     "nifty": True},
-    "BAJFINANCE": {"name": "Bajaj Finance Ltd",             "sector": "NBFC",      "industry": "Finance",           "nifty": True},
-    "MARUTI":     {"name": "Maruti Suzuki India Ltd",       "sector": "Auto",      "industry": "Automobiles",       "nifty": True},
-    "SUNPHARMA":  {"name": "Sun Pharmaceutical Industries", "sector": "Pharma",    "industry": "Pharmaceuticals",   "nifty": True},
-    "TATASTEEL":  {"name": "Tata Steel Ltd",                "sector": "Metal",     "industry": "Steel",             "nifty": True},
-    "TATAMOTORS": {"name": "Tata Motors Ltd",               "sector": "Auto",      "industry": "Automobiles",       "nifty": True},
-    "KOTAKBANK":  {"name": "Kotak Mahindra Bank Ltd",       "sector": "Banking",   "industry": "Private Bank",      "nifty": True},
-    "TITAN":      {"name": "Titan Company Ltd",             "sector": "Consumer",  "industry": "Consumer Durables", "nifty": True},
-    "ONGC":       {"name": "Oil & Natural Gas Corporation", "sector": "Energy",    "industry": "Oil & Gas",         "nifty": True},
-    "HINDALCO":   {"name": "Hindalco Industries Ltd",       "sector": "Metal",     "industry": "Aluminium",         "nifty": True},
-    "SBIN":       {"name": "State Bank of India",           "sector": "Banking",   "industry": "PSU Bank",          "nifty": True},
-    "BHARTIARTL": {"name": "Bharti Airtel Ltd",             "sector": "Telecom",   "industry": "Telecom",           "nifty": True},
+    # ── Original 20 ───────────────────────────────────────────────
+    "RELIANCE":   {"name": "Reliance Industries Ltd",         "sector": "Energy",       "industry": "Oil & Gas",          "nifty": True},
+    "TCS":        {"name": "Tata Consultancy Services Ltd",   "sector": "IT",           "industry": "IT Services",         "nifty": True},
+    "INFY":       {"name": "Infosys Ltd",                     "sector": "IT",           "industry": "IT Services",         "nifty": True},
+    "HDFCBANK":   {"name": "HDFC Bank Ltd",                   "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
+    "ICICIBANK":  {"name": "ICICI Bank Ltd",                  "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
+    "WIPRO":      {"name": "Wipro Ltd",                       "sector": "IT",           "industry": "IT Services",         "nifty": True},
+    "AXISBANK":   {"name": "Axis Bank Ltd",                   "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
+    "LTIM":       {"name": "LTIMindtree Ltd",                 "sector": "IT",           "industry": "IT Services",         "nifty": True},
+    "NESTLEIND":  {"name": "Nestle India Ltd",                "sector": "FMCG",         "industry": "Food Products",       "nifty": True},
+    "BAJFINANCE": {"name": "Bajaj Finance Ltd",               "sector": "NBFC",         "industry": "Finance",             "nifty": True},
+    "MARUTI":     {"name": "Maruti Suzuki India Ltd",         "sector": "Auto",         "industry": "Automobiles",         "nifty": True},
+    "SUNPHARMA":  {"name": "Sun Pharmaceutical Industries",   "sector": "Pharma",       "industry": "Pharmaceuticals",     "nifty": True},
+    "TATASTEEL":  {"name": "Tata Steel Ltd",                  "sector": "Metal",        "industry": "Steel",               "nifty": True},
+    "TATAMOTORS": {"name": "Tata Motors Ltd",                 "sector": "Auto",         "industry": "Automobiles",         "nifty": True},
+    "KOTAKBANK":  {"name": "Kotak Mahindra Bank Ltd",         "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
+    "TITAN":      {"name": "Titan Company Ltd",               "sector": "Consumer",     "industry": "Consumer Durables",   "nifty": True},
+    "ONGC":       {"name": "Oil & Natural Gas Corporation",   "sector": "Energy",       "industry": "Oil & Gas",           "nifty": True},
+    "HINDALCO":   {"name": "Hindalco Industries Ltd",         "sector": "Metal",        "industry": "Aluminium",           "nifty": True},
+    "SBIN":       {"name": "State Bank of India",             "sector": "Banking",      "industry": "PSU Bank",            "nifty": True},
+    "BHARTIARTL": {"name": "Bharti Airtel Ltd",               "sector": "Telecom",      "industry": "Telecom",             "nifty": True},
+    # ── Expanded 30 (top NIFTY50 by market cap) ──────────────────
+    "HCLTECH":    {"name": "HCL Technologies Ltd",            "sector": "IT",           "industry": "IT Services",         "nifty": True},
+    "ITC":        {"name": "ITC Ltd",                         "sector": "FMCG",         "industry": "Cigarettes & FMCG",   "nifty": True},
+    "LT":         {"name": "Larsen & Toubro Ltd",             "sector": "Infra",        "industry": "Engineering",         "nifty": True},
+    "HINDUNILVR": {"name": "Hindustan Unilever Ltd",          "sector": "FMCG",         "industry": "Personal Products",   "nifty": True},
+    "ULTRACEMCO": {"name": "UltraTech Cement Ltd",            "sector": "Cement",       "industry": "Cement",              "nifty": True},
+    "BAJAJFINSV": {"name": "Bajaj Finserv Ltd",               "sector": "NBFC",         "industry": "Insurance",           "nifty": True},
+    "NTPC":       {"name": "NTPC Ltd",                        "sector": "Power",        "industry": "Power Generation",    "nifty": True},
+    "ADANIENT":   {"name": "Adani Enterprises Ltd",           "sector": "Conglomerate", "industry": "Diversified",         "nifty": True},
+    "ADANIPORTS": {"name": "Adani Ports & SEZ Ltd",           "sector": "Infra",        "industry": "Ports",               "nifty": True},
+    "JSWSTEEL":   {"name": "JSW Steel Ltd",                   "sector": "Metal",        "industry": "Steel",               "nifty": True},
+    "TECHM":      {"name": "Tech Mahindra Ltd",               "sector": "IT",           "industry": "IT Services",         "nifty": True},
+    "COALINDIA":  {"name": "Coal India Ltd",                  "sector": "Energy",       "industry": "Coal",                "nifty": True},
+    "BPCL":       {"name": "Bharat Petroleum Corp Ltd",       "sector": "Energy",       "industry": "Oil & Gas",           "nifty": True},
+    "HDFCLIFE":   {"name": "HDFC Life Insurance Co Ltd",      "sector": "Insurance",    "industry": "Life Insurance",      "nifty": True},
+    "SBILIFE":    {"name": "SBI Life Insurance Co Ltd",       "sector": "Insurance",    "industry": "Life Insurance",      "nifty": True},
+    "INDUSINDBK": {"name": "IndusInd Bank Ltd",               "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
+    "M&M":        {"name": "Mahindra & Mahindra Ltd",         "sector": "Auto",         "industry": "Automobiles",         "nifty": True},
+    "DIVISLAB":   {"name": "Divi's Laboratories Ltd",         "sector": "Pharma",       "industry": "Pharmaceuticals",     "nifty": True},
+    "DRREDDY":    {"name": "Dr. Reddy's Laboratories Ltd",    "sector": "Pharma",       "industry": "Pharmaceuticals",     "nifty": True},
+    "EICHERMOT":  {"name": "Eicher Motors Ltd",               "sector": "Auto",         "industry": "Motorcycles",         "nifty": True},
+    "HEROMOTOCO": {"name": "Hero MotoCorp Ltd",               "sector": "Auto",         "industry": "Motorcycles",         "nifty": True},
+    "CIPLA":      {"name": "Cipla Ltd",                       "sector": "Pharma",       "industry": "Pharmaceuticals",     "nifty": True},
+    "BRITANNIA":  {"name": "Britannia Industries Ltd",        "sector": "FMCG",         "industry": "Food Products",       "nifty": True},
+    "APOLLOHOSP": {"name": "Apollo Hospitals Enterprise Ltd", "sector": "Healthcare",   "industry": "Hospitals",           "nifty": True},
+    "TRENT":      {"name": "Trent Ltd",                       "sector": "Consumer",     "industry": "Retail",              "nifty": True},
+    "GRASIM":     {"name": "Grasim Industries Ltd",           "sector": "Cement",       "industry": "Diversified",         "nifty": True},
+    "SHREECEM":   {"name": "Shree Cement Ltd",                "sector": "Cement",       "industry": "Cement",              "nifty": True},
+    "BEL":        {"name": "Bharat Electronics Ltd",          "sector": "Defence",      "industry": "Electronics",         "nifty": True},
+    "POWERGRID":  {"name": "Power Grid Corporation of India", "sector": "Power",        "industry": "Power Transmission",  "nifty": True},
+    "ASIANPAINT": {"name": "Asian Paints Ltd",                "sector": "Consumer",     "industry": "Paints",              "nifty": True},
 }
 
 INDEX_META: dict[str, str] = {
@@ -308,6 +340,39 @@ def run_daily_ingestion(start_override: Optional[date] = None) -> dict:
     data_logger.info("=== DAILY INGESTION %s | stocks:%d idx:%d errors:%d ===",
                      report["status"], total_stock_rows, total_index_rows, len(errors))
     return report
+
+
+def run_new_symbol_backfill(years: int = 3) -> dict:
+    """
+    Download full history for any symbol in the universe that has no price data yet.
+    Called once on boot after universe is expanded; safe to call repeatedly (no-op for
+    symbols already in DB).
+    """
+    from datetime import timedelta
+    settings = get_settings()
+    backfill_start = date.today() - timedelta(days=years * 365)
+    data_logger.info("=== NEW SYMBOL BACKFILL START (from %s) ===", backfill_start)
+
+    new_symbols: list[str] = []
+    with get_db() as db:
+        seed_stock_universe(db)
+        for ticker_ns in settings.universe_list:
+            symbol = ticker_ns.replace(".NS", "")
+            if not _latest_date_in_db(db, symbol):
+                new_symbols.append(ticker_ns)
+
+    if not new_symbols:
+        data_logger.info("No new symbols to backfill.")
+        return {"backfilled": 0, "symbols": []}
+
+    data_logger.info("Backfilling %d new symbols: %s", len(new_symbols), new_symbols)
+    with get_db() as db:
+        results = download_stock_prices(db, new_symbols, start_override=backfill_start)
+
+    total = sum(v for v in results.values() if v > 0)
+    errors = [k for k, v in results.items() if v == -1]
+    data_logger.info("=== BACKFILL DONE | rows=%d errors=%d ===", total, len(errors))
+    return {"backfilled": total, "symbols": [s.replace(".NS", "") for s in new_symbols], "errors": errors}
 
 
 # ══════════════════════════════════════════════════════════════

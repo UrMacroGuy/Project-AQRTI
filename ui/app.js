@@ -433,7 +433,7 @@ function renderMarket() {
   const moversBody = el('top-movers-body');
   if (moversBody) moversBody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px">Loading market data…</td></tr>';
   const derivBody = el('deriv-body');
-  if (derivBody) derivBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:16px">Loading…</td></tr>';
+  if (derivBody) derivBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:16px">No options data — run Options Intelligence scraper</td></tr>';
 }
 
 // ── OPPORTUNITIES ─────────────────────────────────────────────
@@ -1811,17 +1811,33 @@ function stopPaperPolling() {
 
 async function hydrateStrategyResearch() {
   const el = id => document.getElementById(id);
+  const statusEl = el('src-status-label');
+  if (statusEl) statusEl.textContent = 'Loading…';
 
   // Fetch all in parallel for speed
-  const [pop, leaders, evoTree, affinity, graveD, resurrect, research] = await Promise.all([
-    Api.strategyPopulation(),
-    Api.strategyLeaderboard(15),
-    Api.evolutionTree(90),
-    Api.regimeAffinity(),
-    Api.graveyard({ limit: 20 }),
-    Api.resurrectionCandidates(),
-    Api.latestResearch(),
-  ]);
+  let pop, leaders, evoTree, affinity, graveD, resurrect, research;
+  try {
+    [pop, leaders, evoTree, affinity, graveD, resurrect, research] = await Promise.all([
+      Api.strategyPopulation(),
+      Api.strategyLeaderboard(15),
+      Api.evolutionTree(90),
+      Api.regimeAffinity(),
+      Api.graveyard({ limit: 20 }),
+      Api.resurrectionCandidates(),
+      Api.latestResearch(),
+    ]);
+  } catch (err) {
+    console.error('[Strategy Research] Data fetch failed:', err);
+    if (statusEl) statusEl.textContent = 'Backend offline';
+    return;
+  }
+
+  const serverOnline = !!(pop || leaders);
+  if (statusEl) {
+    const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    statusEl.textContent = serverOnline ? `Updated ${now}` : 'Backend offline — start server';
+    statusEl.style.color = serverOnline ? 'var(--positive)' : 'var(--negative)';
+  }
 
 
 
@@ -1832,6 +1848,8 @@ async function hydrateStrategyResearch() {
   _kpi('src-kpi-active-sub', `${stats.active_count || 0} Active`);
   _kpi('src-kpi-avg-fitness', stats.avg_fitness != null ? stats.avg_fitness.toFixed(1) : '—');
   _kpi('src-kpi-best-fitness', stats.max_fitness != null ? stats.max_fitness.toFixed(1) : '—');
+  const bestRow = (leaders && leaders.leaderboard && leaders.leaderboard.length) ? leaders.leaderboard[0] : null;
+  _kpi('src-kpi-best-name', bestRow ? (bestRow.name || bestRow.strategy_id || '—') : '—');
   _kpi('src-kpi-generation', stats.max_generation || '—');
   _kpi('src-kpi-graveyard', stats.graveyard_count || '—');
   _kpi('src-kpi-promoted', stats.promoted || '—');
@@ -1856,7 +1874,7 @@ async function hydrateStrategyResearch() {
         <td style="color:var(--text-muted)">${i + 1}</td>
         <td style="font-family:var(--font-mono);font-size:0.72rem">
           <div>${r.name || '—'}${ddWarn ? ' <span style="color:#f59e0b;font-size:0.65rem">⚠</span>' : ''}</div>
-          <div style="font-size:0.62rem;color:var(--accent);opacity:0.7;letter-spacing:0.02em">${r.strategy_id}</div>
+          <div onclick="loadStrategyDna('${r.strategy_id}');document.getElementById('panel-dna-viewer').scrollIntoView({behavior:'smooth'})" style="font-size:0.62rem;color:var(--accent);letter-spacing:0.02em;cursor:pointer;text-decoration:underline dotted" title="Click to open DNA viewer">${r.strategy_id}</div>
         </td>
         <td><span class="chip">${r.family || '—'}</span></td>
         <td class="${statusClass}" style="font-size:0.7rem">${(r.status || '').toUpperCase()}</td>
@@ -1871,7 +1889,7 @@ async function hydrateStrategyResearch() {
           <button class="panel-action-btn" style="background:rgba(167,139,250,0.1);border-color:rgba(167,139,250,0.35);color:rgba(167,139,250,0.9)" onclick="loadStrategyDna('${r.strategy_id}');document.getElementById('panel-dna-viewer').scrollIntoView({behavior:'smooth'})">DNA</button>
         </td>
       </tr>`;
-    }).join('') || `<tr><td colspan="10" style="color:var(--text-muted);text-align:center">No strategies yet</td></tr>`;
+    }).join('') || `<tr><td colspan="10" style="color:var(--text-muted);text-align:center">${serverOnline ? 'No strategies yet' : 'Backend offline — click Refresh after starting server'}</td></tr>`;
   }
 
   // ── Family Population Chart ───────────────────────────────────
@@ -1994,18 +2012,19 @@ async function hydrateStrategyResearch() {
     // Pull recent knowledge events filtered to strategy category
     const events = await apiFetch('/knowledge?days=7').catch(() => null);
     const evList = events ? (events.recentEvents || []) : [];
-    const stratEvts = evList.filter(e => e.category === 'strategy' || e.type?.startsWith('strategy_'));
+    const stratEvts = evList.filter(e => e.category === 'strategy' || (e.eventType || e.type || '').startsWith('strategy_'));
     if (stratEvts.length) {
       feedEl.innerHTML = stratEvts.slice(0, 30).map(e => {
-        const isPromo  = e.type === 'strategy_promoted';
-        const isRetire = e.type === 'strategy_retired';
-        const color = isPromo ? 'var(--color-positive)' : isRetire ? 'var(--color-negative)' : 'var(--text-muted)';
+        const evType   = e.eventType || e.type || '';
+        const isPromo  = evType === 'strategy_promoted';
+        const isRetire = evType === 'strategy_retired';
+        const color = isPromo ? 'var(--positive)' : isRetire ? 'var(--negative)' : 'var(--text-muted)';
         const icon  = isPromo ? '▲' : isRetire ? '▼' : '●';
         return `<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border-faint)">
           <span style="color:${color};min-width:12px;margin-top:1px">${icon}</span>
           <div>
-            <div style="color:${color};font-size:0.68rem">${e.date}</div>
-            <div style="color:var(--text-secondary);font-size:0.7rem;line-height:1.4">${e.description || e.type}</div>
+            <div style="color:${color};font-size:0.68rem">${e.date || e.event_date || ''}</div>
+            <div style="color:var(--text-secondary);font-size:0.7rem;line-height:1.4">${e.description || evType}</div>
           </div>
         </div>`;
       }).join('');
@@ -3010,7 +3029,7 @@ async function hydrateDataIntelligence() {
   }
 
   // ── FII/DII — delegate to enhanced chart loader ──
-  loadFiiDiiCharts();
+  await loadFiiDiiCharts();
 
   // ── Market Breadth ──
   const breadth = await Api.marketBreadth();
@@ -3359,6 +3378,15 @@ async function hydrateTopbarLive() {
     _s('market-banknifty-val', fmt);
     const mChg = el('market-banknifty-chg');
     if (mChg) { mChg.textContent = chgText; mChg.className = 'kpi-sub ' + (pct >= 0 ? 'positive' : 'negative'); }
+  }
+  if (vix && vix.price != null) {
+    const _s = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+    _s('market-vix-val', vix.price.toFixed(2));
+    const pct = vix.changePct || 0;
+    const mChg = el('market-vix-sub');
+    if (mChg) { mChg.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% today`; }
+    const vEl = el('market-vix-val');
+    if (vEl) vEl.className = 'kpi-value ' + (vix.price > 20 ? 'negative' : vix.price < 13 ? 'positive' : '');
   }
 }
 
@@ -3849,9 +3877,9 @@ async function hydrateMarket() {
   }
 
   // Top movers table
-  if (topMovers && topMovers.length) {
-    const moversBody = el('top-movers-body');
-    if (moversBody) {
+  const moversBody = el('top-movers-body');
+  if (moversBody) {
+    if (topMovers && topMovers.length) {
       moversBody.innerHTML = topMovers.map(m => {
         const pct = (m.change || 0) * 100;
         return `
@@ -3863,6 +3891,8 @@ async function hydrateMarket() {
             <td style="color:var(--text-muted)">—</td>
           </tr>`;
       }).join('');
+    } else {
+      moversBody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px">No intraday data — run daily ingestion to populate</td></tr>';
     }
   }
 }
@@ -5010,8 +5040,7 @@ function renderCandleChart(data) {
 async function loadFiiDiiCharts() {
   const days = document.getElementById('fiidii-days')?.value || 30;
   const data = await Api.fiiDii(days);
-  // Backend returns { fii: [...], dii: [...], ... }
-  // Each entry in fii/dii array has net_investment, gross_buy, gross_sell, flow_date
+  // Backend returns { fii: [...], dii: [...], ... } in descending order (newest first)
   let fiiArr = [], diiArr = [];
   if (data?.fii && Array.isArray(data.fii)) {
     fiiArr = data.fii;
@@ -5023,17 +5052,19 @@ async function loadFiiDiiCharts() {
   }
   if (!fiiArr.length) return;
 
-  // Merge fii+dii into parallel record arrays aligned by date
-  const _fld = (r, ...keys) => { for (const k of keys) if (r[k] != null) return r[k]; return 0; };
-  const fiiNets  = fiiArr.map(r => _fld(r, 'net_investment', 'fii_net', 'fii_net_value'));
-  const diiByDate = Object.fromEntries(diiArr.map(r => [r.flow_date || r.date, r]));
-  const diiNets  = fiiArr.map(r => { const d = diiByDate[r.flow_date || r.date]; return d ? _fld(d, 'net_investment', 'dii_net', 'dii_net_value') : 0; });
-  const fiiBuy   = fiiArr.map(r => _fld(r, 'gross_buy', 'fii_gross_buy'));
-  const fiiSell  = fiiArr.map(r => _fld(r, 'gross_sell', 'fii_gross_sell'));
-  const labels   = fiiArr.map(r => r.flow_date || r.date || r.trade_date || '');
-  // Use fiiArr as records for table rendering (merge dii inline below)
-  const records = fiiArr;
+  // Reverse to chronological order (oldest→newest) for chart display
+  fiiArr = [...fiiArr].reverse();
+  diiArr = [...diiArr].reverse();
 
+  const _fld = (r, ...keys) => { for (const k of keys) if (r[k] != null) return r[k]; return 0; };
+  const fiiNets   = fiiArr.map(r => _fld(r, 'net_investment', 'fii_net', 'fii_net_value'));
+  const diiByDate = Object.fromEntries(diiArr.map(r => [r.flow_date || r.date, r]));
+  const diiNets   = fiiArr.map(r => { const d = diiByDate[r.flow_date || r.date]; return d ? _fld(d, 'net_investment', 'dii_net', 'dii_net_value') : 0; });
+  const fiiBuy    = fiiArr.map(r => _fld(r, 'gross_buy', 'fii_gross_buy'));
+  const fiiSell   = fiiArr.map(r => _fld(r, 'gross_sell', 'fii_gross_sell'));
+  const labels    = fiiArr.map(r => (r.flow_date || r.date || '').slice(5)); // show MM-DD
+
+  // KPI cards — use all data (full period totals)
   const fiiNet30 = fiiNets.reduce((s, v) => s + v, 0);
   const diiNet30 = diiNets.reduce((s, v) => s + v, 0);
   const last5fii = fiiNets.slice(-5).filter(v => v > 0).length;
@@ -5046,54 +5077,80 @@ async function loadFiiDiiCharts() {
   _set('fii-trend', `${last5fii}/5 BUY`, last5fii >= 3 ? 'positive' : 'negative');
   _set('dii-trend', `${last5dii}/5 BUY`, last5dii >= 3 ? 'positive' : 'negative');
 
-  ['chart-fiidii-bar', 'chart-fiidii-cumulative'].forEach(id => { const c = Chart.getChart(id); if (c) c.destroy(); });
+  // Update combined signal badge
+  const sigEl = document.getElementById('di-fii-signal');
+  if (sigEl && data?.combined_signal) {
+    sigEl.textContent = data.combined_signal;
+    sigEl.className = 'badge ' + (data.combined_signal.includes('BULL') ? 'badge-green' : data.combined_signal.includes('BEAR') ? 'badge-red' : '');
+  }
+
+  // Destroy existing charts safely
+  ['chart-fiidii-bar', 'chart-fiidii-cumulative'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { const c = Chart.getChart(el); if (c) c.destroy(); }
+  });
 
   const barCanvas = document.getElementById('chart-fiidii-bar');
   if (barCanvas) new Chart(barCanvas, {
     type: 'bar',
     data: { labels, datasets: [
-      { label: 'FII Net', data: fiiNets, backgroundColor: fiiNets.map(v => v >= 0 ? 'rgba(0,204,102,0.7)' : 'rgba(255,51,51,0.7)') },
-      { label: 'DII Net', data: diiNets, backgroundColor: diiNets.map(v => v >= 0 ? 'rgba(0,170,255,0.6)' : 'rgba(255,140,0,0.6)') },
+      { label: 'FII Net (Cr)', data: fiiNets, backgroundColor: fiiNets.map(v => v >= 0 ? 'rgba(0,204,102,0.75)' : 'rgba(255,51,51,0.75)'), borderRadius: 2 },
+      { label: 'DII Net (Cr)', data: diiNets, backgroundColor: diiNets.map(v => v >= 0 ? 'rgba(0,170,255,0.65)' : 'rgba(255,140,0,0.65)'), borderRadius: 2 },
     ]},
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { labels: { color: '#666', font: { size: 9 } } }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
-      scales: { x: { ticks: { color: '#444', font: { size: 8 }, maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#0d0d0d' } }, y: { ticks: { color: '#666', font: { size: 8 } }, grid: { color: '#111' }, position: 'right' } },
+      plugins: {
+        legend: { display: true, labels: { color: '#888', font: { size: 9 }, boxWidth: 10 } },
+        tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 },
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${Math.round(ctx.parsed.y).toLocaleString('en-IN')} Cr` } },
+      },
+      scales: {
+        x: { stacked: false, ticks: { color: '#555', font: { size: 8 }, maxTicksLimit: 12, maxRotation: 0 }, grid: { color: '#0d0d0d' } },
+        y: { ticks: { color: '#666', font: { size: 8 }, callback: v => (v >= 0 ? '+' : '') + Math.round(v/100)/10 + 'k' }, grid: { color: '#111' }, position: 'right' },
+      },
     },
   });
 
   let cumFii = 0, cumDii = 0;
-  const cumFiiArr = fiiNets.map(v => { cumFii += v; return cumFii; });
-  const cumDiiArr = diiNets.map(v => { cumDii += v; return cumDii; });
+  const cumFiiArr = fiiNets.map(v => { cumFii += v; return Math.round(cumFii); });
+  const cumDiiArr = diiNets.map(v => { cumDii += v; return Math.round(cumDii); });
   const cumCanvas = document.getElementById('chart-fiidii-cumulative');
   if (cumCanvas) new Chart(cumCanvas, {
     type: 'line',
     data: { labels, datasets: [
-      { label: 'Cumulative FII', data: cumFiiArr, borderColor: '#00cc66', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0 },
-      { label: 'Cumulative DII', data: cumDiiArr, borderColor: '#00aaff', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0 },
+      { label: 'Cumul. FII', data: cumFiiArr, borderColor: '#00cc66', backgroundColor: 'rgba(0,204,102,0.08)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
+      { label: 'Cumul. DII', data: cumDiiArr, borderColor: '#00aaff', backgroundColor: 'rgba(0,170,255,0.08)', borderWidth: 1.5, pointRadius: 0, fill: true, tension: 0.3 },
     ]},
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { labels: { color: '#666', font: { size: 9 } } }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
-      scales: { x: { ticks: { color: '#444', font: { size: 8 }, maxTicksLimit: 8, maxRotation: 0 }, grid: { color: '#0d0d0d' } }, y: { ticks: { color: '#666', font: { size: 8 } }, grid: { color: '#111' }, position: 'right' } },
+      plugins: {
+        legend: { display: true, labels: { color: '#888', font: { size: 9 }, boxWidth: 10 } },
+        tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 },
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toLocaleString('en-IN')} Cr` } },
+      },
+      scales: {
+        x: { ticks: { color: '#444', font: { size: 8 }, maxTicksLimit: 8, maxRotation: 0 }, grid: { color: '#0d0d0d' } },
+        y: { ticks: { color: '#666', font: { size: 8 }, callback: v => (v >= 0 ? '+' : '') + Math.round(v/100)/10 + 'k' }, grid: { color: '#111' }, position: 'right' },
+      },
     },
   });
 
+  // Table — show last 10 sessions, newest first
   const tbody = document.getElementById('fiidii-table-body');
   if (tbody) {
-    const count = records.length;
-    const startIdx = Math.max(0, count - 10);
     const _fmtCr = v => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString('en-IN') + ' Cr';
     const rows = [];
-    for (let i = count - 1; i >= startIdx; i--) {
-      const r = records[i];
+    const count = fiiArr.length;
+    // Iterate newest→oldest (reversed array is already oldest→newest, so go backwards)
+    for (let i = count - 1; i >= Math.max(0, count - 10); i--) {
       const fn = fiiNets[i] || 0;
       const dn = diiNets[i] || 0;
       const gb = fiiBuy[i] || 0;
       const gs = fiiSell[i] || 0;
       const comb = fn + dn;
+      const dateStr = fiiArr[i]?.flow_date || fiiArr[i]?.date || labels[i] || '—';
       rows.push(`<tr>
-        <td>${labels[i] || '—'}</td>
+        <td>${dateStr}</td>
         <td class="positive">${Math.round(gb).toLocaleString('en-IN')} Cr</td>
         <td class="negative">${Math.round(gs).toLocaleString('en-IN')} Cr</td>
         <td class="${fn >= 0 ? 'positive' : 'negative'}">${_fmtCr(fn)}</td>
