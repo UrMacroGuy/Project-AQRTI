@@ -52,8 +52,8 @@ W_LONGEVITY        = 0.05
 TARGET_SHARPE        = 1.2     # raised — Nifty50 long-only ≈ 0.8; must beat it
 TARGET_PROFIT_FACTOR = 2.0     # raised — must clear cost friction
 TARGET_WIN_RATE      = 55.0    # 55% realistic for trend-following on Indian equities
-TARGET_TRADES        = 25      # 25+ trades in backtest window = confident sample
-MIN_TRADES           = 8       # hard floor — below this, longevity = 0
+TARGET_TRADES        = 100     # 100+ trades in 3-year window = statistically meaningful
+MIN_TRADES           = 10      # hard floor — below this, longevity = 0
 
 # ── Cost model constants (match backtester) ───────────────────
 ROUND_TRIP_COST_PCT  = 0.28    # % — realistic NSE delivery round-trip
@@ -162,8 +162,6 @@ def regime_adaptability_score(
 def longevity_score(trade_count: int) -> float:
     if trade_count < MIN_TRADES:
         return 0.0
-    if trade_count < 10:
-        return round((trade_count / 10) * 40, 2)   # slower ramp (was 50)
     return round(min(trade_count / TARGET_TRADES, 1.0) * 100, 2)
 
 

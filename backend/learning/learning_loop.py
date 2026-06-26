@@ -32,6 +32,71 @@ from aqrti.utils.logger import get_logger
 log = get_logger("learning_loop")
 
 
+def _backfill_prediction_outcomes(db, days: int = 30) -> dict:
+    """
+    Fill Prediction.actual_return for any prediction whose 5-day forward
+    return can now be computed from DailyPrice data.
+
+    Predictions are made for a horizon of ~5 trading days (~7 calendar days).
+    We only fill once the data is available; older predictions are also
+    backfilled if they were missed. This makes all downstream learning
+    steps (model drift, failure detection, confidence audit, feature decay)
+    work correctly instead of returning zero results.
+    """
+    from datetime import timedelta
+    from aqrti.database.models import Prediction, DailyPrice
+
+    cutoff = date.today() - timedelta(days=days)
+    # Only process predictions that don't have actual_return yet
+    preds = (
+        db.query(Prediction)
+        .filter(
+            Prediction.date >= cutoff,
+            Prediction.actual_return.is_(None),
+        )
+        .all()
+    )
+
+    filled = 0
+    skipped = 0
+    HORIZON_CALENDAR = 7  # 5 trading days ≈ 7 calendar days
+
+    for p in preds:
+        target_date = p.date + timedelta(days=HORIZON_CALENDAR)
+        start_row = (
+            db.query(DailyPrice.close)
+            .filter(DailyPrice.symbol == p.symbol, DailyPrice.date >= p.date)
+            .order_by(DailyPrice.date.asc())
+            .first()
+        )
+        end_row = (
+            db.query(DailyPrice.close)
+            .filter(DailyPrice.symbol == p.symbol, DailyPrice.date <= target_date)
+            .order_by(DailyPrice.date.desc())
+            .first()
+        )
+        if not start_row or not end_row or start_row[0] == end_row[0]:
+            skipped += 1
+            continue
+        if start_row[0] == 0:
+            skipped += 1
+            continue
+
+        actual = round((end_row[0] - start_row[0]) / start_row[0] * 100, 4)
+        p.actual_return = actual
+        p.was_correct = (
+            (p.direction == "Bullish" and actual > 0) or
+            (p.direction == "Bearish" and actual < 0)
+        )
+        filled += 1
+
+    if filled:
+        db.commit()
+
+    log.info("Prediction backfill: filled=%d skipped=%d", filled, skipped)
+    return {"filled": filled, "skipped": skipped, "total_checked": len(preds)}
+
+
 def run_daily_learning(days: int = 7) -> dict:
     """
     Run the full learning loop for today.
@@ -59,6 +124,11 @@ def run_daily_learning(days: int = 7) -> dict:
                 except Exception:
                     pass
                 return None
+
+        # Step 0: Backfill Prediction.actual_return from price data
+        # Must run before all downstream steps that filter on actual_return.isnot(None)
+        log.info("[Learning Loop] Step 0: Backfill prediction outcomes")
+        _run_step("prediction_backfill", lambda: _backfill_prediction_outcomes(db, days=days))
 
         # Step 1: Evaluate pending pattern outcomes
         log.info("[Learning Loop] Step 1: Pattern outcome evaluation")

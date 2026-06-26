@@ -91,15 +91,13 @@ def _load_universe_data(
     Load price history for all universe stocks + NIFTY50.
     Returns (universe_dfs, nifty_df, sector_map).
     """
-    settings = get_settings()
-    symbols  = settings.universe_clean
     cutoff   = date.today() - timedelta(days=days)
 
-    # Load stock data
+    # Load stock data — use ALL active symbols that have price data (not just settings list)
     universe_dfs: dict[str, pd.DataFrame] = {}
     sector_map: dict[str, str] = {}
 
-    stocks = db.query(Stock).filter(Stock.symbol.in_(symbols), Stock.active == True).all()
+    stocks = db.query(Stock).filter(Stock.active == True).all()
     for stock in stocks:
         sector_map[stock.symbol] = stock.sector or "Unknown"
         rows = (
@@ -288,7 +286,28 @@ def _generate_incremental(
                 skipped += 1
                 continue
 
-            features = _compute_all_features(symbol, stock_df, nifty_df, universe_dfs, sector_map)
+            # Slice all data up to latest_price — same as _generate_all does per date.
+            # This prevents look-ahead bias: incremental must use identical slicing.
+            def _to_date(d):
+                return d.date() if isinstance(d, pd.Timestamp) else d
+
+            slice_stock = stock_df[
+                stock_df["date"].apply(_to_date) <= latest_price
+            ].copy()
+            slice_nifty = nifty_df[
+                nifty_df["date"].apply(_to_date) <= latest_price
+            ].copy() if not nifty_df.empty else nifty_df
+            slice_universe = {
+                s: df[df["date"].apply(_to_date) <= latest_price]
+                for s, df in universe_dfs.items()
+            }
+
+            if len(slice_stock) < MIN_HISTORY_ROWS:
+                skipped += 1
+                continue
+
+            features = _compute_all_features(symbol, slice_stock, slice_nifty,
+                                             slice_universe, sector_map)
             rows = save_feature_vector(db, symbol, latest_price, features, version)
             total_rows += rows
             symbols_done += 1

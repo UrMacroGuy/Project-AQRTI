@@ -139,15 +139,14 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
     log.info("Starting model retraining. Reason: %s", trigger_reason)
 
     try:
-        from ml.datasets.training_dataset import AQRTITrainingDataset
+        from ml.datasets.training_dataset import prepare_training_dataset
         from ml.models.lightgbm_model import LightGBMModel
         from ml.models.xgboost_model import XGBoostModel
         from ml.models.catboost_model import CatBoostModel
-        from ml.validation.walk_forward import WalkForwardValidator
         import pandas as pd, numpy as np
 
-        dataset = AQRTITrainingDataset(db)
-        splits  = dataset.get_walk_forward_splits()
+        dataset = prepare_training_dataset(label_col="direction_5d", top_features=40, scale=True)
+        splits  = dataset.folds
 
         if not splits:
             log.warning("No training splits available — not enough data for retraining")
@@ -160,20 +159,35 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         X_test  = latest_split.X_test
         y_test  = latest_split.y_test
 
+        # Compute next version number before training so models can use it
+        last_version = (
+            db.query(ModelVersion.version)
+            .order_by(ModelVersion.version.desc())
+            .first()
+        )
+        next_version = (last_version[0] + 1) if last_version else 1
+
         trained_models = []
         metrics_list   = []
 
         for ModelClass in [LightGBMModel, XGBoostModel, CatBoostModel]:
             try:
-                model = ModelClass(task="direction")
+                model = ModelClass(task="direction", label_col="direction_5d", version=next_version)
                 model.fit(X_train, y_train, X_val=X_test, y_val=y_test)
-                test_metrics = model.evaluate(X_test, y_test)
-                metrics_list.append({
-                    "model":   model.model_type,
-                    "metrics": test_metrics,
-                })
+                # Compute metrics manually using predict
+                preds = model.predict(X_test)
+                correct = int((preds == y_test.values).sum())
+                accuracy = correct / len(y_test) if len(y_test) > 0 else 0.0
+                try:
+                    probas = model.predict_proba(X_test)
+                    from sklearn.metrics import roc_auc_score
+                    auc = float(roc_auc_score(y_test, probas[:, 1])) if probas.shape[1] > 1 else 0.5
+                except Exception:
+                    auc = 0.5
+                test_metrics = {"accuracy": accuracy, "auc_roc": auc, "n_test": len(y_test)}
+                metrics_list.append({"model": model.model_type, "metrics": test_metrics})
                 trained_models.append((model, test_metrics))
-                log.info("Trained %s: accuracy=%.3f", model.model_type, test_metrics.get("accuracy", 0))
+                log.info("Trained %s: accuracy=%.3f auc=%.3f", model.model_type, accuracy, auc)
             except Exception as exc:
                 log.warning("Training %s failed: %s", ModelClass.__name__, exc)
 
@@ -191,22 +205,14 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         for m in current_active:
             m.is_active = False
 
-        # Get next version number
-        last_version = (
-            db.query(ModelVersion.version)
-            .order_by(ModelVersion.version.desc())
-            .first()
-        )
-        next_version = (last_version[0] + 1) if last_version else 1
-
-        # Save model artifact to disk
-        save_path = best_model.save(version=next_version)
+        # Save model artifact to disk (version already set on model)
+        save_path = best_model.save()
 
         # Register in DB
         new_mv = ModelVersion(
             model_name    = best_model.model_type,
             task          = "direction",
-            label_col     = "direction_label",
+            label_col     = "direction_5d",
             version       = next_version,
             primary_metric = best_metrics.get("accuracy"),
             metrics_json  = json.dumps(best_metrics),
@@ -246,15 +252,16 @@ def _record_lesson(db: Session, accuracy_check: dict, retrain_result: dict) -> N
     regime = _current_regime(db)
     win_rate = accuracy_check.get("win_rate")
 
+    win_rate_str = f"{win_rate:.1f}%" if win_rate is not None else "N/A"
     what_failed = (
-        f"Model win rate fell to {win_rate:.1f}% (threshold {WIN_RATE_FLOOR}%) "
+        f"Model win rate: {win_rate_str} (threshold {WIN_RATE_FLOOR}%) "
         f"over last {ACCURACY_EVAL_DAYS} days ({accuracy_check.get('evaluated', 0)} predictions)."
     )
     regime_breakdown = accuracy_check.get("regime_win_rates", {})
     worst_regime = min(regime_breakdown, key=regime_breakdown.get) if regime_breakdown else None
 
     what_happened = (
-        f"Automatic model retraining triggered. Reason: {accuracy_check['reason']}. "
+        f"Automatic model retraining triggered. Reason: {accuracy_check.get('reason', 'forced')}. "
         f"Worst performing regime: {worst_regime} ({regime_breakdown.get(worst_regime, 'N/A')}% accuracy). "
         f"New model: {retrain_result.get('model', 'N/A')} v{retrain_result.get('version', '?')} "
         f"accuracy={retrain_result.get('accuracy', 0):.3f}."
@@ -263,7 +270,7 @@ def _record_lesson(db: Session, accuracy_check: dict, retrain_result: dict) -> N
     lesson = LessonLearned(
         lesson_date     = date.today(),
         category        = "model",
-        title           = f"Model retrained after win rate fell to {win_rate:.1f}% in {regime} regime",
+        title           = f"Model retrained (win_rate={win_rate_str}) in {regime} regime",
         description     = what_happened,
         what_happened   = what_happened,
         what_failed     = what_failed,
@@ -275,7 +282,7 @@ def _record_lesson(db: Session, accuracy_check: dict, retrain_result: dict) -> N
             "Monitor regime-specific accuracy daily. "
             "Consider training separate regime models if divergence persists."
         ),
-        severity        = "warning" if win_rate and win_rate >= 40 else "critical",
+        severity        = "warning" if (win_rate is not None and win_rate >= 40) else "critical",
         regime          = regime,
         applied         = True,
     )

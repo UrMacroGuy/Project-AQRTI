@@ -1159,6 +1159,92 @@ if (typeof Api !== 'undefined' && !Api.marketRegime) {
 }
 
 
+
+// ── Boot sequence poller ──────────────────────────────────────────────────────
+(function bootPoller() {
+  const STEP_LABELS = {
+    market_data:       'Pulling market data (OHLCV)…',
+    features:          'Computing feature engineering…',
+    news:              'Fetching news & classifying…',
+    sentiment:         'Running sentiment & regime analysis…',
+    predictions:       'Generating ML predictions…',
+    paper_trading:     'Running paper trading cycle…',
+    agents:            'Dispatching research agents…',
+    strategy_research: 'Evolving strategy population…',
+    learning:          'Running learning & scoring loop…',
+  };
+  const STEP_ORDER = Object.keys(STEP_LABELS);
+  const ICONS = { pending: '⬡', running: '◈', done: '◆', error: '✗' };
+  const COLORS = { pending: '#374151', running: '#00d4aa', done: '#22c55e', error: '#ef4444' };
+
+  const overlay  = document.getElementById('boot-overlay');
+  const bar      = document.getElementById('boot-progress-bar');
+  const stepLbl  = document.getElementById('boot-step-label');
+  const elapsed  = document.getElementById('boot-elapsed');
+  const startTs  = Date.now();
+
+  if (!overlay) return;   // overlay already removed (unlikely on first load)
+
+  let pollInterval = null;
+
+  function updateOverlay(status) {
+    const steps  = status.steps || {};
+    const doneN  = Object.values(steps).filter(s => s.status === 'done' || s.status === 'error').length;
+    const totalN = STEP_ORDER.length;
+    const pct    = totalN > 0 ? Math.min(100, Math.round(doneN / totalN * 100)) : 0;
+
+    if (bar)     bar.style.width = pct + '%';
+    if (stepLbl) {
+      const cur = status.current_step;
+      stepLbl.textContent = cur ? (STEP_LABELS[cur] || cur) : (status.done ? 'All systems ready!' : 'Initialising…');
+      stepLbl.style.color = status.done ? '#22c55e' : '#00d4aa';
+    }
+    if (elapsed && status.started_at) {
+      const secs = Math.round((Date.now() / 1000) - status.started_at);
+      elapsed.textContent = `${secs}s elapsed`;
+    }
+
+    STEP_ORDER.forEach(key => {
+      const el = document.getElementById('boot-s-' + key);
+      if (!el) return;
+      const s = steps[key] || { status: 'pending', msg: '' };
+      const icon  = ICONS[s.status] || '⬡';
+      const color = COLORS[s.status] || '#374151';
+      el.style.color = color;
+      el.textContent = icon + ' ' + (STEP_LABELS[key] || key).replace('…', '') + (s.msg ? '  — ' + s.msg : '');
+    });
+  }
+
+  function dismiss() {
+    if (pollInterval) clearInterval(pollInterval);
+    overlay.style.transition = 'opacity 0.6s ease';
+    overlay.style.opacity    = '0';
+    setTimeout(() => { overlay.style.display = 'none'; }, 650);
+  }
+
+  async function poll() {
+    try {
+      const resp = await fetch('http://localhost:8000/api/v1/system/status');
+      if (!resp.ok) return;
+      const status = await resp.json();
+      updateOverlay(status);
+      if (status.done) {
+        // Show 100% for a moment then dismiss
+        if (bar) bar.style.width = '100%';
+        setTimeout(dismiss, 800);
+      }
+    } catch (_) {
+      // Backend not yet up — keep showing overlay
+    }
+  }
+
+  // Poll immediately, then every 2s
+  poll();
+  pollInterval = setInterval(poll, 2000);
+
+  // Safety fallback: if backend never responds with done=true after 15 min, dismiss anyway
+  setTimeout(dismiss, 15 * 60 * 1000);
+})();
 window.addEventListener('DOMContentLoaded', () => {
   // Read previous session BEFORE renderPage() overwrites it
   const prevSession = _session.load();
@@ -1291,94 +1377,6 @@ async function hydrateOpportunities() {
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, cutout: '60%' },
   });
-}
-
-
-// ── Model Center — live model registry hydration ──────────────
-async function hydrateModelCenter() {
-  const [models, stats] = await Promise.all([Api.models(), Api.modelStats()]);
-  if (!models && !stats) return;
-
-  const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
-
-  // Update KPI badges if present
-  if (stats && stats.available) {
-    if (stats.bestAUC != null) _set('model-ensemble-acc', `${(stats.bestAUC * 100).toFixed(1)}%`);
-
-    _set('model-active-count', stats.activeModels || '0');
-    _set('model-active-sub', stats.totalFolds ? `${stats.totalFolds} Walk-Forward Folds` : 'Ensemble Active');
-
-    if (stats.lastTrainedAt) {
-      const d = new Date(stats.lastTrainedAt);
-      const today = new Date();
-      const isToday = d.toDateString() === today.toDateString();
-      _set('model-last-retrain', isToday ? 'Today' : d.toLocaleDateString('en-IN'));
-      _set('model-last-retrain-sub', d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) + ' IST');
-    }
-
-    if (stats.bestIC != null) {
-      const icEl = el('model-best-ic');
-      if (icEl) icEl.textContent = stats.bestIC.toFixed(3);
-    }
-  }
-
-  // Derive best model name + accuracy from models list
-  if (models && models.length) {
-    const dirModels = models.filter(m => m.task === 'direction' && m.isActive);
-    if (dirModels.length) {
-      const best = dirModels.reduce((a, b) => (a.primaryMetric || 0) > (b.primaryMetric || 0) ? a : b);
-      _set('model-best-name', best.modelName || '—');
-      if (best.primaryMetric != null) _set('model-best-acc', `${(best.primaryMetric * 100).toFixed(1)}% Direction`);
-    }
-    const featureCount = models.reduce((max, m) => Math.max(max, m.featureCount || m.numFeatures || 0), 0);
-    if (featureCount > 0) _set('model-features-count', featureCount);
-  }
-
-  // Rebuild model registry table from live data
-  const tbody = el('model-registry-body');
-  if (tbody && models && models.length) {
-    tbody.innerHTML = models.map(m => {
-      const primary = m.primaryMetric != null ? (m.primaryMetric * 100).toFixed(1) : '—';
-      const statusColor = m.isActive ? 'positive' : 'neutral';
-      return `
-        <tr>
-          <td><strong style="font-family:var(--font-mono);font-size:0.72rem">${m.modelName}-${m.task || 'model'}</strong></td>
-          <td style="color:var(--text-muted)">${m.modelName}</td>
-          <td style="color:var(--text-secondary)">${m.labelCol}</td>
-          <td class="${parseFloat(primary) >= 65 ? 'positive' : parseFloat(primary) >= 55 ? 'neutral' : 'warning'}">${primary}%</td>
-          <td>v${m.version}</td>
-          <td class="${statusColor}">${m.isActive ? 'Active' : 'Inactive'}</td>
-          <td style="color:var(--text-muted)">${m.trainRows ? m.trainRows.toLocaleString('en-IN') : '—'}</td>
-          <td style="color:var(--text-muted)">${m.trainedAt ? m.trainedAt.slice(0,10) : '—'}</td>
-        </tr>`;
-    }).join('');
-
-    // Rebuild model accuracy bar chart from live data
-    const active = models.filter(m => m.isActive);
-    if (active.length) {
-      const labels = active.map(m => `${m.modelName}/${(m.task || 'unk').slice(0,3)}`);
-      const values = active.map(m => m.primaryMetric != null ? (m.primaryMetric * 100) : 0);
-      ChartRegistry.create('modelAccChart', {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [{
-            label: 'Primary Metric %',
-            data: values,
-            backgroundColor: values.map(v => v >= 65 ? 'rgba(34,197,94,0.7)' : v >= 55 ? 'rgba(255,140,0,0.7)' : 'rgba(245,158,11,0.6)'),
-            borderRadius: 4,
-          }],
-        },
-        options: {
-          indexAxis: 'y',
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: { x: { min: 50, max: 100, ticks: { callback: v => `${v}%` } } },
-        },
-      });
-    }
-  }
 }
 
 
@@ -1657,10 +1655,15 @@ async function hydratePaperPortfolio() {
         const ps  = pnlSign(p.unrealizedPct);
         const slPct = p.entryPrice > 0 ? ((p.stopLoss - p.entryPrice) / p.entryPrice * 100) : 0;
         const tpPct = p.entryPrice > 0 ? ((p.target   - p.entryPrice) / p.entryPrice * 100) : 0;
+        const heldDays = p.entryDate ? Math.floor((Date.now() - new Date(p.entryDate)) / 86400000) : 0;
+        const maxDays = 20;
+        const daysLeft = maxDays - heldDays;
+        const heldColor = daysLeft <= 3 ? 'var(--negative)' : daysLeft <= 7 ? '#f5a623' : 'var(--text-muted)';
         return `<tr>
           <td><strong>${p.symbol}</strong></td>
           <td style="color:var(--text-muted);font-size:0.7rem">${p.sector || '—'}</td>
           <td style="color:var(--text-muted)">${p.entryDate || '—'}</td>
+          <td style="color:${heldColor};font-size:0.75rem;white-space:nowrap" title="${daysLeft}d until auto-close">${heldDays}d <span style="opacity:0.6">/ ${maxDays}d</span></td>
           <td>₹${fmt(p.entryPrice)}</td>
           <td><strong>₹${fmt(p.currentPrice)}</strong></td>
           <td style="color:var(--text-muted)">${fmt(p.shares, 2)}</td>
@@ -1674,7 +1677,7 @@ async function hydratePaperPortfolio() {
         </tr>`;
       }).join('');
     } else {
-      pbody.innerHTML = `<tr><td colspan="12" style="color:var(--text-muted);text-align:center;padding:20px">No open positions — click ▶ Run Trade Cycle</td></tr>`;
+      pbody.innerHTML = `<tr><td colspan="13" style="color:var(--text-muted);text-align:center;padding:20px">No open positions — click ▶ Run Trade Cycle</td></tr>`;
     }
   }
 
@@ -1756,6 +1759,51 @@ async function hydratePaperPortfolioStrip() {
   }
 }
 
+// ── Intraday MTM trigger ─────────────────────────────────────
+async function triggerMTM() {
+  const statusEl = document.getElementById('pp-cycle-status');
+  try {
+    if (statusEl) { statusEl.textContent = '⟳ Marking to market…'; statusEl.style.color = 'var(--accent)'; }
+    const res  = await fetch(`${API_CONFIG.BASE}/admin/paper-mtm`, { method: 'POST' });
+    const data = await res.json();
+    const sl = (data.stopLossClosed || []).length;
+    const tp = (data.takeProfitClosed || []).length;
+    const ex = (data.expired || []).length;
+    const nav = Math.round(data.totalValue || 0).toLocaleString('en-IN');
+    let msg = `✓ NAV ₹${nav}`;
+    if (sl) msg += `  · SL hit: ${sl}`;
+    if (tp) msg += `  · TP hit: ${tp}`;
+    if (ex) msg += `  · Expired: ${ex}`;
+    if (data.lossesRefined) msg += `  · Strategies refined: ${data.lossesRefined}`;
+    if (statusEl) { statusEl.textContent = msg; statusEl.style.color = sl || ex ? '#f59e0b' : 'var(--positive)'; }
+    await hydratePaperPortfolio();
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '✗ MTM error: ' + e.message; statusEl.style.color = '#ff4444'; }
+  }
+}
+
+// ── Real-time paper portfolio polling ────────────────────────
+let _ppPollInterval = null;
+
+function startPaperPolling() {
+  if (_ppPollInterval) return;
+  // Poll every 60s — refresh positions with live prices and check SL/TP/expiry
+  _ppPollInterval = setInterval(async () => {
+    const page = document.querySelector('.page.active');
+    if (!page || page.id !== 'page-paper') return;
+    // Lightweight: just refresh the UI from current backend state (no full cycle)
+    await hydratePaperPortfolio();
+    // Also run intraday MTM silently to close any triggered SL/TP
+    try {
+      await fetch(`${API_CONFIG.BASE}/admin/paper-mtm`, { method: 'POST' });
+    } catch(_) {}
+  }, 60000);
+}
+
+function stopPaperPolling() {
+  if (_ppPollInterval) { clearInterval(_ppPollInterval); _ppPollInterval = null; }
+}
+
 
 // ═══════════════════════════════════════════════════════════════
 // STRATEGY RESEARCH CENTER — Phase 6
@@ -1764,19 +1812,21 @@ async function hydratePaperPortfolioStrip() {
 async function hydrateStrategyResearch() {
   const el = id => document.getElementById(id);
 
-  // Try backend, fall back to mock
-  let pop      = await Api.strategyPopulation();
-  let leaders  = await Api.strategyLeaderboard(15);
-  let evoTree  = await Api.evolutionTree(90);
-  let affinity = await Api.regimeAffinity();
-  let graveD   = await Api.graveyard({ limit: 20 });
-  let resurrect = await Api.resurrectionCandidates();
-  let research = await Api.latestResearch();
+  // Fetch all in parallel for speed
+  const [pop, leaders, evoTree, affinity, graveD, resurrect, research] = await Promise.all([
+    Api.strategyPopulation(),
+    Api.strategyLeaderboard(15),
+    Api.evolutionTree(90),
+    Api.regimeAffinity(),
+    Api.graveyard({ limit: 20 }),
+    Api.resurrectionCandidates(),
+    Api.latestResearch(),
+  ]);
 
 
 
   // ── KPIs ──────────────────────────────────────────────────────
-  const stats = pop.stats || {};
+  const stats = (pop && pop.stats) || {};
   const _kpi = (id, v) => { const e = el(id); if (e) e.textContent = v; };
   _kpi('src-kpi-total', stats.total || '—');
   _kpi('src-kpi-active-sub', `${stats.active_count || 0} Active`);
@@ -1804,7 +1854,10 @@ async function hydrateStrategyResearch() {
       const ddColor = maxDd == null ? '' : maxDd < -50 ? 'color:var(--negative);font-weight:700' : maxDd < -30 ? 'color:#f59e0b;font-weight:600' : 'color:var(--text-muted)';
       return `<tr${ddWarn ? ' title="⚠ High drawdown — use caution"' : ''}>
         <td style="color:var(--text-muted)">${i + 1}</td>
-        <td style="font-family:var(--font-mono);font-size:0.72rem">${r.name || r.strategy_id}${ddWarn ? ' <span style="color:#f59e0b;font-size:0.65rem">⚠</span>' : ''}</td>
+        <td style="font-family:var(--font-mono);font-size:0.72rem">
+          <div>${r.name || '—'}${ddWarn ? ' <span style="color:#f59e0b;font-size:0.65rem">⚠</span>' : ''}</div>
+          <div style="font-size:0.62rem;color:var(--accent);opacity:0.7;letter-spacing:0.02em">${r.strategy_id}</div>
+        </td>
         <td><span class="chip">${r.family || '—'}</span></td>
         <td class="${statusClass}" style="font-size:0.7rem">${(r.status || '').toUpperCase()}</td>
         <td style="font-weight:600">${fitness}</td>
@@ -1822,7 +1875,7 @@ async function hydrateStrategyResearch() {
   }
 
   // ── Family Population Chart ───────────────────────────────────
-  const familyData = pop.by_family || {};
+  const familyData = (pop && pop.by_family) || {};
   const famLabels  = Object.keys(familyData);
   // API returns count/active_count per family; graveyard count not split by family here
   const famAlive   = famLabels.map(f => familyData[f].count || familyData[f].alive || 0);
@@ -1847,7 +1900,7 @@ async function hydrateStrategyResearch() {
   });
 
   // ── Evolution Operations Chart ────────────────────────────────
-  const ops     = evoTree.by_operation || {};
+  const ops     = (evoTree && evoTree.by_operation) || {};
   const opKeys  = Object.keys(ops);
   const opDelta = opKeys.map(k => ops[k].avg_fitness_delta || 0);
   const opPos   = opKeys.map(k => ops[k].positive_pct || 0);
@@ -1887,7 +1940,7 @@ async function hydrateStrategyResearch() {
   // ── Regime Affinity Chart ─────────────────────────────────────
   const REGIMES = ['BULL', 'BEAR', 'SIDEWAYS', 'VOLATILE'];
   const REGIME_COLORS = ['rgba(52,211,153,0.7)', 'rgba(239,68,68,0.6)', 'rgba(251,191,36,0.6)', 'rgba(167,139,250,0.6)'];
-  const affFamilies = Object.keys(affinity);
+  const affFamilies = affinity ? Object.keys(affinity) : [];
   ChartRegistry.create('srcRegimeChart', {
     type: 'bar',
     data: {
@@ -2445,10 +2498,16 @@ async function hydrateResearchOps() {
       if (staleLabel) tag.style.color = 'var(--amber-dim, #cc6600)';
     }
 
+    const _filterStrategyNoise = items => (items || []).filter(i =>
+      !i.includes('Critical Decay') && !i.includes('strategy_research:') &&
+      !i.includes('cro: Daily Brief') && !i.includes('fitness=')
+    );
+
     const sec = (label, items) => {
-      if (!items || !items.length) return '';
+      const clean = _filterStrategyNoise(items);
+      if (!clean.length) return '';
       return `<div style="margin-bottom:10px"><div style="font-size:0.65rem;color:var(--text-muted);letter-spacing:0.08em;margin-bottom:4px">${label}</div>`
-        + items.map(i => `<div style="padding:3px 0;border-bottom:1px solid var(--border-faint)">${i}</div>`).join('') + '</div>';
+        + clean.map(i => `<div style="padding:3px 0;border-bottom:1px solid var(--border-faint);font-size:0.72rem">${i}</div>`).join('') + '</div>';
     };
 
     briefBody.innerHTML = `
@@ -2461,7 +2520,6 @@ async function hydrateResearchOps() {
       </div>
       ${sec('TOP OPPORTUNITIES', briefData.top_opportunities)}
       ${sec('MAJOR RISKS', briefData.major_risks)}
-      ${sec('ACTION ITEMS', briefData.action_items)}
     `;
   } else if (briefBody) {
     briefBody.innerHTML = '<div style="color:var(--text-muted)">No brief generated today. Click Generate.</div>';
@@ -2517,18 +2575,60 @@ async function hydrateResearchOps() {
     `).join('') || '<div style="color:var(--text-muted)">No messages</div>';
   }
 
-  // ── Action Items ──────────────────────────────────────────────
+  // ── Action Items — with actionable Retire buttons ────────────
   const actBody = el('roc-actions-body');
-  if (actBody && briefData?.action_items) {
-    const items = Array.isArray(briefData.action_items) ? briefData.action_items : [];
-    actBody.innerHTML = items.map(item => {
-      const isUrgent = item.includes('🔴');
-      return `<div style="padding:8px 12px;margin-bottom:6px;border-radius:4px;font-size:0.76rem;
-        background:${isUrgent ? 'rgba(239,68,68,0.08)' : 'rgba(251,191,36,0.06)'};
-        border:1px solid ${isUrgent ? 'rgba(239,68,68,0.2)' : 'rgba(251,191,36,0.15)'}">
-        ${item}
-      </div>`;
-    }).join('') || '<div style="color:var(--text-muted)">No action items</div>';
+  if (actBody) {
+    const rawItems = Array.isArray(briefData?.action_items) ? briefData.action_items : [];
+
+    // Pull decayed strategies directly from leaderboard (fitness < retire threshold)
+    let decayedStrategies = [];
+    try {
+      const lb = await Api.strategyLeaderboard(100);
+      decayedStrategies = (lb?.leaderboard || []).filter(s =>
+        (s.fitness_score || 0) < 8 && s.status !== 'retired' && s.status !== 'archived'
+      );
+    } catch (_) {}
+
+    // Show "Retire All Bad" button only when there are decayed strategies
+    const retireAllBtn = document.getElementById('btn-retire-all');
+    if (retireAllBtn) retireAllBtn.style.display = decayedStrategies.length ? 'inline-block' : 'none';
+
+    // Render decayed strategies as actionable cards first
+    const decayedHTML = decayedStrategies.slice(0, 10).map(s => `
+      <div data-strategy-card data-strategy-id="${s.strategy_id}"
+        style="display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:6px;border-radius:4px;
+        background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.25)">
+        <span style="color:#f87171;font-size:0.65rem;font-weight:700;white-space:nowrap">[URGENT]</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.73rem;font-weight:600;color:#fca5a5">${s.name || s.strategy_id}</div>
+          <div style="font-size:0.62rem;color:var(--accent);opacity:0.7">${s.strategy_id}</div>
+          <div style="font-size:0.65rem;color:var(--text-muted)">
+            Fitness: <span style="color:#f87171">${(s.fitness_score||0).toFixed(1)}</span>
+            &nbsp;|&nbsp; Trades: ${s.trade_count||0}
+            &nbsp;|&nbsp; Sharpe: ${(s.sharpe||0).toFixed(2)}
+            &nbsp;|&nbsp; ${s.status}
+          </div>
+        </div>
+        <button class="panel-action-btn" style="background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.45);color:#f87171;white-space:nowrap;flex-shrink:0"
+          onclick="retireSingleStrategy('${s.strategy_id}', this)">Retire</button>
+      </div>`).join('');
+
+    // Render non-strategy action items (filter out Critical Decay noise)
+    const otherHTML = rawItems
+      .filter(item => !item.includes('Critical Decay') && !item.includes('strategy_research:'))
+      .slice(0, 6)
+      .map(item => {
+        const isUrgent = item.includes('URGENT') || item.includes('🔴') || item.includes('[CRITICAL]');
+        const isWarn   = item.includes('🟡') || item.includes('REVIEW');
+        return `<div style="padding:7px 10px;margin-bottom:5px;border-radius:4px;font-size:0.73rem;
+          background:${isUrgent ? 'rgba(239,68,68,0.06)' : isWarn ? 'rgba(251,191,36,0.05)' : 'rgba(255,255,255,0.03)'};
+          border:1px solid ${isUrgent ? 'rgba(239,68,68,0.18)' : isWarn ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.07)'}">
+          ${item.replace('[URGENT]:', '').replace('[CRITICAL]:', '').replace('cro: ', '').trim()}
+        </div>`;
+      }).join('');
+
+    actBody.innerHTML = decayedHTML + otherHTML ||
+      '<div style="color:var(--positive);font-size:0.8rem;padding:8px">All clear — no action required</div>';
   }
 
   // ── Agent Performance Chart ───────────────────────────────────
@@ -2553,6 +2653,108 @@ async function hydrateResearchOps() {
       },
     });
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ACTION ITEMS — RETIRE STRATEGIES
+// ═══════════════════════════════════════════════════════════════
+
+async function retireSingleStrategy(strategyId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Retiring…'; }
+  try {
+    const res = await Api.retireStrategy(strategyId, 'low_fitness_manual');
+    if (res?.success || res?.status === 'ok' || res?.strategy_id) {
+      const card = btn ? btn.closest('[data-strategy-card]') : null;
+      if (card) card.remove();
+      const remaining = document.querySelectorAll('[data-strategy-card]');
+      const allBtn = document.getElementById('btn-retire-all');
+      if (allBtn && remaining.length === 0) allBtn.style.display = 'none';
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Retire'; }
+      alert('Retire failed: ' + (res?.error || 'unknown error'));
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Retire'; }
+  }
+}
+
+async function retireAllDecayedStrategies() {
+  const retireAllBtn = document.getElementById('btn-retire-all');
+  const cards = [...document.querySelectorAll('[data-strategy-card]')];
+  if (!cards.length) return;
+  if (!confirm(`Retire ${cards.length} low-fitness strategies? This cannot be undone.`)) return;
+  if (retireAllBtn) { retireAllBtn.disabled = true; retireAllBtn.textContent = `Retiring ${cards.length}…`; }
+  for (const card of cards) {
+    const sid = card.getAttribute('data-strategy-id');
+    const btn = card.querySelector('button');
+    if (sid) { await retireSingleStrategy(sid, btn); await new Promise(r => setTimeout(r, 120)); }
+  }
+  if (retireAllBtn) { retireAllBtn.disabled = false; retireAllBtn.textContent = 'Retire All Bad'; retireAllBtn.style.display = 'none'; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LIVE MARKET NEWS FEED — auto-refreshes every 5 min
+// ═══════════════════════════════════════════════════════════════
+
+let _newsRefreshTimer = null;
+
+async function loadLiveNewsFeed() {
+  const feed = document.getElementById('live-news-feed');
+  const lastUpdate = document.getElementById('news-feed-last-update');
+  if (!feed) return;
+  try {
+    const data = await Api.news({ limit: 30, sort: 'timestamp' });
+    const articles = Array.isArray(data) ? data : (data?.articles || data?.news || []);
+    if (!articles.length) {
+      feed.innerHTML = '<div style="color:var(--text-muted);padding:8px">No news available right now</div>';
+      return;
+    }
+    const SENT_COLOR = { positive: '#34d399', negative: '#f87171', neutral: '#94a3b8' };
+    const _age = ts => {
+      if (!ts) return '';
+      const diff = Date.now() - new Date(ts).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      return `${Math.floor(hrs/24)}d ago`;
+    };
+    feed.innerHTML = articles.map(a => {
+      const sent = (a.sentiment || 'neutral').toLowerCase();
+      const sentColor = SENT_COLOR[sent] || '#94a3b8';
+      const score = a.impactScore || a.importanceScore || 0;
+      const source = (a.source || '').replace(/_/g, ' ').toUpperCase();
+      const company = a.company ? `<span style="color:var(--accent);font-weight:600">${a.company}</span> · ` : '';
+      const sector = a.sector ? `<span style="color:var(--text-muted)">${a.sector}</span> · ` : '';
+      const summary = a.summary && a.summary !== a.headline
+        ? `<div style="font-size:0.68rem;color:var(--text-muted);line-height:1.4;margin-bottom:4px">${a.summary.slice(0,200)}${a.summary.length>200?'…':''}</div>` : '';
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border-faint);display:flex;gap:10px;align-items:flex-start">
+        <div style="flex-shrink:0;width:3px;border-radius:2px;background:${sentColor};align-self:stretch;min-height:36px"></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:0.76rem;font-weight:600;line-height:1.4;margin-bottom:3px">${a.headline || '—'}</div>
+          ${summary}
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:0.63rem">
+            ${company}${sector}<span style="color:${sentColor};text-transform:uppercase;font-weight:700">${sent}</span>
+            ${score ? `<span style="color:var(--text-muted)">Impact: ${score.toFixed(0)}</span>` : ''}
+            <span style="color:var(--text-muted)">${source}</span>
+            <span style="color:var(--text-muted);margin-left:auto">${_age(a.timestamp)}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    if (lastUpdate) {
+      const now = new Date();
+      lastUpdate.textContent = `Updated ${now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+    }
+  } catch (e) {
+    if (feed) feed.innerHTML = '<div style="color:var(--text-muted);padding:8px">Failed to load news</div>';
+  }
+}
+
+function startNewsFeedAutoRefresh() {
+  if (_newsRefreshTimer) clearInterval(_newsRefreshTimer);
+  loadLiveNewsFeed();
+  _newsRefreshTimer = setInterval(loadLiveNewsFeed, 5 * 60 * 1000);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2807,15 +3009,8 @@ async function hydrateDataIntelligence() {
     _mergeQualityWithHealth(health.sources);
   }
 
-  // ── FII/DII ──
-  const fiiData = await Api.fiiDii(30);
-  if (fiiData) {
-    const fii5d = fiiData.fii_5d_net;
-    _set('di-kpi-fii', fii5d != null ? (fii5d >= 0 ? '+' : '') + fii5d.toFixed(0) : '—');
-    _set('di-kpi-fii-sub', `Signal: ${fiiData.combined_signal || '—'}`);
-    _set('di-fii-signal', fiiData.combined_signal || '—');
-    _renderFiiChart(fiiData.fii || [], fiiData.dii || []);
-  }
+  // ── FII/DII — delegate to enhanced chart loader ──
+  loadFiiDiiCharts();
 
   // ── Market Breadth ──
   const breadth = await Api.marketBreadth();
@@ -2847,11 +3042,9 @@ async function hydrateDataIntelligence() {
     _set('di-opt-put-strike', opts.highest_put_oi_strike?.toLocaleString('en-IN') ?? '—');
   }
 
-  // ── Earnings Calendar ──
-  const cal = await Api.earningsCalendar(14);
-  const calList = cal?.calendar || [];
-  _set('di-kpi-earnings', calList.length);
-  _renderEarningsTable(calList);
+  // ── Earnings Calendar — delegate to enhanced loader ──
+  loadEarningsCalendar();
+  loadOptionsChain();
 
   // ── Corporate Filings ──
   const corp = await Api.corporateFilings({ days: 30, limit: 50 });
@@ -3049,10 +3242,11 @@ function renderPage(pageId) {
 
   if (pageId === 'news')        hydrateNews();
   if (pageId === 'sentiment')   hydrateSentiment();
-  if (pageId === 'market')      hydrateMarket();
+  if (pageId === 'market')      { hydrateMarket(); loadUniverseSummary().catch(()=>{}); }
   if (pageId === 'opportunity') hydrateOpportunities();
   if (pageId === 'model')       hydrateModelCenter();
-  if (pageId === 'paper')       hydratePaperPortfolio();
+  if (pageId === 'paper') { hydratePaperPortfolio(); startPaperPolling(); }
+  if (pageId !== 'paper') stopPaperPolling();
   if (pageId === 'risk')        hydrateRisk();
   // learning: renderLearning() is fully live. _originalRenderPage calls it on first
   // visit; we only need hydrateLearnCenter (which re-runs renderLearning) on
@@ -3060,7 +3254,7 @@ function renderPage(pageId) {
   if (pageId === 'learning' && _learningInitDone) hydrateLearnCenter();
   if (pageId === 'learning') _learningInitDone = true;
   if (pageId === 'strategy')    hydrateStrategyResearch();
-  if (pageId === 'agents')           hydrateResearchOps();
+  if (pageId === 'agents')           { hydrateResearchOps(); startNewsFeedAutoRefresh(); }
   if (pageId === 'vault')            hydrateVault();
   if (pageId === 'data-intelligence') hydrateDataIntelligence();
   if (pageId === 'overview') {
@@ -3071,6 +3265,8 @@ function renderPage(pageId) {
   }
   if (pageId === 'intelligence-lab') hydrateIntelligenceLab();
   if (pageId === 'live-prices')      hydrateLivePrices();
+  if (pageId === 'screener')         hydrateScreener();
+  if (pageId === 'analytics')        hydrateAnalytics();
 }
 
 // ── Nav Badges — live counts from backend ────────────────────
@@ -3188,6 +3384,7 @@ async function hydrateLivePrices() {
     if (page && page.classList.contains('active')) refreshLivePrices();
     else clearInterval(_livePricesTimer);
   }, 5000);
+  loadCandleChart();
 }
 
 async function refreshLivePrices() {
@@ -3430,6 +3627,7 @@ async function hydrateRisk() {
       alertsBody.innerHTML = '<div class="risk-alert info"><div class="risk-alert-title">All Clear</div><div class="risk-alert-sub">No active risk alerts. All metrics within normal ranges.</div></div>';
     }
   }
+  initStressTest();
 }
 
 // ── Learning Centre — live hydration ─────────────────────────
@@ -3543,6 +3741,7 @@ async function hydrateOverview() {
       }).join('');
     }
   }
+  loadWatchlist();
 }
 
 // ── Market — full live hydration ──────────────────────────────
@@ -3689,7 +3888,7 @@ async function hydrateIntelligenceLab() {
 async function loadRegimeDatasets() {
   const tbody = document.getElementById('il-regime-body');
   try {
-    const data = await API.get('/api/v1/regime-datasets');
+    const data = await apiFetch('/regime-datasets');
     document.getElementById('il-kpi-regimes').textContent = data.length;
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center">No regime datasets yet</td></tr>'; return; }
     tbody.innerHTML = data.map(d => `
@@ -3709,7 +3908,7 @@ async function loadRegimeDatasets() {
 async function loadMetaLearningInsights() {
   const tbody = document.getElementById('il-meta-body');
   try {
-    const data = await API.get('/api/v1/meta-learning?limit=20');
+    const data = await apiFetch('/meta-learning', { limit: 20 });
     const hi = data.filter(d => d.severity === 'high' || d.severity === 'critical').length;
     document.getElementById('il-kpi-insights').textContent = data.length;
     document.getElementById('il-kpi-insights-sub').textContent = `High Severity: ${hi}`;
@@ -3733,7 +3932,7 @@ async function loadMetaLearningInsights() {
 async function runMetaLearning() {
   document.getElementById('il-meta-body').innerHTML = '<tr><td colspan="6" style="color:var(--accent);text-align:center">Running meta-learning analysis…</td></tr>';
   try {
-    await API.post('/api/v1/meta-learning/run');
+    await apiPost('/meta-learning/run');
     _liveHydrated.delete('intelligence-lab');
     await loadMetaLearningInsights();
   } catch (e) {
@@ -3744,7 +3943,7 @@ async function runMetaLearning() {
 async function loadFeatureProposals() {
   const tbody = document.getElementById('il-proposals-body');
   try {
-    const data = await API.get('/api/v1/feature-proposals');
+    const data = await apiFetch('/feature-proposals');
     const pending = data.filter(d => d.status === 'proposed').length;
     document.getElementById('il-kpi-proposals').textContent = data.length;
     document.getElementById('il-kpi-proposals-sub').textContent = `Pending Approval: ${pending}`;
@@ -3770,7 +3969,7 @@ async function approveProposal(pid) {
   const btn = document.querySelector(`button[onclick="approveProposal('${pid}')"]`);
   if (btn) { btn.disabled = true; btn.textContent = '⟳'; }
   try {
-    const res = await API.post(`/api/v1/feature-proposals/${pid}/approve`);
+    const res = await apiPost(`/feature-proposals/${pid}/approve`);
     if (!res) throw new Error('No response — backend may be offline');
     _liveHydrated.delete('intelligence-lab');
     await loadFeatureProposals();
@@ -3783,7 +3982,7 @@ async function approveProposal(pid) {
 async function runFeatureDiscovery() {
   document.getElementById('il-proposals-body').innerHTML = '<tr><td colspan="5" style="color:var(--accent);text-align:center">Discovering features…</td></tr>';
   try {
-    await API.post('/api/v1/feature-proposals/discover');
+    await apiPost('/feature-proposals/discover');
     _liveHydrated.delete('intelligence-lab');
     await loadFeatureProposals();
   } catch (e) {
@@ -3794,7 +3993,7 @@ async function runFeatureDiscovery() {
 async function loadModelMemory() {
   const tbody = document.getElementById('il-model-memory-body');
   try {
-    const data = await API.get('/api/v1/model-memory');
+    const data = await apiFetch('/model-memory');
     document.getElementById('il-kpi-models').textContent = data.length;
     const recColor = { trust: 'var(--positive)', caution: '#f59e0b', retrain: 'var(--accent)', retire: 'var(--negative)' };
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);text-align:center">No model memory yet</td></tr>'; return; }
@@ -3816,7 +4015,7 @@ async function loadModelMemory() {
 async function loadStrategyMemory() {
   const tbody = document.getElementById('il-strategy-memory-body');
   try {
-    const data = await API.get('/api/v1/strategy-memory');
+    const data = await apiFetch('/strategy-memory');
     const decayed = data.filter(d => d.decay_detected).length;
     document.getElementById('il-kpi-strategies').textContent = data.length;
     document.getElementById('il-kpi-strategies-sub').textContent = `Decayed: ${decayed}`;
@@ -3843,7 +4042,7 @@ async function loadStrategyMemory() {
 async function loadResearchMemory() {
   const body = document.getElementById('il-research-memory-body');
   try {
-    const data = await API.get('/api/v1/research-memory/latest');
+    const data = await apiFetch('/research-memory/latest');
     document.getElementById('il-kpi-research').textContent = data.total_records != null ? data.total_records.toLocaleString() : '—';
     if (data.status === 'no_data') { body.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem">No research memory yet</div>'; return; }
     const themes = (data.themes && data.themes.slice ? data.themes : []).slice(0, 8);
@@ -3867,7 +4066,7 @@ async function loadResearchMemory() {
 async function loadFailurePatterns() {
   const tbody = document.getElementById('il-failure-patterns-body');
   try {
-    const data = await API.get('/api/v1/failure-patterns');
+    const data = await apiFetch('/failure-patterns');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);text-align:center">No patterns yet</td></tr>'; return; }
     tbody.innerHTML = data.slice(0, 15).map(d => `
       <tr>
@@ -3887,7 +4086,7 @@ async function loadFailurePatterns() {
 async function loadPredictionPatterns() {
   const tbody = document.getElementById('il-pred-patterns-body');
   try {
-    const data = await API.get('/api/v1/prediction-patterns');
+    const data = await apiFetch('/prediction-patterns');
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);text-align:center">No patterns yet</td></tr>'; return; }
     tbody.innerHTML = data.slice(0, 10).map(d => `
       <tr>
@@ -3915,7 +4114,7 @@ async function triggerReplay() {
     else if (scope === 'month') { body.year = new Date(dateVal).getFullYear(); body.month = new Date(dateVal).getMonth() + 1; }
     else if (scope === 'regime') body.regime_name = 'BULL';
     else if (scope === 'event') body.event_date = dateVal;
-    const res = await API.post('/api/v1/replay', body);
+    const res = await apiPost('/replay', body);
     result.style.color = 'var(--positive)';
     result.textContent = `✓ Replay complete: ${JSON.stringify(res).substring(0, 200)}`;
     await loadReplayHistory();
@@ -3928,7 +4127,7 @@ async function triggerReplay() {
 async function loadReplayHistory() {
   const el = document.getElementById('il-replay-history');
   try {
-    const data = await API.get('/api/v1/replay/history');
+    const data = await apiFetch('/replay/history');
     if (!data.length) { el.textContent = 'No replay history yet'; return; }
     el.innerHTML = data.slice(0, 5).map(d =>
       `<div style="padding:2px 0">${d.replay_type} — ${d.scope_label} — ${(d.created_at || '').substring(0, 16)}</div>`
@@ -4688,5 +4887,701 @@ async function forceModelRetrain() {
     await loadMetaLearningState();
   } catch (e) {
     if (content) content.innerHTML = `<div style="color:var(--negative);padding:8px">Error: ${e.message}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EQUITY SCREENER
+// ═══════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════
+// CANDLESTICK CHART + TECHNICAL OVERLAYS
+// ══════════════════════════════════════════════════════════════
+const _candleState = { overlays: { ema: true, bb: false, vol: true }, data: null };
+
+async function loadCandleChart() {
+  const sym  = document.getElementById('candle-symbol')?.value || 'RELIANCE';
+  const days = document.getElementById('candle-days')?.value  || 90;
+  const data = await Api.stockOhlcv(sym, days);
+  if (!data || !data.candles || !data.candles.length) return;
+  _candleState.data = data;
+  renderCandleChart(data);
+  const last = data.candles[data.candles.length - 1];
+  if (last) {
+    const _s = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    _s('ci-open',  `₹${(last.open  || 0).toFixed(1)}`);
+    _s('ci-high',  `₹${(last.high  || 0).toFixed(1)}`);
+    _s('ci-low',   `₹${(last.low   || 0).toFixed(1)}`);
+    _s('ci-close', `₹${(last.close || 0).toFixed(1)}`);
+    _s('ci-vol',   last.volume ? `${(last.volume / 1e5).toFixed(1)}L` : '—');
+    const lastRsi = (data.rsi || []).filter(v => v !== null).pop();
+    _s('ci-rsi', lastRsi ? lastRsi.toFixed(1) : '—');
+  }
+}
+
+function toggleCandleOverlay(name) {
+  _candleState.overlays[name] = !_candleState.overlays[name];
+  const btn = document.getElementById(`candle-overlay-${name}`);
+  if (btn) btn.style.borderColor = _candleState.overlays[name] ? '#ff8c00' : '#333';
+  if (_candleState.data) renderCandleChart(_candleState.data);
+}
+
+function renderCandleChart(data) {
+  const candles = data.candles || [];
+  const labels  = candles.map(c => c.date);
+
+  ['chart-candlestick', 'chart-rsi', 'chart-macd'].forEach(id => {
+    const existing = Chart.getChart(id);
+    if (existing) existing.destroy();
+  });
+
+  // ── Price chart ──
+  const priceDsets = [{
+    label: 'Close', data: candles.map(c => c.close),
+    type: 'line', borderColor: '#ff8c00', borderWidth: 1.5,
+    pointRadius: 0, fill: false, tension: 0, order: 1,
+  }];
+  if (_candleState.overlays.ema && data.ema20) {
+    priceDsets.push({ label: 'EMA20', data: data.ema20, type: 'line', borderColor: '#00aaff', borderWidth: 1, pointRadius: 0, fill: false, tension: 0, order: 2 });
+  }
+  if (_candleState.overlays.ema && data.ema50) {
+    priceDsets.push({ label: 'EMA50', data: data.ema50, type: 'line', borderColor: '#ffcc00', borderWidth: 1, pointRadius: 0, fill: false, tension: 0, order: 3 });
+  }
+  if (_candleState.overlays.bb && data.bb_upper) {
+    priceDsets.push({ label: 'BB Upper', data: data.bb_upper, type: 'line', borderColor: 'rgba(0,204,102,0.5)', borderWidth: 1, pointRadius: 0, fill: false, tension: 0, borderDash: [3, 3], order: 4 });
+    priceDsets.push({ label: 'BB Lower', data: data.bb_lower, type: 'line', borderColor: 'rgba(0,204,102,0.5)', borderWidth: 1, pointRadius: 0, fill: false, tension: 0, borderDash: [3, 3], order: 5 });
+    priceDsets.push({ label: 'BB Mid',   data: data.bb_mid,   type: 'line', borderColor: 'rgba(0,204,102,0.3)', borderWidth: 1, pointRadius: 0, fill: false, tension: 0, order: 6 });
+  }
+
+  const _chartOpts = (extra = {}) => ({
+    responsive: true, maintainAspectRatio: false, animation: false,
+    plugins: {
+      legend: { display: true, labels: { color: '#666', font: { size: 9 }, boxWidth: 12 } },
+      tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleColor: '#888', bodyColor: '#ccc', titleFont: { size: 9 }, bodyFont: { size: 9 } },
+    },
+    scales: {
+      x: { ticks: { color: '#444', font: { size: 8 }, maxTicksLimit: 8, maxRotation: 0 }, grid: { color: '#0d0d0d' } },
+      y: { ticks: { color: '#666', font: { size: 8 } }, grid: { color: '#111' }, position: 'right' },
+      ...extra,
+    },
+  });
+
+  const priceCanvas = document.getElementById('chart-candlestick');
+  if (priceCanvas) new Chart(priceCanvas, { type: 'line', data: { labels, datasets: priceDsets }, options: _chartOpts() });
+
+  // ── RSI sub-chart ──
+  const rsiCanvas = document.getElementById('chart-rsi');
+  if (rsiCanvas) new Chart(rsiCanvas, {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'RSI', data: data.rsi, borderColor: '#ff8c00', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
+      scales: {
+        x: { display: false },
+        y: { min: 0, max: 100, ticks: { color: '#444', font: { size: 8 }, stepSize: 30 }, grid: { color: '#111' }, position: 'right' },
+      },
+    },
+  });
+
+  // ── MACD sub-chart ──
+  const macdCanvas = document.getElementById('chart-macd');
+  if (macdCanvas) new Chart(macdCanvas, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'MACD Hist', data: data.macd_hist, backgroundColor: (data.macd_hist || []).map(v => (v || 0) >= 0 ? 'rgba(0,204,102,0.6)' : 'rgba(255,51,51,0.6)'), type: 'bar', order: 3 },
+        { label: 'MACD',   data: data.macd,        borderColor: '#00aaff', borderWidth: 1.5, type: 'line', pointRadius: 0, fill: false, tension: 0, order: 1 },
+        { label: 'Signal', data: data.macd_signal, borderColor: '#ff8c00', borderWidth: 1,   type: 'line', pointRadius: 0, fill: false, tension: 0, order: 2 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
+      scales: { x: { display: false }, y: { ticks: { color: '#444', font: { size: 8 } }, grid: { color: '#111' }, position: 'right' } },
+    },
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// FII/DII FLOW TRACKER — enhanced charts
+// ══════════════════════════════════════════════════════════════
+async function loadFiiDiiCharts() {
+  const days = document.getElementById('fiidii-days')?.value || 30;
+  const data = await Api.fiiDii(days);
+  // Backend returns { fii: [...], dii: [...], ... }
+  // Each entry in fii/dii array has net_investment, gross_buy, gross_sell, flow_date
+  let fiiArr = [], diiArr = [];
+  if (data?.fii && Array.isArray(data.fii)) {
+    fiiArr = data.fii;
+    diiArr = data.dii || [];
+  } else if (Array.isArray(data)) {
+    fiiArr = data;
+  } else if (data?.records) {
+    fiiArr = data.records;
+  }
+  if (!fiiArr.length) return;
+
+  // Merge fii+dii into parallel record arrays aligned by date
+  const _fld = (r, ...keys) => { for (const k of keys) if (r[k] != null) return r[k]; return 0; };
+  const fiiNets  = fiiArr.map(r => _fld(r, 'net_investment', 'fii_net', 'fii_net_value'));
+  const diiByDate = Object.fromEntries(diiArr.map(r => [r.flow_date || r.date, r]));
+  const diiNets  = fiiArr.map(r => { const d = diiByDate[r.flow_date || r.date]; return d ? _fld(d, 'net_investment', 'dii_net', 'dii_net_value') : 0; });
+  const fiiBuy   = fiiArr.map(r => _fld(r, 'gross_buy', 'fii_gross_buy'));
+  const fiiSell  = fiiArr.map(r => _fld(r, 'gross_sell', 'fii_gross_sell'));
+  const labels   = fiiArr.map(r => r.flow_date || r.date || r.trade_date || '');
+  // Use fiiArr as records for table rendering (merge dii inline below)
+  const records = fiiArr;
+
+  const fiiNet30 = fiiNets.reduce((s, v) => s + v, 0);
+  const diiNet30 = diiNets.reduce((s, v) => s + v, 0);
+  const last5fii = fiiNets.slice(-5).filter(v => v > 0).length;
+  const last5dii = diiNets.slice(-5).filter(v => v > 0).length;
+
+  const _set = (id, v, cls) => { const e = document.getElementById(id); if (e) { e.textContent = v; if (cls) e.className = 'kpi-value ' + cls; } };
+  const _fmt = v => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString('en-IN') + ' Cr';
+  _set('fii-net-30d', _fmt(fiiNet30), fiiNet30 >= 0 ? 'positive' : 'negative');
+  _set('dii-net-30d', _fmt(diiNet30), diiNet30 >= 0 ? 'positive' : 'negative');
+  _set('fii-trend', `${last5fii}/5 BUY`, last5fii >= 3 ? 'positive' : 'negative');
+  _set('dii-trend', `${last5dii}/5 BUY`, last5dii >= 3 ? 'positive' : 'negative');
+
+  ['chart-fiidii-bar', 'chart-fiidii-cumulative'].forEach(id => { const c = Chart.getChart(id); if (c) c.destroy(); });
+
+  const barCanvas = document.getElementById('chart-fiidii-bar');
+  if (barCanvas) new Chart(barCanvas, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: 'FII Net', data: fiiNets, backgroundColor: fiiNets.map(v => v >= 0 ? 'rgba(0,204,102,0.7)' : 'rgba(255,51,51,0.7)') },
+      { label: 'DII Net', data: diiNets, backgroundColor: diiNets.map(v => v >= 0 ? 'rgba(0,170,255,0.6)' : 'rgba(255,140,0,0.6)') },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { labels: { color: '#666', font: { size: 9 } } }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
+      scales: { x: { ticks: { color: '#444', font: { size: 8 }, maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#0d0d0d' } }, y: { ticks: { color: '#666', font: { size: 8 } }, grid: { color: '#111' }, position: 'right' } },
+    },
+  });
+
+  let cumFii = 0, cumDii = 0;
+  const cumFiiArr = fiiNets.map(v => { cumFii += v; return cumFii; });
+  const cumDiiArr = diiNets.map(v => { cumDii += v; return cumDii; });
+  const cumCanvas = document.getElementById('chart-fiidii-cumulative');
+  if (cumCanvas) new Chart(cumCanvas, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Cumulative FII', data: cumFiiArr, borderColor: '#00cc66', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0 },
+      { label: 'Cumulative DII', data: cumDiiArr, borderColor: '#00aaff', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0 },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { labels: { color: '#666', font: { size: 9 } } }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
+      scales: { x: { ticks: { color: '#444', font: { size: 8 }, maxTicksLimit: 8, maxRotation: 0 }, grid: { color: '#0d0d0d' } }, y: { ticks: { color: '#666', font: { size: 8 } }, grid: { color: '#111' }, position: 'right' } },
+    },
+  });
+
+  const tbody = document.getElementById('fiidii-table-body');
+  if (tbody) {
+    const count = records.length;
+    const startIdx = Math.max(0, count - 10);
+    const _fmtCr = v => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString('en-IN') + ' Cr';
+    const rows = [];
+    for (let i = count - 1; i >= startIdx; i--) {
+      const r = records[i];
+      const fn = fiiNets[i] || 0;
+      const dn = diiNets[i] || 0;
+      const gb = fiiBuy[i] || 0;
+      const gs = fiiSell[i] || 0;
+      const comb = fn + dn;
+      rows.push(`<tr>
+        <td>${labels[i] || '—'}</td>
+        <td class="positive">${Math.round(gb).toLocaleString('en-IN')} Cr</td>
+        <td class="negative">${Math.round(gs).toLocaleString('en-IN')} Cr</td>
+        <td class="${fn >= 0 ? 'positive' : 'negative'}">${_fmtCr(fn)}</td>
+        <td class="${dn >= 0 ? 'positive' : 'negative'}">${_fmtCr(dn)}</td>
+        <td class="${comb >= 0 ? 'positive' : 'negative'}">${_fmtCr(comb)}</td>
+      </tr>`);
+    }
+    tbody.innerHTML = rows.join('');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// EARNINGS CALENDAR
+// ══════════════════════════════════════════════════════════════
+async function loadEarningsCalendar() {
+  const aheadEl = document.getElementById('earnings-ahead');
+  const ahead = aheadEl ? aheadEl.value : 14;
+  const data = await Api.earningsCalendar(ahead);
+  // Backend returns { calendar: [...] }
+  const events  = data?.calendar || data?.events || (Array.isArray(data) ? data : []);
+  const summary = data?.summary || {};
+
+  const _set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  _set('earn-upcoming', events.length || '0');
+  const today   = new Date();
+  const weekEnd = new Date(today); weekEnd.setDate(today.getDate() + 7);
+  const thisWeek = events.filter(e => { const d = new Date(e.date || e.earnings_date || ''); return d >= today && d <= weekEnd; }).length;
+  _set('earn-this-week', thisWeek);
+  _set('earn-beat-rate', summary.beat_rate ? `${summary.beat_rate.toFixed(0)}%` : '—');
+
+  // Populate the earnings-cal-panel table (agent-added IDs)
+  const tbody1 = document.getElementById('earnings-cal-body');
+  // Also populate the existing di-earnings-tbody in data-intelligence page
+  const tbody2 = document.getElementById('di-earnings-tbody');
+
+  const rowHtml = events.map(e => {
+    const surprise = e.surprise_pct;
+    const ss = surprise != null ? `${surprise >= 0 ? '+' : ''}${surprise.toFixed(1)}%` : '—';
+    const sc = surprise != null ? (surprise >= 0 ? 'positive' : 'negative') : '';
+    const isPast = new Date(e.date || e.earnings_date || '') < today;
+    return `<tr style="${!isPast ? 'background:rgba(255,140,0,0.04)' : ''}">
+      <td>${e.date || e.earnings_date || '—'}</td>
+      <td><strong>${e.symbol || '—'}</strong></td>
+      <td style="color:#666">${e.sector || e.company || '—'}</td>
+      <td>${e.quarter || e.event_type || 'Q Results'}</td>
+      <td>${e.estimated_eps != null ? e.estimated_eps.toFixed(2) : '—'}</td>
+      <td>${e.actual_eps != null ? e.actual_eps.toFixed(2) : '—'}</td>
+      <td class="${sc}">${ss}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" style="text-align:center;color:#444;padding:16px">No upcoming earnings data</td></tr>';
+
+  if (tbody1) tbody1.innerHTML = rowHtml;
+  if (tbody2) tbody2.innerHTML = rowHtml;
+}
+
+// ══════════════════════════════════════════════════════════════
+// OPTIONS CHAIN VIEWER
+// ══════════════════════════════════════════════════════════════
+async function loadOptionsChain() {
+  const sym    = document.getElementById('chain-symbol')?.value  || 'NIFTY';
+  const expiry = document.getElementById('chain-expiry')?.value  || 0;
+  const tbody  = document.getElementById('options-chain-body');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#666;padding:16px">Fetching live options data…</td></tr>';
+
+  const data = await Api.optionsChain(sym, expiry);
+  const _set = (id, v, cls) => { const e = document.getElementById(id); if (e) { e.textContent = v; if (cls) e.className = 'kpi-value ' + cls; } };
+
+  _set('chain-spot',    data?.spot_price ? `₹${(data.spot_price).toLocaleString('en-IN')}` : '—');
+  const pcr = data?.pcr;
+  _set('chain-pcr',     pcr ? pcr.toFixed(2) : '—', pcr ? (pcr > 1 ? 'positive' : 'negative') : '');
+  _set('chain-maxpain', data?.max_pain ? `₹${data.max_pain.toLocaleString('en-IN')}` : '—');
+  _set('chain-atm',     data?.atm_strike ? `₹${data.atm_strike.toLocaleString('en-IN')}` : '—');
+  const expiryEl = document.getElementById('chain-expiry-label');
+  if (expiryEl) expiryEl.textContent = `Expiry: ${data?.expiry || 'N/A'}`;
+
+  const chain = data?.chain || [];
+  if (!tbody) return;
+  if (!chain.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#444;padding:16px">No options data — market may be closed or data unavailable</td></tr>';
+  } else {
+    const atmStrike = data.atm_strike;
+    const _fmtOI = v => !v ? '—' : v >= 1e5 ? `${(v / 1e5).toFixed(1)}L` : `${(v / 1000).toFixed(1)}K`;
+    const _fmtIV = v => v ? `${v.toFixed(1)}%` : '—';
+    tbody.innerHTML = chain.map(row => {
+      const isAtm = row.strike === atmStrike;
+      return `<tr style="${isAtm ? 'background:rgba(255,140,0,0.08)' : ''}">
+        <td style="color:#00cc66;text-align:right">${_fmtOI(row.call_oi)}</td>
+        <td style="color:#00cc66;text-align:right">${_fmtOI(row.call_vol)}</td>
+        <td style="text-align:right">${_fmtIV(row.call_iv)}</td>
+        <td style="color:#00cc66;text-align:right;font-weight:600">${row.call_ltp ? '₹' + row.call_ltp.toFixed(1) : '—'}</td>
+        <td style="text-align:center;font-weight:600;background:#111;color:${isAtm ? '#ff8c00' : '#e0e0e0'}">${row.strike.toLocaleString('en-IN')}</td>
+        <td style="color:#ff3333;text-align:left;font-weight:600">${row.put_ltp ? '₹' + row.put_ltp.toFixed(1) : '—'}</td>
+        <td style="text-align:left">${_fmtIV(row.put_iv)}</td>
+        <td style="color:#ff3333;text-align:left">${_fmtOI(row.put_vol)}</td>
+        <td style="color:#ff3333;text-align:left">${_fmtOI(row.put_oi)}</td>
+      </tr>`;
+    }).join('');
+
+    const oiCanvas = document.getElementById('chart-oi-distribution');
+    if (oiCanvas) {
+      const existing = Chart.getChart('chart-oi-distribution');
+      if (existing) existing.destroy();
+      const strikes  = chain.map(r => r.strike.toLocaleString('en-IN'));
+      const callOIs  = chain.map(r => (r.call_oi || 0) / 1000);
+      const putOIs   = chain.map(r => (r.put_oi  || 0) / 1000);
+      new Chart(oiCanvas, {
+        type: 'bar',
+        data: { labels: strikes, datasets: [
+          { label: 'Call OI (K)', data: callOIs,              backgroundColor: 'rgba(0,204,102,0.6)' },
+          { label: 'Put OI (K)',  data: putOIs.map(v => -v),  backgroundColor: 'rgba(255,51,51,0.6)' },
+        ]},
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { labels: { color: '#666', font: { size: 9 } } }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
+          scales: {
+            x: { ticks: { color: '#444', font: { size: 7 }, maxRotation: 45 }, grid: { color: '#0d0d0d' } },
+            y: { ticks: { color: '#666', font: { size: 8 } }, grid: { color: '#111' }, position: 'right' },
+          },
+        },
+      });
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// MARKET ANALYTICS — Sector Breadth + Correlation Matrix
+// ══════════════════════════════════════════════════════════════
+async function hydrateAnalytics() {
+  loadSectorBreadth();
+  loadCorrelationMatrix();
+}
+
+async function loadSectorBreadth() {
+  const data    = await Api.sectorBreadth();
+  const sectors = data?.sectors || [];
+
+  const labels   = sectors.map(s => s.name.replace(' & ', '/').substring(0, 12));
+  const above20  = sectors.map(s => s.above_20ma_pct  || 0);
+  const above50  = sectors.map(s => s.above_50ma_pct  || 0);
+  const above200 = sectors.map(s => s.above_200ma_pct || 0);
+
+  const existing = Chart.getChart('chart-sector-breadth');
+  if (existing) existing.destroy();
+
+  const canvas = document.getElementById('chart-sector-breadth');
+  if (canvas) new Chart(canvas, {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: 'Above 20MA',  data: above20,  backgroundColor: 'rgba(0,204,102,0.7)' },
+      { label: 'Above 50MA',  data: above50,  backgroundColor: 'rgba(0,170,255,0.6)' },
+      { label: 'Above 200MA', data: above200, backgroundColor: 'rgba(255,140,0,0.5)' },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { labels: { color: '#666', font: { size: 9 } } }, tooltip: { mode: 'index', intersect: false, backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleFont: { size: 9 }, bodyFont: { size: 9 } } },
+      scales: {
+        x: { ticks: { color: '#555', font: { size: 8 }, maxRotation: 30 }, grid: { color: '#0d0d0d' } },
+        y: { min: 0, max: 100, ticks: { color: '#666', font: { size: 8 }, callback: v => v + '%' }, grid: { color: '#111' }, position: 'right' },
+      },
+    },
+  });
+
+  const tbody = document.getElementById('breadth-table-body');
+  if (tbody) {
+    tbody.innerHTML = sectors.map(s => {
+      const trend   = s.above_20ma_pct >= 60 ? 'BULLISH' : s.above_20ma_pct <= 40 ? 'BEARISH' : 'MIXED';
+      const trendCls = trend === 'BULLISH' ? 'positive' : trend === 'BEARISH' ? 'negative' : 'neutral';
+      return `<tr>
+        <td>${s.name}</td>
+        <td>${s.stocks_total}</td>
+        <td class="${s.above_20ma_pct  >= 50 ? 'positive' : 'negative'}">${(s.above_20ma_pct  || 0).toFixed(0)}%</td>
+        <td class="${s.above_50ma_pct  >= 50 ? 'positive' : 'negative'}">${(s.above_50ma_pct  || 0).toFixed(0)}%</td>
+        <td class="${s.above_200ma_pct >= 50 ? 'positive' : 'negative'}">${(s.above_200ma_pct || 0).toFixed(0)}%</td>
+        <td class="${trendCls}">${trend}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" style="text-align:center;color:#444;padding:16px">Insufficient price data</td></tr>';
+  }
+}
+
+async function loadCorrelationMatrix() {
+  const days      = document.getElementById('corr-days')?.value || 60;
+  const container = document.getElementById('corr-matrix-container');
+  if (!container) return;
+  container.innerHTML = '<div style="text-align:center;color:#666;padding:16px">Computing correlations…</div>';
+
+  const data = await Api.correlationMatrix(days);
+  if (!data || !data.symbols || !data.symbols.length) {
+    container.innerHTML = '<div style="text-align:center;color:#444;padding:20px">Insufficient price data for correlation</div>';
+    return;
+  }
+
+  const { symbols, matrix } = data;
+  const n        = symbols.length;
+  const cellSize = 28;
+  let html = `<table style="border-collapse:collapse;font-size:0.6rem;font-family:inherit">`;
+  html += '<tr><td style="width:56px"></td>';
+  for (const sym of symbols) {
+    html += `<td style="width:${cellSize}px;height:56px;vertical-align:bottom;padding-bottom:2px;overflow:hidden">
+      <div style="transform:rotate(-45deg);transform-origin:0 100%;white-space:nowrap;color:#666;font-size:0.55rem;width:${cellSize}px">${sym}</div>
+    </td>`;
+  }
+  html += '</tr>';
+  for (let i = 0; i < n; i++) {
+    html += `<tr><td style="padding:1px 4px;color:#888;white-space:nowrap;text-align:right;font-size:0.58rem">${symbols[i]}</td>`;
+    for (let j = 0; j < n; j++) {
+      const val = matrix[i][j];
+      if (val === null) { html += `<td style="width:${cellSize}px;height:${cellSize}px;background:#111"></td>`; continue; }
+      const r     = val < 0 ? Math.round(255 * Math.abs(val)) : 0;
+      const g     = val > 0 ? Math.round(180 * val) : 0;
+      const alpha = Math.min(0.9, Math.abs(val) * 0.8 + 0.1);
+      const bg    = i === j ? '#1a1a1a' : `rgba(${r},${g},0,${alpha})`;
+      const tc    = Math.abs(val) > 0.55 ? '#fff' : '#888';
+      const disp  = i === j ? '1.0' : val.toFixed(2);
+      html += `<td title="${symbols[i]} vs ${symbols[j]}: ${disp}" style="width:${cellSize}px;height:${cellSize}px;background:${bg};text-align:center;vertical-align:middle;color:${tc};font-size:0.52rem;cursor:default">${disp}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</table>';
+  container.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════════
+// WATCHLIST
+// ══════════════════════════════════════════════════════════════
+async function loadWatchlist() {
+  const [wlData, liveData] = await Promise.all([
+    Api.watchlist().catch(() => null),
+    Api.liveStockPrices().catch(() => null),
+  ]);
+
+  const symbols = wlData?.symbols || [];
+  const liveMap = {};
+  (liveData || []).forEach(s => { liveMap[s.key] = s; });
+
+  const tbody = document.getElementById('watchlist-body');
+  if (!tbody) return;
+  if (!symbols.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#444;padding:12px">No symbols in watchlist</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = symbols.map(sym => {
+    const live   = liveMap[sym] || liveMap[sym.toLowerCase()] || null;
+    const price  = live?.price;
+    const chgPct = live?.changePct;
+    const cls    = chgPct != null ? (chgPct >= 0 ? 'positive' : 'negative') : '';
+    return `<tr>
+      <td><strong>${sym}</strong></td>
+      <td>${price != null ? '₹' + price.toFixed(1) : '—'}</td>
+      <td class="${cls}">${chgPct != null ? (chgPct >= 0 ? '+' : '') + chgPct.toFixed(2) + '%' : '—'}</td>
+      <td><span class="badge neutral">—</span></td>
+      <td><button class="panel-action-btn" onclick="removeFromWatchlist('${sym}')" style="font-size:0.58rem;padding:2px 6px;color:#ff3333;border-color:#ff3333">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function addToWatchlist() {
+  const input = document.getElementById('watchlist-add-input');
+  const sym   = input?.value?.toUpperCase().trim();
+  if (!sym) return;
+  await Api.watchlistAdd(sym);
+  if (input) input.value = '';
+  loadWatchlist();
+}
+
+async function removeFromWatchlist(sym) {
+  await Api.watchlistRemove(sym);
+  loadWatchlist();
+}
+
+// ══════════════════════════════════════════════════════════════
+// SCENARIO STRESS TEST
+// ══════════════════════════════════════════════════════════════
+async function initStressTest() {
+  const data      = await Api.stressTestPresets().catch(() => null);
+  const container = document.getElementById('st-presets');
+  if (container && data?.presets) {
+    container.innerHTML = data.presets.map(p =>
+      `<button class="panel-action-btn" onclick="applyStressPreset(${p.nifty_shock_pct},'${p.sector_shock || ''}',${p.sector_shock_pct || 0})" style="font-size:0.6rem;padding:3px 8px">${p.name}</button>`
+    ).join('');
+  }
+}
+
+function applyStressPreset(niftyShock, sector, sectorShock) {
+  const _sv = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+  _sv('st-nifty-shock',  niftyShock);
+  _sv('st-sector',       sector);
+  _sv('st-sector-shock', sectorShock || -15);
+  runStressTest();
+}
+
+async function runStressTest() {
+  const niftyShock  = parseFloat(document.getElementById('st-nifty-shock')?.value  || '-10');
+  const sector      = document.getElementById('st-sector')?.value || null;
+  const sectorShock = parseFloat(document.getElementById('st-sector-shock')?.value || '-15');
+  const data = await Api.stressTestRun(niftyShock, sector || null, sectorShock).catch(() => null);
+  if (!data || data.error) return;
+
+  const resultsDiv = document.getElementById('st-results');
+  if (resultsDiv) resultsDiv.style.display = 'block';
+
+  const _fmt = v => (v >= 0 ? '+' : '') + Math.round(v).toLocaleString('en-IN');
+  const _set = (id, v, cls) => { const e = document.getElementById(id); if (e) { e.textContent = v; if (cls) e.className = 'kpi-value ' + cls; } };
+  _set('st-pnl',     `₹${_fmt(data.total_pnl_impact)}`,   data.total_pnl_impact >= 0 ? 'positive' : 'negative');
+  _set('st-pnl-pct', `${(data.total_pnl_pct >= 0 ? '+' : '')}${data.total_pnl_pct.toFixed(2)}%`, data.total_pnl_pct >= 0 ? 'positive' : 'negative');
+  _set('st-new-nav', `₹${(data.new_portfolio_value / 1000).toFixed(1)}K`);
+
+  const tbody = document.getElementById('st-positions-body');
+  if (tbody && data.positions) {
+    tbody.innerHTML = data.positions.map(p =>
+      `<tr>
+        <td><strong>${p.symbol}</strong></td>
+        <td style="color:#666">${p.sector}</td>
+        <td>${p.beta.toFixed(2)}</td>
+        <td class="${p.stock_shock_pct >= 0 ? 'positive' : 'negative'}">${p.stock_shock_pct >= 0 ? '+' : ''}${p.stock_shock_pct.toFixed(1)}%</td>
+        <td>₹${(p.current_value / 1000).toFixed(1)}K</td>
+        <td class="${p.pnl_impact >= 0 ? 'positive' : 'negative'}">₹${_fmt(p.pnl_impact)}</td>
+      </tr>`
+    ).join('');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// EQUITY SCREENER
+// ══════════════════════════════════════════════════════════════
+async function hydrateScreener() {
+  await loadScreenerPresets();
+  await runScreener();
+}
+
+async function loadScreenerPresets() {
+  const data = await Api.screenerPresets();
+  const container = document.getElementById('scr-presets');
+  if (!container || !data) return;
+  container.innerHTML = (data.presets || []).map(p =>
+    `<button class="panel-action-btn" onclick="applyScreenerPreset(${JSON.stringify(JSON.stringify(p.filters))})" style="font-size:0.6rem;padding:3px 7px">${p.name}</button>`
+  ).join('');
+}
+
+function applyScreenerPreset(filtersJson) {
+  const f = JSON.parse(filtersJson);
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v !== undefined) el.value = v; };
+  set('scr-rsi-min', f.min_rsi || ''); set('scr-rsi-max', f.max_rsi || '');
+  set('scr-chg-min', f.min_change_pct || ''); set('scr-chg-max', f.max_change_pct || '');
+  set('scr-vol-min', f.min_volume_ratio || '');
+  set('scr-signal', f.signal || 'all');
+  set('scr-ema20', f.above_ema20 !== undefined ? String(f.above_ema20) : '');
+  set('scr-ema50', f.above_ema50 !== undefined ? String(f.above_ema50) : '');
+  runScreener();
+}
+
+function clearScreener() {
+  ['scr-rsi-min','scr-rsi-max','scr-chg-min','scr-chg-max','scr-vol-min'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  const sig = document.getElementById('scr-signal'); if(sig) sig.value='all';
+  const e20 = document.getElementById('scr-ema20'); if(e20) e20.value='';
+  const e50 = document.getElementById('scr-ema50'); if(e50) e50.value='';
+  runScreener();
+}
+
+async function runScreener() {
+  const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const params = {};
+  if (g('scr-rsi-min')) params.min_rsi = g('scr-rsi-min');
+  if (g('scr-rsi-max')) params.max_rsi = g('scr-rsi-max');
+  if (g('scr-chg-min')) params.min_change_pct = g('scr-chg-min');
+  if (g('scr-chg-max')) params.max_change_pct = g('scr-chg-max');
+  if (g('scr-vol-min')) params.min_volume_ratio = g('scr-vol-min');
+  const sig = g('scr-signal'); if (sig && sig !== 'all') params.signal = sig;
+  const e20 = g('scr-ema20'); if (e20) params.above_ema20 = e20;
+  const e50 = g('scr-ema50'); if (e50) params.above_ema50 = e50;
+
+  const tbody = document.getElementById('scr-results-body');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#666;padding:16px">Loading…</td></tr>';
+
+  const data = await Api.screener(params);
+  const stocks = data?.stocks || data || [];
+  const matchEl = document.getElementById('scr-match');
+  const bullEl  = document.getElementById('scr-bull');
+  const bearEl  = document.getElementById('scr-bear');
+  const cntEl   = document.getElementById('scr-result-count');
+
+  if (matchEl) matchEl.textContent = stocks.length;
+  if (bullEl)  bullEl.textContent  = stocks.filter(s => s.signal === 'bullish').length;
+  if (bearEl)  bearEl.textContent  = stocks.filter(s => s.signal === 'bearish').length;
+  if (cntEl)   cntEl.textContent   = `${stocks.length} stocks`;
+
+  if (!tbody) return;
+  if (!stocks.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#444;padding:20px">No stocks match filters</td></tr>'; return; }
+
+  tbody.innerHTML = stocks.map(s => {
+    const chgCls = (s.change_pct || 0) >= 0 ? 'positive' : 'negative';
+    const sigCls = s.signal === 'bullish' ? 'positive' : s.signal === 'bearish' ? 'negative' : 'neutral';
+    const rsiColor = s.rsi > 70 ? '#ff3333' : s.rsi < 30 ? '#00cc66' : '#e0e0e0';
+    return `<tr>
+      <td><strong>${s.symbol}</strong><br><span style="color:#666;font-size:0.6rem">${s.sector || ''}</span></td>
+      <td>₹${(s.price||0).toFixed(1)}</td>
+      <td class="${chgCls}">${(s.change_pct||0)>=0?'+':''}${(s.change_pct||0).toFixed(2)}%</td>
+      <td style="color:${rsiColor}">${(s.rsi||0).toFixed(1)}</td>
+      <td>${(s.volume_ratio||0).toFixed(2)}\xD7</td>
+      <td class="${(s.pct_from_52h||0)>-5?'positive':'negative'}">${(s.pct_from_52h||0).toFixed(1)}%</td>
+      <td class="${sigCls}">${(s.signal||'').toUpperCase()}</td>
+      <td><div style="display:flex;align-items:center;gap:4px"><div style="width:${Math.round(s.score||0)*0.5}px;height:6px;background:#ff8c00;border-radius:2px"></div>${(s.score||0).toFixed(0)}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// GLOBAL UNIVERSE
+// ═══════════════════════════════════════════════════════════════
+
+async function loadUniverseSummary() {
+  try {
+    const summary = await Api.universeSummary();
+    const s = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    s('uni-total',    (summary.universe_size || 0).toLocaleString());
+    s('uni-indb',     (summary.stocks_in_db  || 0).toLocaleString());
+    s('uni-withdata', (summary.symbols_with_data || 0).toLocaleString());
+    s('uni-rows',     (summary.total_price_rows  || 0).toLocaleString());
+
+    const tag = document.getElementById('universe-size-tag');
+    if (tag) tag.textContent = `${summary.universe_size || 0} STOCKS`;
+
+    const regionBody = document.getElementById('uni-region-body');
+    if (regionBody && summary.by_region) {
+      regionBody.innerHTML = Object.entries(summary.by_region)
+        .map(([r, n]) => `<tr><td>${r}</td><td class="accent">${n}</td></tr>`)
+        .join('');
+    }
+    const sectorBody = document.getElementById('uni-sector-body');
+    if (sectorBody && summary.by_sector) {
+      sectorBody.innerHTML = Object.entries(summary.by_sector)
+        .map(([s, n]) => `<tr><td>${s}</td><td class="accent">${n}</td></tr>`)
+        .join('');
+    }
+
+    // Also check if a download is running
+    const status = await Api.universeDownloadStatus().catch(() => null);
+    const alert = document.getElementById('universe-download-alert');
+    if (alert) {
+      if (status && status.running) {
+        alert.style.display = 'block';
+        alert.textContent = `Downloading global universe… started ${status.started_at || ''}`;
+        setTimeout(loadUniverseSummary, 10000);
+      } else if (status && status.last_result) {
+        const r = status.last_result;
+        alert.style.display = 'block';
+        alert.style.background = 'rgba(34,197,94,0.08)';
+        alert.style.borderColor = 'rgba(34,197,94,0.3)';
+        alert.style.color = '#22c55e';
+        alert.textContent = `Last download: ${r.downloaded} downloaded, ${r.skipped} skipped, ${r.errors} errors, ${(r.total_rows||0).toLocaleString()} rows total`;
+      } else {
+        alert.style.display = 'none';
+      }
+    }
+  } catch (e) {
+    console.warn('Universe summary failed:', e);
+  }
+}
+
+async function seedAndDownloadUniverse(region = 'all') {
+  const label = region === 'all' ? 'all regions' : `region: ${region}`;
+  const confirmed = confirm(`Download 3yr price data for ${label}?\n\nThis will run in the background — it may take 10-30 minutes for all stocks.`);
+  if (!confirmed) return;
+
+  const alert = document.getElementById('universe-download-alert');
+  if (alert) {
+    alert.style.display = 'block';
+    alert.style.background = 'rgba(251,191,36,0.1)';
+    alert.style.borderColor = 'rgba(251,191,36,0.3)';
+    alert.style.color = '#fbbf24';
+    alert.textContent = 'Starting download…';
+  }
+
+  try {
+    const result = await Api.downloadUniverse(3, region, 4);
+    if (alert) {
+      if (result.status === 'already_running') {
+        alert.textContent = 'Download already running — check back in a few minutes.';
+      } else {
+        alert.textContent = `Download started: ${result.tickers} tickers from ${result.start_date}. Refreshing status every 10s…`;
+        setTimeout(loadUniverseSummary, 10000);
+      }
+    }
+  } catch (e) {
+    if (alert) {
+      alert.style.color = '#ef4444';
+      alert.textContent = `Download failed: ${e.message || e}`;
+    }
   }
 }

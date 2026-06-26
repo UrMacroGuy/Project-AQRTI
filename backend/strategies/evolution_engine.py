@@ -41,7 +41,7 @@ TOURNAMENT_SIZE    = 5      # tournament selection pool size (larger = more sele
 MUTATION_RATE      = 0.65   # 65% of offspring are mutations
 CROSSOVER_RATE     = 0.35   # 35% are crossovers
 MIN_PARENT_FITNESS = 15.0   # lowered to match realistic fitness range
-BACKTEST_DAYS      = 365    # 1 year backtest window for offspring
+BACKTEST_DAYS      = 1095   # 3 year backtest window → ~756 trading days for 500+ trades
 
 
 def _tournament_select(

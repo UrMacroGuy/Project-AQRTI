@@ -27,10 +27,10 @@ from aqrti.utils.logger import get_logger
 
 log = get_logger("strategy_lifecycle")
 
-PROMOTE_THRESHOLD  = 20.0    # fitness score required for promotion
+PROMOTE_THRESHOLD  = 35.0    # fitness score required for promotion (0–100 scale)
 RETIRE_THRESHOLD   = 8.0     # fitness below this → retirement candidate
 DRAWDOWN_LIMIT     = -9999.0 # disabled — cumsum MDD metric is unreliable (divide-by-near-zero artifact)
-MIN_TRADES         = 8       # must have at least 8 backtest trades (prevents inflated Sharpe from tiny samples)
+MIN_TRADES         = 10      # minimum backtest trades before promotion
 
 
 def promote_strategy(

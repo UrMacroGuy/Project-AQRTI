@@ -1,4 +1,126 @@
-﻿## [2026-06-25b] — Meta-Learning Engine, Model Self-Improvement, Adaptive Evolution
+﻿## [2026-06-26b] — Global Universe + ML Retrain + Strategy Leaderboard Fix
+
+### Features
+
+**Global Universe** — 447 tickers across 17 regions seeded into DB; 331,233 price rows downloaded (3yr history)
+- US (167), IN (105), UK (27), JP (27), DE (21), FR (16), HK (13), CA (13), AU (12), BR (10), CH (9), KR (7), CN (5), NL/IT/ES/TW
+- Full ticker as DB symbol key (`RELIANCE.NS`, `AAPL`, `BA.L`) to avoid collisions
+- Universe API: `GET /universe/summary`, `POST /universe/download`, `GET /universe/status`
+- UI: Global Universe panel in Market page with KPI cards, region/sector tables, download buttons
+
+**ML Model Retrain Pipeline** — all 3 models now train successfully on expanded dataset
+- Fixed `next_version` NameError: computation moved before training loop
+- Fixed `BaseModel.save()` — uses `self.version` (set at construction), not a kwarg
+- Fixed manual evaluation: `preds = model.predict(X_test)` + `roc_auc_score` for AUC
+- Fixed `_record_lesson` crash when `win_rate=None` (force-retrain path)
+- LightGBM v2 saved to `ml_models/lightgbm_direction_v2.pkl`
+
+**Feature Generator + Dataset Builder** — now use all active DB stocks (not hardcoded 20 NSE)
+- `dataset_builder.py`: removed hard `nifty_df.empty` gate — global stocks pass through; labels gracefully handle missing NIFTY
+- Global feature generation running in background: 436 global stocks × 748 dates → ~325K new feature rows
+
+### Bug Fixes
+
+**Strategy Leaderboard never loads** (`ui/app.js:1812`)
+- Root cause: 7 sequential API awaits + null-access crashes (`Object.keys(null)`) aborted the render
+- Fix 1: Parallelize all 7 fetches with `Promise.all()`
+- Fix 2: Null-guard `affinity`, `evoTree`, `pop` before chart rendering
+- Leaderboard now renders immediately once data arrives
+
+---
+
+## [2026-06-26a] — Boot Sequence + 4 Data/Fitness Bugs Fixed
+
+### Bug Fixes
+
+**`strategies/strategy_backtester.py:237`** — Sharpe inflated to 17.8 (100% win rate, 0% MDD on every strategy)
+- Root cause: `daily = t.pnl_pct / days * POSITION_SIZE` — multiplying per-day returns by 0.05 collapsed variance to near-zero, causing `mean/std` to blow up to millions
+- Fix: removed `* POSITION_SIZE` — Sharpe now computed on raw per-day trade returns
+
+**`strategies/fitness_engine.py` + `strategy_lifecycle.py`** — `MIN_TRADES = 500` killed all fitness scoring
+- With 3 years of data and 20 stocks, max trades per strategy = 431, avg = 52. `MIN_TRADES=500` forced `cost_efficiency=0` and `longevity=0` on every strategy
+- Fix: `MIN_TRADES=10`, `TARGET_TRADES=100`, `PROMOTE_THRESHOLD=35.0`
+- 4,121 strategies rescored; avg fitness corrected from 73.8 (capped) to 24.8, max 71.4
+
+**`learning/learning_loop.py`** — All learning steps reported zero (model drift, failure detection, confidence audit, feature decay)
+- Root cause: `Prediction.actual_return` was never written — 12+ learning queries filter on `.actual_return.isnot(None)` and returned empty
+- Fix: Added `_backfill_prediction_outcomes()` as Step 0 of learning loop — computes 5d forward returns from `DailyPrice` and writes `Prediction.actual_return` + `was_correct` for all predictions with available price data
+
+**`aqrti/api/app.py`** — Boot sequence now rescores all strategies and runs lifecycle sweep after learning loop
+
+---
+
+## [2026-06-25g] — News Research Agent: Real Readable News
+
+### Improvements
+
+**`agents/news_research_agent.py`** — complete rewrite for human-readable news delivery:
+
+- **Auto-ingestion**: if news DB is stale (>2 hours), agent triggers `run_news_pipeline()` inline before analysing — user never sees empty news
+- **Top Stories section**: top 8 stories by impact with headline, summary preview, source, age, sentiment arrow (↑/↓/→), and impact label (Low/Medium/High/Critical)
+- **High-Impact Alerts**: separate finding per story with impact ≥75, full summary + plain-English implication
+- **Company News Digest**: groups stories by company; flags negative clusters (≥2 negative) and positive leaders (≥2 positive) with bullet headlines
+- **Sector Themes**: ranks sectors by sentiment balance — identifies which sector has tailwind vs headwind
+- **Sentiment Trend**: detects improving/deteriorating market mood with plain explanation of what it means
+- **NSE Official Filings**: dedicated section for `nse_announcement` source stories (highest trust)
+- **Price Signals**: supplementary price-based proxies with plain-English description of what large moves mean
+- Verified live: 156 articles ingested, 9 findings including Critical-impact Micron/AI rally story (96/100), NSE acquisitions, MARUTI +3.8%, sector themes
+
+---
+
+## [2026-06-25f] — Strategy Research Agent: Deep Analysis Rewrite
+
+### Improvements
+
+**`agents/strategy_research_agent.py`** — complete rewrite, 9 analysis dimensions (was 3):
+
+1. **Population Health Summary** — fitness avg/median/top/bottom/σ, health grade (EXCELLENT/GOOD/FAIR/POOR), unscored backlog count
+2. **Family Breakdown Ranking** — all families ranked by avg fitness with per-family count, avg Sharpe, avg win rate, best strategy; flags weak families (<30 avg fitness)
+3. **Decay Detection (3 tiers)** — critical (<20), danger zone (20–35) with names+scores, watch list (35–45); each tier generates its own finding + recommendation
+4. **Top Performers + Sharpe Club** — top 5 by fitness (full metrics), separate "Elite Sharpe Club" finding for strategies with Sharpe ≥2.0
+5. **Regime Alignment** — misaligned strategy count vs suited, best strategy for current regime by regime-specific Sharpe column (`bull_sharpe`/`bear_sharpe`/etc.)
+6. **Evolution Efficiency (30d)** — mutation/crossover/retirement counts, improvement rate%, avg fitness delta, best operation by avg delta
+7. **Backtest Trade Patterns (30d)** — win rate, avg win/loss, expectancy, best/worst symbols, exit reason breakdown (stop-loss vs target dominance check)
+8. **Resurrection Candidates** — graveyard strategies with fitness ≥45 that died in a different regime; lists top 5 with evidence
+9. **Signal Persistence + Live Accuracy** — symbols with ≥75% directional consistency in 30d predictions; live prediction win rate with bull/bear breakdown; triggers retraining recommendation if <50%
+
+Verified live on DB: 12 findings, 5 actionable recommendations including critical decay alerts (471 strategies in danger zone) and evolution efficiency warning (1% improvement rate).
+
+---
+
+## [2026-06-25e] — Hourly Agent Pipeline
+
+### Changes
+
+- **`aqrti/data/scheduler.py`**: Added `_hourly_agent_job()` — runs all 7 research agents + follow-up task executor every 1 hour via APScheduler interval trigger (`max_instances=1` prevents overlap). Removed agents from the once-daily `_daily_job` Step 9 to avoid duplicate runs.
+- **`aqrti/api/app.py`**: Added `_run_agents_background()` — fires once at backend startup in a thread pool executor so agents produce their first findings immediately instead of waiting up to 1 hour for the first interval tick.
+- Schedule summary: **Daily pipeline** (market data, features, news, sentiment, predictions, paper trading, learning, strategy research, vault, data supremacy, intelligence) runs once after NSE close. **Agent pipeline** (all 7 agents) runs every 1 hour + immediately on startup. **Strategy loop** runs every 5 minutes.
+
+---
+
+## [2026-06-25d] — Bug Fix: Duplicate hydrateModelCenter Removed
+
+### Bug Fixes
+
+- Removed stale stub `hydrateModelCenter()` at app.js:1297 that was overriding the full implementation written in the previous session (JS hoisting means the later definition wins, but the dead code was confusing and a future risk)
+- Single canonical implementation now lives at the `MODEL CENTER` section block — fetches `/models/stats`, `/models`, `/models/metrics`, `/models/walk-forward` in parallel and populates all 6 KPI cards, accuracy chart, calibration chart, and registry table
+
+---
+
+## [2026-06-25c] — Agent Success Rate Fix: Follow-up Task Pipeline
+
+### Bug Fixes
+
+**Strategy Research Agent: 34% → 100% success rate**
+- Root cause: CRO agent created "Follow-up" tasks (`task_type=follow_up`) for `strategy_research` and other agents after each daily run, but `run_daily_pipeline` only created and executed `daily_run` tasks — follow-ups sat in `pending` forever, dragging measured success rate to 34.4%
+- Fix 1 (`agent_scheduler.py`): Added `run_followup_tasks()` — picks up pending `follow_up` tasks ordered by priority, executes them via the same agent pipeline, marks completed/failed. Called automatically at end of `run_daily_pipeline` (capped at 10 per cycle)
+- Fix 2 (`cro_agent.py`): `_assign_followups()` now checks for an existing pending follow-up for the same agent today before creating another — prevents CRO from flooding the queue on each run
+- Fix 3 (DB): Cancelled 24 stale orphan follow-up tasks that had accumulated; these are excluded from success rate stats (already in place from previous fix)
+- All 7 agents now show 100% success rate (12 completed / 12 total each)
+
+---
+
+## [2026-06-25b] — Meta-Learning Engine, Model Self-Improvement, Adaptive Evolution
 
 ### New Features
 

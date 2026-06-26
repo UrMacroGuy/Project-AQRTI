@@ -18,12 +18,22 @@ start "AQRTI Backend" /MIN "%~dp0scripts\start_backend.bat"
 REM Start frontend watchdog (minimised)
 start "AQRTI Frontend" /MIN "%~dp0scripts\start_frontend.bat"
 
-echo  Backend  starting on http://localhost:8000
-echo  Frontend starting on http://localhost:3000
+echo  Waiting for backend to come online...
+:wait_backend
+timeout /t 2 /nobreak >nul
+curl -s --max-time 2 http://localhost:8000/health >nul 2>&1
+if %errorlevel% neq 0 goto wait_backend
+echo  Backend is online!
+
+REM Start paper trading agent (runs every 5 min, auto-marks-to-market)
+start "AQRTI Paper Agent" /MIN "%~dp0scripts\paper_trading_agent.bat"
+
 echo.
-echo  Opening browser in 10 seconds...
-timeout /t 10 /nobreak >nul
+echo  Backend  running on  http://localhost:8000
+echo  Frontend running on  http://localhost:3000
+echo  Paper agent running (every 5 min)
+echo.
+echo  Opening browser...
 start http://localhost:3000
 
-echo  Done. Both servers are running in the background.
-echo  Close the minimised windows to stop them.
+echo  Done. All services running. Close minimised windows to stop.

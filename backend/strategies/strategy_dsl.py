@@ -182,7 +182,7 @@ class StrategyDSL:
         return cls(
             entry_conditions  = entry,
             exit_conditions   = exit_,
-            allowed_regimes   = d.get("allowed_regimes", ["BULL", "SIDEWAYS"]),
+            allowed_regimes   = d.get("allowed_regimes", ["BULL", "SIDEWAYS", "BEAR", "VOLATILE"]),
             family            = d.get("family", "hybrid"),
             name              = d.get("name", ""),
             signal_type       = d.get("signal_type", "BUY"),

@@ -47,11 +47,204 @@ from aqrti.api.routes import market_breadth as market_breadth_router
 from aqrti.api.routes import sector_rotation as sector_rotation_router
 from aqrti.api.routes import earnings as earnings_router
 from aqrti.api.routes import data_quality as data_quality_router
+from aqrti.api.routes import screener as screener_router
+from aqrti.api.routes import watchlist as watchlist_router
+from aqrti.api.routes import stress_test as stress_test_router
+from aqrti.api.routes import universe as universe_router
 from aqrti.config.settings import get_settings
 from aqrti.database.engine import init_db, checkpoint_wal
 from aqrti.data.market_data import run_daily_ingestion
 from aqrti.data.scheduler import start_scheduler, stop_scheduler
 from aqrti.utils.logger import api_logger
+import threading
+import time as _time
+
+# ── Boot progress state (shared across threads, read by /system/status) ──────
+_BOOT_STATUS = {
+    "booting": True,
+    "started_at": None,
+    "steps": {},   # step_name -> {"status": "pending"|"running"|"done"|"error", "msg": ""}
+    "current_step": None,
+    "done": False,
+}
+_BOOT_LOCK = threading.Lock()
+
+_BOOT_STEPS = [
+    "market_data",
+    "features",
+    "news",
+    "sentiment",
+    "predictions",
+    "paper_trading",
+    "agents",
+    "strategy_research",
+    "learning",
+]
+
+def _boot_step(name: str, status: str, msg: str = ""):
+    with _BOOT_LOCK:
+        _BOOT_STATUS["steps"][name] = {"status": status, "msg": msg}
+        if status == "running":
+            _BOOT_STATUS["current_step"] = name
+
+
+def _run_boot_sequence():
+    """
+    Full startup pipeline — runs once in background immediately after backend starts.
+    Ensures all data is fresh when the user opens the frontend.
+    Each step is independently guarded so one failure doesn't block the rest.
+    """
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+
+    with _BOOT_LOCK:
+        _BOOT_STATUS["booting"] = True
+        _BOOT_STATUS["started_at"] = _time.time()
+        _BOOT_STATUS["done"] = False
+        for s in _BOOT_STEPS:
+            _BOOT_STATUS["steps"][s] = {"status": "pending", "msg": ""}
+
+    api_logger.info("=== BOOT SEQUENCE STARTED ===")
+
+    # Step 1 — Market Data
+    _boot_step("market_data", "running")
+    try:
+        report = run_daily_ingestion()
+        _boot_step("market_data", "done", f"status={report.get('status','?')}")
+        api_logger.info("Boot step 1 — Market data: %s", report.get("status"))
+    except Exception as e:
+        _boot_step("market_data", "error", str(e))
+        api_logger.error("Boot step 1 — Market data failed: %s", e)
+
+    # Step 2 — Feature Engineering
+    _boot_step("features", "running")
+    try:
+        from features.feature_generator import run_incremental_feature_generation
+        r = run_incremental_feature_generation()
+        _boot_step("features", "done", f"status={r.get('status','?')}")
+        api_logger.info("Boot step 2 — Features: %s", r.get("status"))
+    except Exception as e:
+        _boot_step("features", "error", str(e))
+        api_logger.error("Boot step 2 — Features failed: %s", e)
+
+    # Step 3 — News
+    _boot_step("news", "running")
+    try:
+        from news.news_pipeline import run_news_pipeline
+        r = run_news_pipeline()
+        _boot_step("news", "done", f"stored={r.get('stored',0)}")
+        api_logger.info("Boot step 3 — News: stored=%d", r.get("stored", 0))
+    except Exception as e:
+        _boot_step("news", "error", str(e))
+        api_logger.error("Boot step 3 — News failed: %s", e)
+
+    # Step 4 — Sentiment & Regime
+    _boot_step("sentiment", "running")
+    try:
+        from sentiment.sentiment_engine import run_sentiment_pipeline
+        r = run_sentiment_pipeline()
+        _boot_step("sentiment", "done", f"regime={r.get('regime','?')}")
+        api_logger.info("Boot step 4 — Sentiment: regime=%s", r.get("regime"))
+    except Exception as e:
+        _boot_step("sentiment", "error", str(e))
+        api_logger.error("Boot step 4 — Sentiment failed: %s", e)
+
+    # Step 5 — Predictions
+    _boot_step("predictions", "running")
+    try:
+        from ml.prediction_pipeline import run_prediction_pipeline
+        r = run_prediction_pipeline()
+        _boot_step("predictions", "done", f"written={r.get('predictions_written',0)}")
+        api_logger.info("Boot step 5 — Predictions: written=%d", r.get("predictions_written", 0))
+    except Exception as e:
+        _boot_step("predictions", "error", str(e))
+        api_logger.error("Boot step 5 — Predictions failed: %s", e)
+
+    # Step 6 — Paper Trading
+    _boot_step("paper_trading", "running")
+    try:
+        from paper_trading.paper_engine import run_paper_trading_cycle
+        r = run_paper_trading_cycle()
+        _boot_step("paper_trading", "done",
+                   f"opened={len(r.get('opened',[]))} value={r.get('portfolioValue',0):.0f}")
+        api_logger.info("Boot step 6 — Paper trading: opened=%d value=%.2f",
+                        len(r.get("opened", [])), r.get("portfolioValue", 0))
+    except Exception as e:
+        _boot_step("paper_trading", "error", str(e))
+        api_logger.error("Boot step 6 — Paper trading failed: %s", e)
+
+    # Step 7 — Agent Pipeline
+    _boot_step("agents", "running")
+    try:
+        from aqrti.database.engine import get_session_factory
+        from agents.agent_scheduler import run_daily_pipeline
+        _db = get_session_factory()()
+        try:
+            r = run_daily_pipeline(_db)
+            _db.commit()
+            _boot_step("agents", "done", f"follow_ups={r.get('follow_ups_run',0)}")
+            api_logger.info("Boot step 7 — Agents complete.")
+        finally:
+            _db.close()
+    except Exception as e:
+        _boot_step("agents", "error", str(e))
+        api_logger.error("Boot step 7 — Agents failed: %s", e)
+
+    # Step 8 — Strategy Research
+    _boot_step("strategy_research", "running")
+    try:
+        from strategies.strategy_research_loop import run_daily_strategy_research
+        r = run_daily_strategy_research(generate_n=50, evolve_n=20)
+        snap = r.get("steps", {}).get("snapshot", {})
+        _boot_step("strategy_research", "done",
+                   f"total={snap.get('total',0)} active={snap.get('active_count',0)}")
+        api_logger.info("Boot step 8 — Strategy research: population=%d active=%d",
+                        snap.get("total", 0), snap.get("active_count", 0))
+    except Exception as e:
+        _boot_step("strategy_research", "error", str(e))
+        api_logger.error("Boot step 8 — Strategy research failed: %s", e)
+
+    # Step 9 — Learning Loop (runs with backfilled actual_return now available)
+    _boot_step("learning", "running")
+    try:
+        from learning.learning_loop import run_daily_learning
+        r = run_daily_learning(days=30)   # 30-day window so backfilled outcomes are used
+        score = r.get("steps", {}).get("knowledge_score", {}).get("overall_score", 0)
+        filled = r.get("steps", {}).get("prediction_backfill", {}).get("filled", 0)
+        _boot_step("learning", "done", f"score={score:.1f} backfilled={filled}")
+        api_logger.info("Boot step 9 — Learning: score=%.1f backfilled=%d", score, filled)
+    except Exception as e:
+        _boot_step("learning", "error", str(e))
+        api_logger.error("Boot step 9 — Learning failed: %s", e)
+
+    # Step 10 — Rescore all strategies with corrected fitness parameters
+    try:
+        from strategies.fitness_engine import rescore_all
+        from aqrti.database.engine import get_session_factory
+        from strategies.strategy_lifecycle import run_lifecycle_sweep
+        _db = get_session_factory()()
+        try:
+            r = rescore_all(_db)
+            lc = run_lifecycle_sweep(_db)
+            _db.commit()
+            api_logger.info(
+                "Boot step 10 — Rescore: %d strategies rescored, %d promoted, %d retired",
+                r.get("total", 0), len(lc.get("promoted", [])), len(lc.get("retired", []))
+            )
+        finally:
+            _db.close()
+    except Exception as e:
+        api_logger.error("Boot step 10 — Rescore failed: %s", e)
+
+    with _BOOT_LOCK:
+        _BOOT_STATUS["booting"] = False
+        _BOOT_STATUS["done"] = True
+        _BOOT_STATUS["current_step"] = None
+
+    elapsed = _time.time() - _BOOT_STATUS["started_at"]
+    api_logger.info("=== BOOT SEQUENCE COMPLETE in %.0fs ===", elapsed)
 
 
 def create_app() -> FastAPI:
@@ -77,17 +270,20 @@ def create_app() -> FastAPI:
     # ── Startup / Shutdown ───────────────────────────────────────
     @app.on_event("startup")
     async def on_startup():
+        import asyncio
         api_logger.info("AQRTI Backend starting up …")
         init_db()
-        # Checkpoint any WAL left over from a previous unclean shutdown
         checkpoint_wal()
         start_scheduler()
-        api_logger.info("AQRTI Backend ready on port %d", settings.port)
+        api_logger.info("AQRTI Backend ready on port %d — boot pipeline starting in background", settings.port)
+        # Run full boot sequence in background: market data → features → news →
+        # sentiment → predictions → paper trading → agents → strategies → learning
+        t = threading.Thread(target=_run_boot_sequence, name="boot-sequence", daemon=True)
+        t.start()
 
     @app.on_event("shutdown")
     async def on_shutdown():
         stop_scheduler()
-        # Flush all WAL writes into the main DB file before exiting
         checkpoint_wal()
         api_logger.info("AQRTI Backend shut down.")
 
@@ -138,10 +334,21 @@ def create_app() -> FastAPI:
     app.include_router(sector_rotation_router.router,      prefix=f"{PREFIX}/sector-rotation",      tags=["Sector Rotation"])
     app.include_router(earnings_router.router,             prefix=f"{PREFIX}/earnings",             tags=["Earnings"])
     app.include_router(data_quality_router.router,         prefix=f"{PREFIX}/data-quality",         tags=["Data Quality"])
+    app.include_router(screener_router.router,             prefix=f"{PREFIX}/screener",              tags=["Screener"])
+    app.include_router(watchlist_router.router,            prefix=f"{PREFIX}/watchlist",             tags=["Watchlist"])
+    app.include_router(stress_test_router.router,          prefix=f"{PREFIX}/stress-test",           tags=["StressTest"])
+    app.include_router(universe_router.router,             prefix=f"{PREFIX}/universe",               tags=["Universe"])
 
     # ── Phase 8.5: Historical Intelligence Training System ────────
     HI = f"{PREFIX}"
     app.include_router(intelligence_router.router, prefix=HI, tags=["Historical Intelligence"])
+
+    # ── System Status (boot progress) ────────────────────────────
+    @app.get("/api/v1/system/status", tags=["System"])
+    async def system_status():
+        """Boot pipeline progress — frontend polls this until done=true."""
+        with _BOOT_LOCK:
+            return dict(_BOOT_STATUS)
 
     # ── Admin Endpoints ──────────────────────────────────────────
     @app.post("/admin/ingest", tags=["Admin"])
@@ -292,6 +499,23 @@ def create_app() -> FastAPI:
         import asyncio
         api_logger.info("Manual paper trading cycle triggered.")
         return await asyncio.to_thread(run_paper_trading_cycle)
+
+    @app.post("/admin/paper-mtm", tags=["Admin"])
+    async def trigger_paper_mtm():
+        """Intraday mark-to-market: check SL/TP/expiry on open positions, update NAV. No rebalance."""
+        import sys, os
+        backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        sys.path.insert(0, backend_dir)
+        from aqrti.database.engine import get_db
+        from paper_trading.paper_execution import mark_to_market
+        import asyncio
+        def _run_mtm():
+            with get_db() as db:
+                result = mark_to_market(db)
+                db.commit()
+            return result
+        api_logger.info("Intraday mark-to-market triggered.")
+        return await asyncio.to_thread(_run_mtm)
 
     @app.post("/admin/lifecycle", tags=["Admin"])
     async def trigger_lifecycle():

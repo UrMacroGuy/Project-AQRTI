@@ -95,7 +95,7 @@ def _backtest_unscored(db, max_stocks: int = 200) -> dict:
     tested = 0
     errors = 0
     end_date   = date.today()
-    start_date = end_date - timedelta(days=365)
+    start_date = end_date - timedelta(days=1095)  # 3 years → ~756 trading days for 500+ trades
 
     for row in rows:
         try:

@@ -40,11 +40,12 @@ def compute_price_features(df: pd.DataFrame, nifty_df: Optional[pd.DataFrame] = 
     # return_63d
     results["return_63d"] = _pct_change(close, 63)
 
-    # momentum_10d
-    results["momentum_10d"] = _pct_change(close, 10)
+    # momentum_10d: acceleration = recent 5d return minus prior 5d return
+    # Measures whether momentum is accelerating (positive) or decelerating (negative)
+    results["momentum_10d"] = _momentum_accel(close, fast=5, slow=10)
 
-    # momentum_20d
-    results["momentum_20d"] = _pct_change(close, 20)
+    # momentum_20d: acceleration = recent 10d return minus prior 10d return
+    results["momentum_20d"] = _momentum_accel(close, fast=10, slow=20)
 
     # gap_open_pct: (open_today - close_yesterday) / close_yesterday * 100
     if "open" in df.columns and n >= 2:
@@ -54,16 +55,12 @@ def compute_price_features(df: pd.DataFrame, nifty_df: Optional[pd.DataFrame] = 
     else:
         results["gap_open_pct"] = None
 
-    # breakout_distance_52w: (close - 52w_high) / 52w_high * 100  (negative = below)
+    # breakout_distance_52w: (close - 52w_high) / 52w_high * 100  (negative = below high)
+    # Only compute when we have true 252-day window — fallback to None avoids misleading values
     if n >= 252:
         high_52w = close.iloc[-252:].max()
         results["breakout_distance_52w"] = _safe_divide(
             close.iloc[-1] - high_52w, high_52w
-        ) * 100
-    elif n >= 20:
-        high_window = close.max()
-        results["breakout_distance_52w"] = _safe_divide(
-            close.iloc[-1] - high_window, high_window
         ) * 100
     else:
         results["breakout_distance_52w"] = None
@@ -113,6 +110,23 @@ def compute_price_features(df: pd.DataFrame, nifty_df: Optional[pd.DataFrame] = 
 
 
 # ── Helpers ───────────────────────────────────────────────────
+def _momentum_accel(series: pd.Series, fast: int, slow: int) -> Optional[float]:
+    """Momentum acceleration: return over last `fast` bars minus return over prior `fast` bars.
+    Prior window ends `slow` bars ago. Positive = accelerating, negative = decelerating."""
+    n = len(series)
+    required = slow + fast + 1
+    if n < required:
+        return None
+    recent_ret = _pct_change(series.iloc[-(fast + 1):], fast)
+    # Prior window: fast+1 bars ending at index -(slow+1) (i.e., slow bars ago)
+    end_idx   = n - slow        # exclusive end → closes at series[end_idx - 1]
+    start_idx = end_idx - fast - 1
+    prior_ret = _pct_change(series.iloc[start_idx:end_idx], fast)
+    if recent_ret is None or prior_ret is None:
+        return None
+    return recent_ret - prior_ret
+
+
 def _pct_change(series: pd.Series, periods: int) -> Optional[float]:
     n = len(series)
     if n <= periods:
@@ -131,6 +145,12 @@ def _safe_divide(num: float, den: float) -> float:
 
 
 def _round(v) -> Optional[float]:
-    if v is None or (isinstance(v, float) and np.isnan(v)):
+    if v is None:
         return None
-    return round(float(v), 6)
+    try:
+        f = float(v)
+        if np.isnan(f) or np.isinf(f):
+            return None
+        return round(f, 6)
+    except (TypeError, ValueError):
+        return None

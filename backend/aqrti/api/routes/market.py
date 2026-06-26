@@ -288,3 +288,307 @@ def get_index_history_route(
     db: Session = Depends(get_db_dependency),
 ):
     return get_index_history(db, index_name, days)
+
+
+def _ema(values: list, period: int) -> list:
+    """Compute EMA with None-padding for warmup. Returns list same length as values."""
+    result = [None] * len(values)
+    k = 2.0 / (period + 1)
+    ema_val = None
+    for i, v in enumerate(values):
+        if v is None:
+            continue
+        if ema_val is None:
+            ema_val = v
+        else:
+            ema_val = v * k + ema_val * (1 - k)
+        result[i] = round(ema_val, 4)
+    return result
+
+
+def _compute_indicators(closes: list) -> dict:
+    """Compute all technical indicators from a list of close prices."""
+    n = len(closes)
+
+    # EMA20 and EMA50
+    ema20 = _ema(closes, 20)
+    ema50 = _ema(closes, 50)
+
+    # Bollinger Bands (20-period SMA ± 2 std dev)
+    bb_upper = [None] * n
+    bb_lower = [None] * n
+    bb_mid   = [None] * n
+    for i in range(19, n):
+        window = [c for c in closes[i-19:i+1] if c is not None]
+        if len(window) < 20:
+            continue
+        mean = sum(window) / 20
+        variance = sum((x - mean) ** 2 for x in window) / 20
+        std = variance ** 0.5
+        bb_mid[i]   = round(mean, 4)
+        bb_upper[i] = round(mean + 2 * std, 4)
+        bb_lower[i] = round(mean - 2 * std, 4)
+
+    # RSI (14-period Wilder's)
+    rsi = [None] * n
+    if n >= 15:
+        gains, losses = [], []
+        for i in range(1, n):
+            if closes[i] is None or closes[i-1] is None:
+                continue
+            diff = closes[i] - closes[i-1]
+            gains.append(max(diff, 0))
+            losses.append(max(-diff, 0))
+        if len(gains) >= 14:
+            avg_gain = sum(gains[:14]) / 14
+            avg_loss = sum(losses[:14]) / 14
+            # First RSI value at index 14
+            offset = 0
+            for i in range(1, n):
+                if closes[i] is None or closes[i-1] is None:
+                    continue
+                if offset < 14:
+                    offset += 1
+                    continue
+                if avg_loss == 0:
+                    rsi[i] = 100.0
+                else:
+                    rs = avg_gain / avg_loss
+                    rsi[i] = round(100 - (100 / (1 + rs)), 2)
+                diff = closes[i] - closes[i-1]
+                avg_gain = (avg_gain * 13 + max(diff, 0)) / 14
+                avg_loss = (avg_loss * 13 + max(-diff, 0)) / 14
+
+    # MACD: EMA12 - EMA26, signal = EMA9 of MACD, hist = MACD - signal
+    ema12 = _ema(closes, 12)
+    ema26 = _ema(closes, 26)
+    macd_line = [
+        round(e12 - e26, 4) if e12 is not None and e26 is not None else None
+        for e12, e26 in zip(ema12, ema26)
+    ]
+    signal_line = _ema(macd_line, 9)
+    macd_hist = [
+        round(m - s, 4) if m is not None and s is not None else None
+        for m, s in zip(macd_line, signal_line)
+    ]
+
+    return {
+        "ema20":       ema20,
+        "ema50":       ema50,
+        "bb_upper":    bb_upper,
+        "bb_lower":    bb_lower,
+        "bb_mid":      bb_mid,
+        "rsi":         rsi,
+        "macd":        macd_line,
+        "macd_signal": signal_line,
+        "macd_hist":   macd_hist,
+    }
+
+
+def _pearson(xs, ys):
+    n = len(xs)
+    if n < 5:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    dx = sum((x - mx) ** 2 for x in xs) ** 0.5
+    dy = sum((y - my) ** 2 for y in ys) ** 0.5
+    if dx == 0 or dy == 0:
+        return None
+    return round(num / (dx * dy), 3)
+
+
+@router.get("/correlation")
+def get_correlation_matrix(
+    days: int = Query(default=60, ge=1, le=180),
+    db: Session = Depends(get_db_dependency),
+):
+    """Return Pearson correlation matrix of daily returns for all 18 NSE stocks."""
+    from aqrti.config.settings import get_settings
+    settings = get_settings()
+    symbols = settings.universe_clean
+
+    cutoff = date.today() - timedelta(days=days + 5)  # +5 for weekend buffer
+    rows = (
+        db.query(DailyPrice.symbol, DailyPrice.date, DailyPrice.close)
+        .filter(DailyPrice.symbol.in_(symbols), DailyPrice.date >= cutoff)
+        .order_by(DailyPrice.symbol.asc(), DailyPrice.date.asc())
+        .all()
+    )
+
+    # Build {symbol: [close, ...]} dict sorted by date
+    from collections import defaultdict
+    price_map: dict[str, list] = defaultdict(list)
+    for r in rows:
+        if r.close is not None:
+            price_map[r.symbol].append(float(r.close))
+
+    # Compute returns for each symbol
+    def _returns(closes):
+        if len(closes) < 2:
+            return []
+        return [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
+
+    returns_map: dict[str, list] = {}
+    for sym in symbols:
+        closes = price_map.get(sym, [])
+        rets = _returns(closes)
+        returns_map[sym] = rets if len(rets) >= 10 else []
+
+    # Build matrix
+    n = len(symbols)
+    matrix = []
+    for i, sym_i in enumerate(symbols):
+        row = []
+        for j, sym_j in enumerate(symbols):
+            if i == j:
+                row.append(1.0)
+            elif not returns_map[sym_i] or not returns_map[sym_j]:
+                row.append(None)
+            else:
+                xs = returns_map[sym_i]
+                ys = returns_map[sym_j]
+                # Align to common length
+                min_len = min(len(xs), len(ys))
+                row.append(_pearson(xs[-min_len:], ys[-min_len:]))
+        matrix.append(row)
+
+    return {"symbols": symbols, "matrix": matrix, "days": days}
+
+
+@router.get("/breadth/by-sector")
+def get_sector_breadth(db: Session = Depends(get_db_dependency)):
+    """Return % of stocks above 20MA, 50MA, 200MA per sector."""
+    from aqrti.config.settings import get_settings
+    settings = get_settings()
+    symbols = settings.universe_clean
+
+    cutoff = date.today() - timedelta(days=210)  # ~200 trading + buffer
+    rows = (
+        db.query(DailyPrice.symbol, DailyPrice.date, DailyPrice.close)
+        .filter(DailyPrice.symbol.in_(symbols), DailyPrice.date >= cutoff)
+        .order_by(DailyPrice.symbol.asc(), DailyPrice.date.asc())
+        .all()
+    )
+
+    from collections import defaultdict
+    price_map: dict[str, list] = defaultdict(list)
+    for r in rows:
+        if r.close is not None:
+            price_map[r.symbol].append(float(r.close))
+
+    def _sma(closes, period):
+        if len(closes) < period:
+            return None
+        return sum(closes[-period:]) / period
+
+    # Build sector → stocks mapping
+    sector_map: dict[str, list] = defaultdict(list)
+    for sym in symbols:
+        meta = STOCK_META.get(sym)
+        if meta:
+            sector_map[meta["sector"]].append(sym)
+
+    sectors_result = []
+    for sector_name, sector_syms in sorted(sector_map.items()):
+        stocks_data = []
+        above_20_count = 0
+        above_50_count = 0
+        above_200_count = 0
+        valid_20 = 0
+        valid_50 = 0
+        valid_200 = 0
+
+        for sym in sector_syms:
+            closes = price_map.get(sym, [])
+            if len(closes) < 2:
+                stocks_data.append({"symbol": sym, "above_20": None, "above_50": None, "above_200": None})
+                continue
+
+            latest = closes[-1]
+            sma20  = _sma(closes, 20)
+            sma50  = _sma(closes, 50)
+            sma200 = _sma(closes, 200)
+
+            above_20  = (latest > sma20)  if sma20  is not None else None
+            above_50  = (latest > sma50)  if sma50  is not None else None
+            above_200 = (latest > sma200) if sma200 is not None else None
+
+            if above_20 is not None:
+                valid_20 += 1
+                if above_20:
+                    above_20_count += 1
+            if above_50 is not None:
+                valid_50 += 1
+                if above_50:
+                    above_50_count += 1
+            if above_200 is not None:
+                valid_200 += 1
+                if above_200:
+                    above_200_count += 1
+
+            stocks_data.append({
+                "symbol":    sym,
+                "above_20":  above_20,
+                "above_50":  above_50,
+                "above_200": above_200,
+            })
+
+        sectors_result.append({
+            "name":           sector_name,
+            "stocks_total":   len(sector_syms),
+            "above_20ma_pct": round(above_20_count / valid_20 * 100, 1) if valid_20 else 0.0,
+            "above_50ma_pct": round(above_50_count / valid_50 * 100, 1) if valid_50 else 0.0,
+            "above_200ma_pct": round(above_200_count / valid_200 * 100, 1) if valid_200 else 0.0,
+            "stocks":         stocks_data,
+        })
+
+    return {"sectors": sectors_result}
+
+
+@router.get("/ohlcv/{symbol}")
+def get_stock_ohlcv(
+    symbol: str,
+    days: int = Query(default=90, ge=1, le=365),
+    db: Session = Depends(get_db_dependency),
+):
+    """Return OHLCV candles + technical indicators for a single stock symbol."""
+    cutoff = date.today() - timedelta(days=days)
+    rows = (
+        db.query(
+            DailyPrice.date,
+            DailyPrice.open,
+            DailyPrice.high,
+            DailyPrice.low,
+            DailyPrice.close,
+            DailyPrice.volume,
+        )
+        .filter(DailyPrice.symbol == symbol.upper(), DailyPrice.date >= cutoff)
+        .order_by(DailyPrice.date.asc())
+        .all()
+    )
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No price data found for symbol: {symbol}")
+
+    candles = [
+        {
+            "date":   str(r.date),
+            "open":   float(r.open)   if r.open   is not None else None,
+            "high":   float(r.high)   if r.high   is not None else None,
+            "low":    float(r.low)    if r.low    is not None else None,
+            "close":  float(r.close)  if r.close  is not None else None,
+            "volume": float(r.volume) if r.volume is not None else None,
+        }
+        for r in rows
+    ]
+
+    closes = [c["close"] for c in candles]
+    indicators = _compute_indicators(closes)
+
+    return {
+        "symbol":      symbol.upper(),
+        "candles":     candles,
+        **indicators,
+    }

@@ -157,40 +157,78 @@ def execute_rebalance(
     }
 
 
+MAX_HOLDING_DAYS = 20   # force-close any position held longer than this
+
+
 def mark_to_market(db: Session) -> dict:
     """
     Recalculate current portfolio value using latest prices.
-    Also enforces stop-loss and take-profit rules on open positions.
+    Enforces stop-loss, take-profit, and max-holding-day rules on open positions.
+    Feeds closed losing trades back to the strategy refinement pipeline.
     """
     from aqrti.database.models import PaperPosition
 
-    portfolio  = get_or_create_portfolio(db)
-    sl_closed  = []
-    tp_closed  = []
+    portfolio   = get_or_create_portfolio(db)
+    sl_closed   = []
+    tp_closed   = []
+    expired     = []
+    loss_trades = []
 
-    # Enforce stop-loss and take-profit on every open position
     positions = db.query(PaperPosition).filter_by(portfolio_name=portfolio.portfolio_name).all()
     for pos in positions:
         current_price = _get_fill_price(db, pos.symbol)
         if not current_price:
             continue
 
-        hit_sl = pos.stop_loss_price and current_price <= pos.stop_loss_price
-        hit_tp = pos.target_price    and current_price >= pos.target_price
+        holding_days = (date.today() - pos.entry_date).days
+        unrealized_pct = (current_price - pos.entry_price) / pos.entry_price * 100
 
-        if hit_sl or hit_tp:
-            reason = "stop_loss" if hit_sl else "take_profit"
+        hit_sl      = pos.stop_loss_price and current_price <= pos.stop_loss_price
+        hit_tp      = pos.target_price    and current_price >= pos.target_price
+        hit_expiry  = holding_days >= MAX_HOLDING_DAYS
+        # Trailing time-stop: close if loss > 3% after holding ≥ 5 days with no recovery
+        hit_time_stop = holding_days >= 5 and unrealized_pct < -3.0
+
+        if hit_sl or hit_tp or hit_expiry or hit_time_stop:
+            if hit_sl:
+                reason = "stop_loss"
+            elif hit_tp:
+                reason = "take_profit"
+            elif hit_expiry:
+                reason = "max_holding_days"
+            else:
+                reason = "time_stop"
+
+            capital_before = pos.capital_deployed
             result = close_position(db, pos.symbol, exit_reason=reason)
             if result:
-                freed_cash = (result["grossPnl"] or 0) + pos.capital_deployed
+                freed_cash = capital_before + (result["grossPnl"] or 0)
                 portfolio.current_cash += freed_cash
                 db.commit()
-                if hit_sl:
+
+                if reason == "stop_loss":
                     sl_closed.append(pos.symbol)
-                    log.info("Stop-loss triggered: %s  price=%.2f  sl=%.2f", pos.symbol, current_price, pos.stop_loss_price)
-                else:
+                    log.info("Stop-loss: %s  price=%.2f  sl=%.2f", pos.symbol, current_price, pos.stop_loss_price)
+                elif reason == "take_profit":
                     tp_closed.append(pos.symbol)
-                    log.info("Take-profit triggered: %s  price=%.2f  tp=%.2f", pos.symbol, current_price, pos.target_price)
+                    log.info("Take-profit: %s  price=%.2f  tp=%.2f", pos.symbol, current_price, pos.target_price)
+                else:
+                    expired.append(pos.symbol)
+                    log.info("%s: %s  held=%dd  pnl=%.2f%%", reason, pos.symbol, holding_days, unrealized_pct)
+
+                # Track losing trades for strategy feedback
+                if (result["grossPnl"] or 0) < 0 and pos.strategy_id:
+                    loss_trades.append({
+                        "symbol":      pos.symbol,
+                        "strategy_id": pos.strategy_id,
+                        "pnl_pct":     result["grossPnlPct"],
+                        "reason":      reason,
+                        "holding_days": holding_days,
+                    })
+
+    # Feed losses to strategy refinement
+    if loss_trades:
+        _refine_strategies_from_losses(db, loss_trades)
 
     open_pos  = get_open_positions(db)
     invested  = sum(p["currentValue"] for p in open_pos)
@@ -198,11 +236,107 @@ def mark_to_market(db: Session) -> dict:
     update_portfolio_value(db, total_val, portfolio.current_cash)
 
     return {
-        "date":           str(date.today()),
-        "totalValue":     round(total_val, 2),
-        "cash":           round(portfolio.current_cash, 2),
-        "invested":       round(invested, 2),
-        "openPositions":  len(open_pos),
-        "stopLossClosed": sl_closed,
+        "date":             str(date.today()),
+        "totalValue":       round(total_val, 2),
+        "cash":             round(portfolio.current_cash, 2),
+        "invested":         round(invested, 2),
+        "openPositions":    len(open_pos),
+        "stopLossClosed":   sl_closed,
         "takeProfitClosed": tp_closed,
+        "expired":          expired,
+        "lossesRefined":    len(loss_trades),
     }
+
+
+def _refine_strategies_from_losses(db: Session, loss_trades: list[dict]) -> None:
+    """
+    When a trade closes with a loss, feed the result back to the strategy engine:
+    1. Record a FailureRecord so the learning system sees it
+    2. Run live divergence check — if strategy is underperforming, demote it
+    3. Queue it for re-evolution with updated fitness data
+    """
+    from collections import defaultdict
+    try:
+        from strategies.live_validator import on_trade_closed, _check_live_divergence, _demote_to_shadow
+        from aqrti.database.models import PaperTrade, StrategyV2
+    except ImportError as e:
+        log.warning("Strategy refinement import error: %s", e)
+        return
+
+    strategy_losses: dict[str, list] = defaultdict(list)
+    for lt in loss_trades:
+        strategy_losses[lt["strategy_id"]].append(lt)
+
+    for strategy_id, losses in strategy_losses.items():
+        strat = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
+        if not strat:
+            continue
+
+        avg_loss_pct = sum(l["pnl_pct"] for l in losses) / len(losses)
+        log.info(
+            "Strategy %s had %d losing trade(s) avg_loss=%.2f%% — checking divergence",
+            strategy_id, len(losses), avg_loss_pct,
+        )
+
+        # Check if this strategy is now diverging from its backtest metrics
+        divergence = _check_live_divergence(db, strategy_id)
+        if divergence["demote"]:
+            _demote_to_shadow(db, strategy_id, divergence["reason"])
+            log.warning("Strategy %s demoted to shadow after losses", strategy_id)
+
+        # Record failure events for the learning system
+        try:
+            from aqrti.database.models import FailureRecord
+            for lt in losses:
+                db.add(FailureRecord(
+                    failure_date      = date.today(),
+                    symbol            = lt["symbol"],
+                    failure_category  = "paper_trade_loss",
+                    severity          = "high" if lt["pnl_pct"] < -5 else "medium",
+                    root_cause        = (
+                        f"Strategy {strategy_id} trade closed as {lt['reason']} "
+                        f"after {lt['holding_days']}d: {lt['pnl_pct']:.2f}% loss"
+                    ),
+                    lesson            = f"Review strategy {strategy_id} parameters — live underperformance",
+                    resolved          = False,
+                ))
+            db.commit()
+        except Exception as e:
+            log.debug("FailureRecord insert error: %s", e)
+
+        # Queue strategy for re-evolution if it has enough losses
+        try:
+            closed_losses = (
+                db.query(PaperTrade)
+                .filter(
+                    PaperTrade.strategy_id == strategy_id,
+                    PaperTrade.is_open == False,
+                    PaperTrade.gross_pnl_pct.isnot(None),
+                    PaperTrade.gross_pnl_pct < 0,
+                )
+                .count()
+            )
+            total_closed = (
+                db.query(PaperTrade)
+                .filter(PaperTrade.strategy_id == strategy_id, PaperTrade.is_open == False)
+                .count()
+            )
+            loss_rate = closed_losses / total_closed if total_closed > 0 else 0
+            # If >60% loss rate on ≥5 trades, mark strategy for re-evolution
+            if total_closed >= 5 and loss_rate > 0.60 and strat.status not in ("retired", "archived"):
+                strat.status_reason = (
+                    f"flagged_for_reevolution: loss_rate={loss_rate:.0%} "
+                    f"over {total_closed} live trades"
+                )
+                if strat.fitness and avg_loss_pct < -3:
+                    # Reduce fitness score so it gets replaced sooner in next evolution run
+                    strat.fitness = max(0.0, (strat.fitness or 0.5) * 0.7)
+                db.commit()
+                log.info(
+                    "Strategy %s flagged for re-evolution: loss_rate=%.0f%% trades=%d",
+                    strategy_id, loss_rate * 100, total_closed,
+                )
+        except Exception as e:
+            log.debug("Re-evolution flagging error: %s", e)
+
+    db.commit()

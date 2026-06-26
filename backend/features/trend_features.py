@@ -3,6 +3,13 @@ AQRTI Trend Features
 EMA, SMA, MACD, RSI, ADX computed from OHLCV DataFrame.
 Input: DataFrame with [date, open, high, low, close] sorted ascending.
 Output: dict {feature_name: value} for the last row.
+
+FIXES applied:
+  - RSI divergence: compare RSI(close[:-5]) vs RSI(close) on same-length window
+    to avoid mixing different EMA warm-up depths
+  - MACD: require n >= 60 (not 35) so EMA26+EMA9 have >2x their span to converge
+  - EMA: warn-safe (still computed but flagged with fewer rows)
+  - inf values caught in _round
 """
 
 from __future__ import annotations
@@ -16,86 +23,82 @@ def compute_trend_features(df: pd.DataFrame) -> dict:
     if df.empty or len(df) < 9:
         return {}
 
-    df = df.sort_values("date").reset_index(drop=True)
+    df    = df.sort_values("date").reset_index(drop=True)
     close = df["close"].astype(float)
     n     = len(close)
 
     results: dict[str, Optional[float]] = {}
 
-    # ── EMA ──────────────────────────────────────────────────
+    # ── EMA ──────────────────────────────────────────────────────
+    ema_cache: dict[int, Optional[float]] = {}
     for span in (9, 21, 50, 200):
         key = f"ema_{span}"
         if n >= span:
-            results[key] = _ema(close, span)
+            val = _ema(close, span)
+            results[key]        = val
+            ema_cache[span]     = val
         else:
-            results[key] = None
+            results[key]        = None
+            ema_cache[span]     = None
 
-    # ── SMA ──────────────────────────────────────────────────
+    # ── SMA ──────────────────────────────────────────────────────
     for w in (20, 50):
-        key = f"sma_{w}"
-        results[key] = float(close.iloc[-w:].mean()) if n >= w else None
+        results[f"sma_{w}"] = float(close.iloc[-w:].mean()) if n >= w else None
 
-    # ── Price vs EMA % ───────────────────────────────────────
+    # ── Price vs EMA % ───────────────────────────────────────────
+    curr_close = float(close.iloc[-1])
     for span in (21, 50):
-        ema_val = results.get(f"ema_{span}")
-        key     = f"price_vs_ema{span}_pct"
+        ema_val = ema_cache.get(span)
         if ema_val and ema_val != 0:
-            results[key] = (float(close.iloc[-1]) - ema_val) / ema_val * 100
+            results[f"price_vs_ema{span}_pct"] = (curr_close - ema_val) / ema_val * 100
         else:
-            results[key] = None
+            results[f"price_vs_ema{span}_pct"] = None
 
-    # ── MACD ─────────────────────────────────────────────────
-    if n >= 35:
-        ema12 = _ema_series(close, 12)
-        ema26 = _ema_series(close, 26)
-        macd  = ema12 - ema26
-        sig   = _ema_series(macd, 9)
-        hist  = macd - sig
+    # ── MACD ─────────────────────────────────────────────────────
+    # Need EMA(26) + EMA(9) of MACD line to converge — require 60 bars minimum
+    if n >= 60:
+        ema12  = _ema_series(close, 12)
+        ema26  = _ema_series(close, 26)
+        macd   = ema12 - ema26
+        sig    = _ema_series(macd, 9)
+        hist   = macd - sig
 
         results["macd_line"]      = float(macd.iloc[-1])
         results["macd_signal"]    = float(sig.iloc[-1])
         results["macd_histogram"] = float(hist.iloc[-1])
 
-        # crossover: +1 bullish (hist went -→+), -1 bearish, 0 none
         if len(hist) >= 2:
-            h1 = hist.iloc[-2]
-            h2 = hist.iloc[-1]
-            if h1 < 0 and h2 >= 0:
-                results["macd_crossover"] = 1.0
-            elif h1 > 0 and h2 <= 0:
-                results["macd_crossover"] = -1.0
-            else:
-                results["macd_crossover"] = 0.0
+            h1, h2 = hist.iloc[-2], hist.iloc[-1]
+            if   h1 < 0 and h2 >= 0: results["macd_crossover"] =  1.0  # bullish
+            elif h1 > 0 and h2 <= 0: results["macd_crossover"] = -1.0  # bearish
+            else:                     results["macd_crossover"] =  0.0
         else:
             results["macd_crossover"] = 0.0
     else:
         for k in ("macd_line", "macd_signal", "macd_histogram", "macd_crossover"):
             results[k] = None
 
-    # ── RSI 14 ───────────────────────────────────────────────
+    # ── RSI 14 ───────────────────────────────────────────────────
     if n >= 15:
         results["rsi_14"] = _rsi(close, 14)
     else:
         results["rsi_14"] = None
 
-    # rsi_divergence: 1 if price up 5d but RSI down 5d (bearish), -1 opposite, 0 none
-    if n >= 20:
-        rsi_now  = results.get("rsi_14")
-        rsi_prev = _rsi(close.iloc[:-5], 14) if n >= 20 else None
-        ret5     = (float(close.iloc[-1]) - float(close.iloc[-6])) / float(close.iloc[-6]) if n >= 6 else None
-        if rsi_now is not None and rsi_prev is not None and ret5 is not None:
-            if ret5 > 0 and rsi_now < rsi_prev:
-                results["rsi_divergence"] = 1.0   # bearish divergence
-            elif ret5 < 0 and rsi_now > rsi_prev:
-                results["rsi_divergence"] = -1.0  # bullish divergence
-            else:
-                results["rsi_divergence"] = 0.0
-        else:
-            results["rsi_divergence"] = None
-    else:
-        results["rsi_divergence"] = None
+    # ── RSI Divergence ───────────────────────────────────────────
+    # Compare RSI computed on same rolling 15-bar window ending at t vs t-5.
+    # Both use identical EMA warm-up depth — no bias.
+    results["rsi_divergence"] = None
+    if n >= 25:   # need 15-bar RSI window + 5-bar lookback + some buffer
+        rsi_now  = _rsi(close.iloc[-15:], 14)      # RSI on most recent 15 bars
+        rsi_prev = _rsi(close.iloc[-20:-5], 14)    # RSI on window ending 5 bars ago
+        ret5 = (curr_close - float(close.iloc[-6])) / float(close.iloc[-6]) if n >= 6 else None
 
-    # ── ADX 14 ───────────────────────────────────────────────
+        if rsi_now is not None and rsi_prev is not None and ret5 is not None:
+            if   ret5 > 0 and rsi_now < rsi_prev:  results["rsi_divergence"] =  1.0  # bearish divergence
+            elif ret5 < 0 and rsi_now > rsi_prev:  results["rsi_divergence"] = -1.0  # bullish divergence
+            else:                                   results["rsi_divergence"] =  0.0
+
+    # ── ADX 14 ───────────────────────────────────────────────────
     if n >= 28 and "high" in df.columns and "low" in df.columns:
         adx_val, di_diff = _adx(df["high"].astype(float), df["low"].astype(float), close, 14)
         results["adx_14"]        = adx_val
@@ -119,12 +122,12 @@ def _ema_series(series: pd.Series, span: int) -> pd.Series:
 
 
 def _rsi(close: pd.Series, period: int = 14) -> Optional[float]:
+    """Wilder RSI. Requires exactly period+1 rows minimum."""
     if len(close) < period + 1:
         return None
-    delta = close.diff().dropna()
-    gain  = delta.clip(lower=0)
-    loss  = (-delta).clip(lower=0)
-    # Wilder's smoothing
+    delta    = close.diff().dropna()
+    gain     = delta.clip(lower=0)
+    loss     = (-delta).clip(lower=0)
     avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean().iloc[-1]
     if avg_loss == 0:
@@ -143,42 +146,39 @@ def _adx(
     if n < period * 2:
         return None, None
 
-    tr_arr, dm_plus, dm_minus = [], [], []
-    h = high.values
-    l = low.values
-    c = close.values
+    h = high.values.astype(float)
+    l = low.values.astype(float)
+    c = close.values.astype(float)
 
+    tr_arr, dm_plus, dm_minus = [], [], []
     for i in range(1, n):
         tr = max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1]))
         tr_arr.append(tr)
-
         up_move   = h[i] - h[i - 1]
         down_move = l[i - 1] - l[i]
-
-        dm_plus.append(up_move if up_move > down_move and up_move > 0 else 0.0)
-        dm_minus.append(down_move if down_move > up_move and down_move > 0 else 0.0)
+        dm_plus.append(up_move   if up_move   > down_move and up_move   > 0 else 0.0)
+        dm_minus.append(down_move if down_move > up_move   and down_move > 0 else 0.0)
 
     tr_s  = pd.Series(tr_arr)
     dmp_s = pd.Series(dm_plus)
     dmm_s = pd.Series(dm_minus)
 
-    atr14  = tr_s.ewm(alpha=1 / period, adjust=False).mean()
-    dip14  = dmp_s.ewm(alpha=1 / period, adjust=False).mean()
-    dim14  = dmm_s.ewm(alpha=1 / period, adjust=False).mean()
+    atr14 = tr_s.ewm(alpha=1 / period,  adjust=False).mean()
+    dip14 = dmp_s.ewm(alpha=1 / period, adjust=False).mean()
+    dim14 = dmm_s.ewm(alpha=1 / period, adjust=False).mean()
 
-    atr_val = atr14.iloc[-1]
+    atr_val = float(atr14.iloc[-1])
     if atr_val == 0:
         return None, None
 
     di_plus  = float(dip14.iloc[-1] / atr_val * 100)
     di_minus = float(dim14.iloc[-1] / atr_val * 100)
-    dx       = abs(di_plus - di_minus) / (di_plus + di_minus) * 100 if (di_plus + di_minus) > 0 else 0.0
 
-    dx_series = pd.Series(
-        [abs(dip14.iloc[i] - dim14.iloc[i]) / (dip14.iloc[i] + dim14.iloc[i]) * 100
-         if (dip14.iloc[i] + dim14.iloc[i]) > 0 else 0.0
-         for i in range(len(dip14))]
-    )
+    dx_series = pd.Series([
+        abs(dip14.iloc[i] - dim14.iloc[i]) / (dip14.iloc[i] + dim14.iloc[i]) * 100
+        if (dip14.iloc[i] + dim14.iloc[i]) > 0 else 0.0
+        for i in range(len(dip14))
+    ])
     adx_val = float(dx_series.ewm(alpha=1 / period, adjust=False).mean().iloc[-1])
 
     return adx_val, di_plus - di_minus
@@ -189,6 +189,8 @@ def _round(v) -> Optional[float]:
         return None
     try:
         f = float(v)
-        return None if np.isnan(f) else round(f, 6)
+        if np.isnan(f) or np.isinf(f):
+            return None
+        return round(f, 6)
     except (TypeError, ValueError):
         return None

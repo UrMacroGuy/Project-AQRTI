@@ -141,6 +141,7 @@ const Api = {
     } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/live/stocks failed:', e.message); return null; }
   },
   async indexHistory(name, days = 30)  { return apiFetch(`/market/history/${name}`, { days }); },
+  async stockOhlcv(symbol, days = 90)  { return apiFetch(`/market/ohlcv/${symbol}`, { days }); },
   async predictions(p = {})            { return apiFetch('/predictions', p); },
   async news(p = {})                    { return apiFetch('/news', p); },
   async newsStats()                     { return apiFetch('/news/stats'); },
@@ -295,6 +296,22 @@ const Api = {
   async triggerReplay(body = {})     { return apiPost('/replay', body); },
   async runIntelligencePipeline()    { return apiPostRaw('http://localhost:8000/admin/intelligence'); },
 
+  async screener(p = {}) { return apiFetch('/screener', p); },
+  async screenerPresets() { return apiFetch('/screener/presets'); },
+
+  async correlationMatrix(days = 60) { return apiFetch('/market/correlation', { days }); },
+  async sectorBreadth() { return apiFetch('/market/breadth/by-sector'); },
+  async watchlist()                      { return apiFetch('/watchlist'); },
+  async watchlistAdd(symbol)             { return apiPost(`/watchlist/add?symbol=${symbol}`); },
+  async watchlistRemove(symbol)          { return apiPost(`/watchlist/remove?symbol=${symbol}`); },
+  async stressTestRun(niftyShock = -10, sectorShock = null, sectorShockPct = -15) {
+    const p = { nifty_shock_pct: niftyShock };
+    if (sectorShock) { p.sector_shock = sectorShock; p.sector_shock_pct = sectorShockPct; }
+    return apiPost('/stress-test/run?' + new URLSearchParams(p).toString());
+  },
+  async stressTestPresets()              { return apiFetch('/stress-test/presets'); },
+  async optionsChain(sym = 'NIFTY', expiryOffset = 0) { return apiFetch('/options-intelligence/chain', { symbol: sym, expiry_offset: expiryOffset }); },
+
   async checkBackend() {
     try {
       const res = await fetch('http://localhost:8000/health', { signal: AbortSignal.timeout(2000) });
@@ -316,6 +333,16 @@ const Api = {
   // Model self-improvement
   async modelRetrainStatus()          { return apiFetch('/models/retrain-status'); },
   async triggerModelRetrain(force = false) { return apiPost(`/models/retrain?force=${force}`); },
+
+  // Global universe
+  async universeSummary()             { return apiFetch('/universe/summary'); },
+  async universeList(region = 'all', sector = 'all') { return apiFetch(`/universe/list?region=${region}&sector=${sector}`); },
+  async universeRegions()             { return apiFetch('/universe/regions'); },
+  async seedUniverse()                { return apiPost('/universe/seed'); },
+  async downloadUniverse(years = 3, region = 'all', workers = 4) {
+    return apiPost(`/universe/download?years=${years}&region=${region}&workers=${workers}`);
+  },
+  async universeDownloadStatus()      { return apiFetch('/universe/status'); },
 };
 
 // ── Legacy uppercase API shim (used in intelligence-lab + replay) ──

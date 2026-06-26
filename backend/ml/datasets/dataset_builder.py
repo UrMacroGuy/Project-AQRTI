@@ -106,8 +106,8 @@ def build_symbol_dataset(
     nifty_df = _load_nifty_data(db)
     feat_df  = _load_feature_vectors(db, symbol, version)
 
-    if price_df.empty or nifty_df.empty or feat_df.empty:
-        log.debug("Skipping %s — missing price, NIFTY, or feature data", symbol)
+    if price_df.empty or feat_df.empty:
+        log.debug("Skipping %s — missing price or feature data", symbol)
         return None
 
     # Generate forward labels from raw prices (no leakage)
@@ -148,21 +148,23 @@ def build_full_dataset(version: int = 1) -> pd.DataFrame:
     Build the complete multi-symbol labeled dataset.
 
     Returns combined DataFrame sorted by date (then symbol).
-    All symbols in the stock universe are attempted.
+    Uses all active stocks in the DB (not just hardcoded universe).
     """
-    symbols = list(__import__(
-        "aqrti.data.market_data", fromlist=["STOCK_META"]
-    ).STOCK_META.keys())
-
     all_dfs = []
     with get_db() as db:
+        # Use all active symbols that have price data
+        symbols = [
+            row[0] for row in
+            db.query(Stock.symbol).filter(Stock.active == True).all()
+        ]
+        log.info("Building dataset for %d active symbols", len(symbols))
         for symbol in symbols:
             df = build_symbol_dataset(db, symbol, version)
             if df is not None:
                 all_dfs.append(df)
                 log.info("Built dataset for %s: %d rows", symbol, len(df))
             else:
-                log.warning("No dataset for %s", symbol)
+                log.debug("No dataset for %s", symbol)
 
     if not all_dfs:
         log.error("No symbol datasets could be built")

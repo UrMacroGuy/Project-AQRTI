@@ -76,21 +76,27 @@ def compute_volume_features(df: pd.DataFrame) -> dict:
     else:
         results["distribution_score_5d"] = None
 
-    # obv_slope_10d: slope of On-Balance Volume over last 10 days, normalised by close
+    # obv_slope_10d: slope of OBV over last 10 days, normalised by avg OBV magnitude
+    # Normalising by avg volume (not close price) gives a scale-invariant signal
     if n >= 11:
-        obv  = _compute_obv(close.values, volume.values)
+        obv        = _compute_obv(close.values, volume.values)
         obv_last10 = obv[-10:]
-        x = np.arange(10, dtype=float)
-        slope, _ = np.polyfit(x, obv_last10, 1)
-        results["obv_slope_10d"] = _safe_divide(slope, float(close.iloc[-1]))
+        x          = np.arange(10, dtype=float)
+        slope, _   = np.polyfit(x, obv_last10, 1)
+        avg_vol    = float(volume.iloc[-10:].mean())
+        results["obv_slope_10d"] = _safe_divide(slope, avg_vol) if avg_vol > 0 else None
     else:
         results["obv_slope_10d"] = None
 
-    # delivery_ratio
-    if "delivery_volume" in df.columns and not df["delivery_volume"].isna().all():
-        dv = df["delivery_volume"].iloc[-1]
-        tv = volume.iloc[-1]
-        results["delivery_ratio"] = _safe_divide(dv, tv)
+    # delivery_ratio — only when today's delivery value is non-null
+    if (
+        "delivery_volume" in df.columns
+        and not df["delivery_volume"].isna().all()
+        and pd.notna(df["delivery_volume"].iloc[-1])
+    ):
+        dv = float(df["delivery_volume"].iloc[-1])
+        tv = float(volume.iloc[-1])
+        results["delivery_ratio"] = _safe_divide(dv, tv) if tv > 0 else None
     else:
         results["delivery_ratio"] = None
 
@@ -117,6 +123,12 @@ def _safe_divide(num, den) -> float:
 
 
 def _round(v) -> Optional[float]:
-    if v is None or (isinstance(v, float) and np.isnan(v)):
+    if v is None:
         return None
-    return round(float(v), 6)
+    try:
+        f = float(v)
+        if np.isnan(f) or np.isinf(f):
+            return None
+        return round(f, 6)
+    except (TypeError, ValueError):
+        return None

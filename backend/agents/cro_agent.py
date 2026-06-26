@@ -329,6 +329,7 @@ class CROAgent(AgentBase):
 
     def _assign_followups(self, db: Session, priority_findings) -> list[str]:
         from agents.agent_scheduler import create_task
+        from aqrti.database.models import AgentTask
         CATEGORY_AGENT_MAP = {
             "model":    "model_research",
             "strategy": "strategy_research",
@@ -340,6 +341,20 @@ class CROAgent(AgentBase):
         assigned = []
         for f in priority_findings[:3]:
             target_agent = CATEGORY_AGENT_MAP.get(f.category, "cro")
+            # Skip if that agent already has a pending follow-up today (prevent pile-up)
+            existing = (
+                db.query(AgentTask)
+                .filter(
+                    AgentTask.agent_id  == target_agent,
+                    AgentTask.task_type == "follow_up",
+                    AgentTask.status    == "pending",
+                    AgentTask.due_date  == date.today(),
+                )
+                .first()
+            )
+            if existing:
+                log.debug("Skipping follow-up for %s — one already pending (%s)", target_agent, existing.task_id)
+                continue
             try:
                 task = create_task(
                     db,

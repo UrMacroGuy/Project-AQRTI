@@ -234,7 +234,7 @@ class BacktestResult:
         daily_returns = []
         for t in closed:
             days = max(t.holding_days, 1)
-            daily = t.pnl_pct / days * POSITION_SIZE
+            daily = t.pnl_pct / days   # per-day return; portfolio scaling done at fitness layer
             daily_returns.extend([daily] * days)
 
         self.sharpe  = compute_sharpe(daily_returns)
@@ -362,25 +362,31 @@ def _should_enter(
     """
     Gate entry signal:
       - Must be Bullish
-      - Confidence >= min_confidence (adjusted upward in bear/sideways regimes)
+      - Confidence >= min_confidence (adjusted upward in bear/sideways/volatile regimes)
       - Regime must be allowed
-      - Not during NIFTY freefall
+      - NIFTY trend is a soft penalty (raises threshold), not a hard block
     """
     if signal["direction"] != "Bullish":
         return False
 
-    # Raise the bar in cautious regimes
     effective_threshold = min_confidence
+
+    # Raise the bar in cautious regimes — but never block outright
     if regime == "SIDEWAYS":
-        effective_threshold = max(min_confidence, min_confidence + 3)
+        effective_threshold += 3
     elif regime == "BEAR":
-        effective_threshold = max(min_confidence, min_confidence + 5)
+        effective_threshold += 6
+    elif regime == "VOLATILE":
+        effective_threshold += 4
+
+    # Soft NIFTY-trend penalty: raises bar instead of hard block
+    # (hard block was cutting 48%+ of trading days in sideways markets)
+    if nifty_trend == "DOWN":
+        effective_threshold += 5
 
     if signal["confidence"] < effective_threshold:
         return False
     if regime not in allowed_regimes:
-        return False
-    if nifty_trend == "DOWN":
         return False
 
     return True

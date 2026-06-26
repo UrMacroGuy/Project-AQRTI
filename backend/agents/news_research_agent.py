@@ -1,7 +1,9 @@
 """
 News Research Agent
-Tracks breaking news, high-impact events, unusual price moves, and sentiment shifts.
-Falls back to price-based anomaly detection when news DB tables are empty.
+Fetches and presents real-world market news in plain, readable format.
+Auto-triggers news ingestion if DB is stale (>2 hours old).
+Surfaces top stories, company-specific news, sector themes, and market-moving events
+in language a non-expert can read and act on.
 
 MAY NOT: execute trades, modify strategies, retrain models.
 """
@@ -9,8 +11,8 @@ MAY NOT: execute trades, modify strategies, retrain models.
 from __future__ import annotations
 
 import sys, os
-from collections import Counter
-from datetime import date, timedelta
+from collections import Counter, defaultdict
+from datetime import date, datetime, timedelta, timezone
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
@@ -30,83 +32,315 @@ STOCK_UNIVERSE = [
     "TATAMOTORS", "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
 ]
 
+SOURCE_FRIENDLY = {
+    "moneycontrol":    "MoneyControl",
+    "economictimes":   "Economic Times",
+    "livemint":        "LiveMint",
+    "business_standard": "Business Standard",
+    "financial_express": "Financial Express",
+    "nse_announcement": "NSE Official",
+}
+
+SENTIMENT_EMOJI = {"positive": "↑", "negative": "↓", "neutral": "→"}
+IMPACT_LABEL    = {(0, 40): "Low", (40, 65): "Medium", (65, 80): "High", (80, 101): "Critical"}
+
+
+def _impact_label(score) -> str:
+    s = score or 0
+    for (lo, hi), label in IMPACT_LABEL.items():
+        if lo <= s < hi:
+            return label
+    return "Unknown"
+
+
+def _age_label(ts: datetime) -> str:
+    if ts is None:
+        return "unknown time"
+    now  = datetime.utcnow()
+    diff = now - ts
+    mins = int(diff.total_seconds() / 60)
+    if mins < 60:
+        return f"{mins}m ago"
+    hrs = mins // 60
+    if hrs < 24:
+        return f"{hrs}h ago"
+    return f"{diff.days}d ago"
+
 
 class NewsResearchAgent(AgentBase):
     agent_id    = "news_research"
     agent_type  = "news"
     name        = "News Research Agent"
-    description = "Tracks breaking news, sentiment shifts, and price anomalies as news proxies."
+    description = (
+        "Fetches live market news and presents top stories in plain readable language. "
+        "Auto-refreshes if news is stale. Shows what happened, which stocks are affected, "
+        "and what it means for trading."
+    )
 
     def run(self, db: Session) -> dict:
         findings        = []
         recommendations = []
         today           = date.today()
+        cutoff_2h       = datetime.utcnow() - timedelta(hours=2)
+        cutoff_24h      = datetime.utcnow() - timedelta(hours=24)
         cutoff_7d       = today - timedelta(days=7)
-        cutoff_1d       = today - timedelta(days=1)
-        cutoff_30d      = today - timedelta(days=30)
-        cutoff_52w      = today - timedelta(weeks=52)
 
-        news_available = False
-
-        # ── 1. News Volume ────────────────────────────────────────
+        # ── Auto-trigger ingestion if news is stale ─────────────────
+        ingested_now = False
         try:
-            today_count = db.query(NewsEvent).filter(NewsEvent.timestamp >= cutoff_1d).count()
-            week_count  = db.query(NewsEvent).filter(NewsEvent.timestamp >= cutoff_7d).count()
-            if week_count > 0:
-                news_available = True
-                daily_avg = week_count / 7
-                if daily_avg > 0 and today_count > daily_avg * 1.5:
-                    findings.append({
-                        "title":       f"Unusual News Volume: {today_count} articles today (7d avg {daily_avg:.0f})",
-                        "description": f"Today's news volume is {(today_count / daily_avg - 1) * 100:.0f}% above 7-day average.",
-                        "evidence":    f"today={today_count}, 7d_avg={daily_avg:.1f}",
-                        "implication": "High news volume may indicate a significant market event. Increase monitoring.",
-                        "urgency":     "high",
-                        "subcategory": "news_volume",
-                    })
+            latest = db.query(NewsEvent).order_by(NewsEvent.timestamp.desc()).first()
+            needs_refresh = (
+                latest is None or
+                (latest.timestamp and latest.timestamp < cutoff_2h)
+            )
+            if needs_refresh:
+                log.info("News DB stale — triggering live ingestion …")
+                try:
+                    from news.news_pipeline import run_news_pipeline
+                    report = run_news_pipeline()
+                    ingested_now = True
+                    log.info("News ingestion complete: stored=%d", report.get("stored", 0))
+                    # Refresh latest pointer
+                    latest = db.query(NewsEvent).order_by(NewsEvent.timestamp.desc()).first()
+                except Exception as exc:
+                    log.warning("Auto-ingestion failed: %s", exc)
         except Exception as exc:
-            log.debug("News volume query skipped: %s", exc)
+            log.debug("Staleness check failed: %s", exc)
 
-        # ── 2. Negative Clusters ──────────────────────────────────
+        # ── How many news items do we have? ─────────────────────────
+        try:
+            total_news   = db.query(NewsEvent).count()
+            today_news   = db.query(NewsEvent).filter(NewsEvent.timestamp >= cutoff_24h).count()
+            news_available = total_news > 0
+        except Exception:
+            total_news = today_news = 0
+            news_available = False
+
+        # ═══════════════════════════════════════════════════════════
+        # 1. TOP STORIES TODAY — highest impact, most readable
+        # ═══════════════════════════════════════════════════════════
         if news_available:
             try:
-                neg_articles = (
+                top_stories = (
                     db.query(NewsEvent)
-                    .filter(NewsEvent.timestamp >= cutoff_7d, NewsEvent.sentiment == "negative")
+                    .filter(NewsEvent.timestamp >= cutoff_24h)
+                    .order_by(NewsEvent.impact_score.desc())
+                    .limit(8)
                     .all()
                 )
-                if neg_articles:
-                    symbol_counts = Counter(a.company for a in neg_articles if a.company)
-                    for symbol, count in symbol_counts.most_common(3):
-                        if count >= 3:
-                            findings.append({
-                                "title":       f"Negative News Cluster: {symbol} ({count} articles, 7d)",
-                                "description": f"{symbol} has {count} negative news articles in the last 7 days.",
-                                "evidence":    f"negative_count={count}, symbol={symbol}",
-                                "implication": f"Monitor {symbol} predictions for sentiment headwinds.",
-                                "urgency":     "high" if count >= 5 else "normal",
-                                "subcategory": "negative_cluster",
-                                "symbol":      symbol,
-                            })
-            except Exception as exc:
-                log.debug("Negative cluster query skipped: %s", exc)
+                if not top_stories:
+                    # fall back to 7 days
+                    top_stories = (
+                        db.query(NewsEvent)
+                        .order_by(NewsEvent.impact_score.desc())
+                        .limit(8)
+                        .all()
+                    )
 
+                if top_stories:
+                    story_lines = []
+                    for n in top_stories:
+                        sent_arrow = SENTIMENT_EMOJI.get(n.sentiment or "neutral", "→")
+                        source_str = SOURCE_FRIENDLY.get(n.source or "", n.source or "Unknown")
+                        age_str    = _age_label(n.timestamp)
+                        impact_str = _impact_label(n.impact_score)
+                        company_str = f" [{n.company}]" if n.company else ""
+                        summary_str = (
+                            f" — {n.summary[:160].rstrip()}…"
+                            if n.summary and len(n.summary) > 20 else ""
+                        )
+                        story_lines.append(
+                            f"{sent_arrow} [{impact_str}]{company_str} {n.headline}{summary_str}"
+                            f"  ({source_str}, {age_str})"
+                        )
+
+                    most_critical = top_stories[0]
+                    findings.append({
+                        "title": f"Top Market News ({today_news} stories today)",
+                        "description": "\n\n".join(story_lines),
+                        "evidence":    f"total_today={today_news}, total_db={total_news}",
+                        "implication": (
+                            f"Most impactful: {most_critical.headline[:100]} "
+                            f"[{_impact_label(most_critical.impact_score)} impact, "
+                            f"{most_critical.sentiment or 'neutral'} sentiment]"
+                        ),
+                        "urgency":     (
+                            "high"   if any(n.impact_score and n.impact_score >= 75 for n in top_stories) else
+                            "normal" if any(n.impact_score and n.impact_score >= 50 for n in top_stories) else
+                            "low"
+                        ),
+                        "subcategory": "top_stories",
+                        "category":    "news",
+                    })
+            except Exception as exc:
+                log.debug("Top stories query failed: %s", exc)
+
+            # ═══════════════════════════════════════════════════════
+            # 2. CRITICAL / HIGH-IMPACT ALERTS
+            # ═══════════════════════════════════════════════════════
             try:
-                recent_articles = db.query(NewsEvent).filter(NewsEvent.timestamp >= cutoff_7d).all()
-                category_counts = Counter(a.event_type for a in recent_articles if a.event_type)
-                for cat, count in category_counts.most_common(3):
-                    if count >= 5:
+                critical = (
+                    db.query(NewsEvent)
+                    .filter(
+                        NewsEvent.timestamp >= cutoff_24h,
+                        NewsEvent.impact_score >= 75,
+                    )
+                    .order_by(NewsEvent.impact_score.desc())
+                    .all()
+                )
+                if critical:
+                    for n in critical[:4]:
+                        source_str  = SOURCE_FRIENDLY.get(n.source or "", n.source or "?")
+                        company_str = n.company or "Market"
+                        summary_str = n.summary[:300] if n.summary else "No summary available."
                         findings.append({
-                            "title":       f"Emerging Theme: '{cat}' ({count} articles this week)",
-                            "description": f"Category '{cat}' has {count} articles in the last 7 days.",
-                            "evidence":    f"category={cat}, count={count}",
-                            "implication": f"Strategies sensitive to '{cat}' may experience signal drift.",
-                            "urgency":     "normal",
-                            "subcategory": "emerging_theme",
+                            "title":       f"ALERT [{company_str}]: {n.headline[:100]}",
+                            "description": (
+                                f"Source: {source_str} | Sentiment: {n.sentiment or 'neutral'} | "
+                                f"Impact: {n.impact_score:.0f}/100 | Published: {_age_label(n.timestamp)}\n\n"
+                                f"{summary_str}"
+                            ),
+                            "evidence":    f"impact={n.impact_score}, sentiment={n.sentiment}, source={n.source}",
+                            "implication": (
+                                f"This is a high-impact event for {company_str}. "
+                                f"{'Positive catalyst — monitor for buying opportunity.' if n.sentiment == 'positive' else 'Negative event — consider risk reduction.' if n.sentiment == 'negative' else 'Monitor for follow-through.'}"
+                            ),
+                            "urgency":     "high",
+                            "subcategory": "high_impact_alert",
+                            "category":    "news",
                         })
             except Exception as exc:
-                log.debug("Theme analysis skipped: %s", exc)
+                log.debug("Critical news query failed: %s", exc)
 
+            # ═══════════════════════════════════════════════════════
+            # 3. COMPANY-SPECIFIC NEWS DIGEST
+            # ═══════════════════════════════════════════════════════
+            try:
+                company_news = (
+                    db.query(NewsEvent)
+                    .filter(
+                        NewsEvent.timestamp >= cutoff_24h,
+                        NewsEvent.company.isnot(None),
+                    )
+                    .order_by(NewsEvent.impact_score.desc())
+                    .limit(60)
+                    .all()
+                )
+                if company_news:
+                    by_company: dict[str, list] = defaultdict(list)
+                    for n in company_news:
+                        if n.company:
+                            by_company[n.company].append(n)
+
+                    # Find companies with negative news clusters
+                    negative_clusters = {
+                        co: items for co, items in by_company.items()
+                        if sum(1 for n in items if n.sentiment == "negative") >= 2
+                    }
+                    # Find companies with positive momentum
+                    positive_leaders = {
+                        co: items for co, items in by_company.items()
+                        if sum(1 for n in items if n.sentiment == "positive") >= 2
+                    }
+
+                    if negative_clusters:
+                        worst_co  = max(negative_clusters, key=lambda c: len(negative_clusters[c]))
+                        worst_items = negative_clusters[worst_co]
+                        headlines   = [n.headline for n in sorted(worst_items, key=lambda x: x.impact_score or 0, reverse=True)[:3]]
+                        findings.append({
+                            "title": f"Negative News Cluster: {worst_co} ({len(worst_items)} stories)",
+                            "description": (
+                                f"{worst_co} has {len(worst_items)} news stories in the last 24h, "
+                                f"{sum(1 for n in worst_items if n.sentiment=='negative')} negative.\n\n"
+                                + "\n".join(f"  • {h}" for h in headlines)
+                            ),
+                            "evidence":    f"company={worst_co}, total={len(worst_items)}, negative={sum(1 for n in worst_items if n.sentiment=='negative')}",
+                            "implication": f"Negative sentiment clustering around {worst_co} — AQRTI may reduce confidence on bullish signals for this stock.",
+                            "urgency":     "high",
+                            "subcategory": "company_news",
+                            "category":    "news",
+                        })
+
+                    if positive_leaders:
+                        best_co    = max(positive_leaders, key=lambda c: len(positive_leaders[c]))
+                        best_items = positive_leaders[best_co]
+                        headlines  = [n.headline for n in sorted(best_items, key=lambda x: x.impact_score or 0, reverse=True)[:3]]
+                        findings.append({
+                            "title": f"Positive News Leader: {best_co} ({len(best_items)} stories)",
+                            "description": (
+                                f"{best_co} has {len(best_items)} positive stories in 24h:\n\n"
+                                + "\n".join(f"  • {h}" for h in headlines)
+                            ),
+                            "evidence":    f"company={best_co}, total={len(best_items)}, positive={sum(1 for n in best_items if n.sentiment=='positive')}",
+                            "implication": f"Strong positive news flow for {best_co} — may support bullish momentum strategies.",
+                            "urgency":     "low",
+                            "subcategory": "company_news",
+                            "category":    "news",
+                        })
+            except Exception as exc:
+                log.debug("Company news digest failed: %s", exc)
+
+            # ═══════════════════════════════════════════════════════
+            # 4. SECTOR THEMES
+            # ═══════════════════════════════════════════════════════
+            try:
+                sector_news = (
+                    db.query(NewsEvent)
+                    .filter(
+                        NewsEvent.timestamp >= cutoff_24h,
+                        NewsEvent.sector.isnot(None),
+                    )
+                    .all()
+                )
+                if sector_news:
+                    sector_sentiment: dict[str, list[str]] = defaultdict(list)
+                    for n in sector_news:
+                        if n.sector and n.sentiment:
+                            sector_sentiment[n.sector].append(n.sentiment)
+
+                    sector_scores = {}
+                    for sector, sents in sector_sentiment.items():
+                        if len(sents) < 2:
+                            continue
+                        pos = sents.count("positive")
+                        neg = sents.count("negative")
+                        sector_scores[sector] = {
+                            "total": len(sents), "positive": pos, "negative": neg,
+                            "score": (pos - neg) / len(sents) * 100,
+                        }
+
+                    if sector_scores:
+                        best_sector  = max(sector_scores, key=lambda s: sector_scores[s]["score"])
+                        worst_sector = min(sector_scores, key=lambda s: sector_scores[s]["score"])
+                        bs = sector_scores[best_sector]
+                        ws = sector_scores[worst_sector]
+
+                        findings.append({
+                            "title": f"Sector Themes: {best_sector} leading, {worst_sector} under pressure",
+                            "description": (
+                                f"Best sector: {best_sector} — {bs['positive']} positive, {bs['negative']} negative, {bs['total']} total stories.\n"
+                                f"Worst sector: {worst_sector} — {ws['positive']} positive, {ws['negative']} negative, {ws['total']} total stories.\n\n"
+                                f"Sector breakdown: " +
+                                ", ".join(
+                                    f"{s}: +{d['positive']}/-{d['negative']}"
+                                    for s, d in sorted(sector_scores.items(), key=lambda kv: kv[1]["score"], reverse=True)[:6]
+                                )
+                            ),
+                            "evidence":    f"best={best_sector}(score={bs['score']:.0f}), worst={worst_sector}(score={ws['score']:.0f})",
+                            "implication": (
+                                f"Rotate toward {best_sector} stocks — positive news tailwind. "
+                                f"Reduce exposure to {worst_sector} — negative news pressure."
+                            ),
+                            "urgency":     "normal",
+                            "subcategory": "sector_themes",
+                            "category":    "news",
+                        })
+            except Exception as exc:
+                log.debug("Sector theme analysis failed: %s", exc)
+
+            # ═══════════════════════════════════════════════════════
+            # 5. SENTIMENT TREND (improving or deteriorating?)
+            # ═══════════════════════════════════════════════════════
             try:
                 recent_sent = (
                     db.query(SentimentRecord)
@@ -116,30 +350,84 @@ class NewsResearchAgent(AgentBase):
                     .all()
                 )
                 if len(recent_sent) >= 10:
-                    latest_avg = sum(s.score for s in recent_sent[:10] if s.score) / min(10, len(recent_sent))
-                    older_avg  = sum(s.score for s in recent_sent[10:] if s.score) / max(1, len(recent_sent) - 10)
-                    if abs(latest_avg - older_avg) > 15:
-                        direction = "improving" if latest_avg > older_avg else "deteriorating"
-                        findings.append({
-                            "title":       f"Sentiment Shift: {direction} ({latest_avg:.1f} vs {older_avg:.1f})",
-                            "description": (
-                                f"Overall sentiment has shifted {direction}. "
-                                f"Recent avg={latest_avg:.1f}, prior avg={older_avg:.1f}."
-                            ),
-                            "evidence":    f"recent_avg={latest_avg:.1f}, prior_avg={older_avg:.1f}",
-                            "implication": "Sentiment-driven strategy signals may be transitioning.",
-                            "urgency":     "normal",
-                            "subcategory": "sentiment_shift",
-                        })
-                        recommendations.append(f"Recalibrate sentiment thresholds — market narrative is {direction}.")
+                    latest10 = [s.score for s in recent_sent[:10]  if s.score is not None]
+                    older    = [s.score for s in recent_sent[10:]   if s.score is not None]
+                    if latest10 and older:
+                        latest_avg = sum(latest10) / len(latest10)
+                        older_avg  = sum(older)    / len(older)
+                        delta      = latest_avg - older_avg
+                        if abs(delta) > 8:
+                            direction = "improving" if delta > 0 else "deteriorating"
+                            mood      = "positive" if latest_avg > 55 else "negative" if latest_avg < 40 else "neutral"
+                            findings.append({
+                                "title": (
+                                    f"Market Mood {direction.title()}: sentiment {latest_avg:.0f}/100 "
+                                    f"({'up' if delta > 0 else 'down'} {abs(delta):.0f} pts)"
+                                ),
+                                "description": (
+                                    f"Overall market sentiment has shifted {direction} this week. "
+                                    f"Recent score: {latest_avg:.1f}/100 (prior: {older_avg:.1f}/100, change: {delta:+.1f}). "
+                                    f"Current mood: {mood}.\n\n"
+                                    f"What this means: "
+                                    + (
+                                        "News flow is becoming more optimistic — investors are seeing good news. Good environment for momentum strategies." if direction == "improving"
+                                        else "News flow is worsening — more negative events. Be cautious with new positions."
+                                    )
+                                ),
+                                "evidence":    f"latest_avg={latest_avg:.1f}, older_avg={older_avg:.1f}, delta={delta:.1f}",
+                                "implication": (
+                                    "Positive sentiment shift supports bullish momentum." if direction == "improving"
+                                    else "Deteriorating sentiment — reduce position sizes, wait for stabilisation."
+                                ),
+                                "urgency":     "normal",
+                                "subcategory": "sentiment_trend",
+                                "category":    "news",
+                            })
             except Exception as exc:
-                log.debug("Sentiment shift query skipped: %s", exc)
+                log.debug("Sentiment trend query failed: %s", exc)
 
-        # ── 3. Price-Based News Proxies ───────────────────────────
+            # ═══════════════════════════════════════════════════════
+            # 6. NSE ANNOUNCEMENTS (official filings)
+            # ═══════════════════════════════════════════════════════
+            try:
+                nse_news = (
+                    db.query(NewsEvent)
+                    .filter(
+                        NewsEvent.timestamp >= cutoff_24h,
+                        NewsEvent.source == "nse_announcement",
+                    )
+                    .order_by(NewsEvent.impact_score.desc())
+                    .limit(5)
+                    .all()
+                )
+                if nse_news:
+                    lines = []
+                    for n in nse_news:
+                        lines.append(
+                            f"  • {n.headline[:130]} ({_age_label(n.timestamp)})"
+                        )
+                    findings.append({
+                        "title": f"NSE Official Filings Today ({len(nse_news)} announcements)",
+                        "description": (
+                            "Official NSE corporate announcements — highest reliability:\n\n"
+                            + "\n".join(lines)
+                        ),
+                        "evidence":    f"nse_count={len(nse_news)}",
+                        "implication": "These are directly from NSE — high reliability. Check for earnings, dividends, board meetings.",
+                        "urgency":     "normal",
+                        "subcategory": "official_filings",
+                        "category":    "news",
+                    })
+            except Exception as exc:
+                log.debug("NSE announcements query failed: %s", exc)
+
+        # ═══════════════════════════════════════════════════════════
+        # 7. PRICE-BASED NEWS PROXIES (always run as supplementary)
+        # ═══════════════════════════════════════════════════════════
         try:
+            cutoff_30d    = today - timedelta(days=30)
             large_movers  = []
             volume_spikes = []
-            gap_events    = []
 
             for symbol in STOCK_UNIVERSE:
                 rows = (
@@ -151,7 +439,6 @@ class NewsResearchAgent(AgentBase):
                 )
                 if len(rows) < 2:
                     continue
-
                 latest = rows[0]
                 prev   = rows[1]
 
@@ -164,127 +451,100 @@ class NewsResearchAgent(AgentBase):
                     if avg_vol > 0 and latest.volume > avg_vol * 2.5:
                         volume_spikes.append((symbol, latest.volume / avg_vol, latest.date))
 
-                if latest.open and prev.close and prev.close > 0:
-                    gap = (latest.open - prev.close) / prev.close * 100
-                    if abs(gap) >= 2.5:
-                        gap_events.append((symbol, gap, latest.date))
-
             if large_movers:
                 large_movers.sort(key=lambda x: abs(x[1]), reverse=True)
-                for sym, ret, dt in large_movers[:3]:
-                    findings.append({
-                        "title":       f"Large Price Move: {sym} {ret:+.1f}% on {dt}",
-                        "description": (
-                            f"{sym} moved {ret:+.1f}% in a single session — likely driven by "
-                            f"{'positive catalyst (earnings beat, upgrade, or sector tailwind)' if ret > 0 else 'negative catalyst (earnings miss, downgrade, or macro pressure)'}."
-                        ),
-                        "evidence":    f"symbol={sym}, daily_return={ret:.2f}%, date={dt}",
-                        "implication": f"{'Monitor for follow-through buying.' if ret > 0 else 'Monitor for continued selling pressure.'}",
-                        "urgency":     "high" if abs(ret) >= 5 else "normal",
-                        "subcategory": "large_price_move",
-                        "symbol":      sym,
-                    })
+                mover_lines = []
+                for sym, ret, dt in large_movers[:5]:
+                    direction = "surged" if ret > 0 else "fell"
+                    reason    = (
+                        "likely driven by positive news or earnings beat" if ret > 0
+                        else "likely driven by negative news or sector weakness"
+                    )
+                    mover_lines.append(
+                        f"  • {sym} {direction} {abs(ret):.1f}% on {dt} — {reason}"
+                    )
+                findings.append({
+                    "title":       f"Price-Based News Signals: {len(large_movers)} large moves detected",
+                    "description": (
+                        "Stocks with significant price moves (likely news-driven):\n\n"
+                        + "\n".join(mover_lines)
+                        + ("\n\n(These are price signals — run news ingestion for actual headlines.)" if not news_available else "")
+                    ),
+                    "evidence":    f"large_movers={len(large_movers)}, volume_spikes={len(volume_spikes)}",
+                    "implication": "Large moves suggest news catalysts. Check these stocks in the Market tab for details.",
+                    "urgency":     "high" if any(abs(r) >= 5 for _, r, _ in large_movers) else "normal",
+                    "subcategory": "price_signals",
+                    "category":    "news",
+                })
 
             if volume_spikes:
                 volume_spikes.sort(key=lambda x: x[1], reverse=True)
                 sym, ratio, dt = volume_spikes[0]
                 findings.append({
-                    "title":       f"Volume Spike: {sym} traded {ratio:.1f}x normal on {dt}",
+                    "title": f"Unusual Volume: {sym} traded {ratio:.1f}x normal ({dt})",
                     "description": (
-                        f"{sym} had {ratio:.1f}x its 20-day average volume — "
-                        f"signals institutional accumulation or distribution."
+                        f"{sym} had {ratio:.1f}x its 20-day average volume on {dt}.\n\n"
+                        f"What this means: When volume is this high, it usually means big investors "
+                        f"(institutions, FIIs) are buying or selling aggressively. "
+                        f"This is often a sign that important news is driving the stock."
                     ),
                     "evidence":    f"symbol={sym}, volume_ratio={ratio:.2f}x, date={dt}",
-                    "implication": f"Unusual volume in {sym} suggests informed trading. Monitor price direction.",
+                    "implication": f"Investigate {sym} for news catalyst — high volume rarely happens without reason.",
                     "urgency":     "normal",
-                    "subcategory": "volume_spike",
-                    "symbol":      sym,
-                })
-
-            if gap_events:
-                gap_events.sort(key=lambda x: abs(x[1]), reverse=True)
-                sym, gap, dt = gap_events[0]
-                gap_type = "gap-up" if gap > 0 else "gap-down"
-                findings.append({
-                    "title":       f"Price Gap: {sym} {gap_type} {gap:+.1f}% on {dt}",
-                    "description": (
-                        f"{sym} opened {gap:+.1f}% vs prior close on {dt}. "
-                        f"{'Positive overnight catalyst.' if gap > 0 else 'Negative overnight catalyst.'}"
-                    ),
-                    "evidence":    f"symbol={sym}, gap_pct={gap:.2f}%, date={dt}",
-                    "implication": f"{'Gap-ups on volume often continue intraday.' if gap > 0 else 'Gap-downs signal sustained weakness.'}",
-                    "urgency":     "normal",
-                    "subcategory": "price_gap",
-                    "symbol":      sym,
+                    "subcategory": "volume_signal",
+                    "category":    "news",
                 })
         except Exception as exc:
-            log.debug("Price-based proxy analysis skipped: %s", exc)
+            log.debug("Price-based proxy analysis failed: %s", exc)
 
-        # ── 4. 52-Week Extremes ───────────────────────────────────
-        try:
-            highs_52w = []
-            lows_52w  = []
-            for symbol in STOCK_UNIVERSE:
-                rows = (
-                    db.query(DailyPrice.close, DailyPrice.date)
-                    .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_52w)
-                    .order_by(DailyPrice.date.asc())
-                    .all()
-                )
-                if len(rows) < 30:
-                    continue
-                closes  = [r.close for r in rows if r.close]
-                if not closes:
-                    continue
-                latest  = closes[-1]
-                max_52w = max(closes)
-                min_52w = min(closes)
-                if latest >= max_52w * 0.98:
-                    highs_52w.append(symbol)
-                elif latest <= min_52w * 1.02:
-                    lows_52w.append(symbol)
-
-            if highs_52w:
-                findings.append({
-                    "title":       f"{len(highs_52w)} stocks at 52-week highs: {', '.join(highs_52w[:4])}",
-                    "description": f"{', '.join(highs_52w)} trading near 52-week highs — momentum leaders.",
-                    "evidence":    f"52w_highs={highs_52w}",
-                    "implication": "Breakout candidates. Momentum strategies may generate bullish signals.",
-                    "urgency":     "low",
-                    "subcategory": "52w_high",
-                })
-
-            if lows_52w:
-                findings.append({
-                    "title":       f"{len(lows_52w)} stocks at 52-week lows: {', '.join(lows_52w[:4])}",
-                    "description": f"{', '.join(lows_52w)} trading near 52-week lows — potential distress.",
-                    "evidence":    f"52w_lows={lows_52w}",
-                    "implication": "Avoid or close long positions in 52-week low stocks.",
-                    "urgency":     "normal" if len(lows_52w) >= 3 else "low",
-                    "subcategory": "52w_low",
-                })
-        except Exception as exc:
-            log.debug("52-week high/low analysis skipped: %s", exc)
+        # ── Ingestion status notice ──────────────────────────────────
+        if ingested_now:
+            findings.insert(0, {
+                "title":       f"News Refreshed: {today_news} new stories fetched",
+                "description": (
+                    f"News database was stale — live ingestion was triggered automatically. "
+                    f"Fetched from MoneyControl, Economic Times, LiveMint, Business Standard, "
+                    f"Financial Express, and NSE announcements."
+                ),
+                "evidence":    f"ingested_now=True, today_news={today_news}",
+                "implication": "Fresh news data — findings below reflect latest market events.",
+                "urgency":     "low",
+                "subcategory": "data_freshness",
+                "category":    "news",
+            })
+        elif not news_available:
+            findings.append({
+                "title":       "News Database Empty — Showing Price Signals Only",
+                "description": (
+                    "No news articles in the database yet. Price-based signals above are being used as proxies.\n\n"
+                    "To get real news: make sure the backend is running at market hours (9am–4pm IST) "
+                    "so the hourly agent can pull live headlines from RSS feeds."
+                ),
+                "evidence":    "news_events_count=0",
+                "implication": "Price signals are less reliable than actual news — treat with caution.",
+                "urgency":     "low",
+                "subcategory": "data_freshness",
+                "category":    "news",
+            })
+            recommendations.append("Ensure backend runs during market hours for automatic news ingestion.")
 
         if not findings:
             findings.append({
-                "title":       "News Database Empty — No Price Anomalies Detected",
-                "description": "news_events table is empty and no significant price anomalies found in the last 30 days.",
-                "evidence":    "news_events_count=0, no_price_spikes",
-                "implication": "Run the news ingestion pipeline from Research Ops to populate data.",
+                "title":       "No Significant News Today",
+                "description": "No high-impact news events detected. Market appears quiet.",
+                "evidence":    f"total_today={today_news}",
+                "implication": "Quiet news day — rely on price action and technical signals.",
                 "urgency":     "low",
-                "subcategory": "data_coverage",
+                "subcategory": "baseline",
+                "category":    "news",
             })
-            recommendations.append("Trigger news ingestion from Research Ops page.")
 
-        if not news_available and findings:
-            recommendations.append("News DB empty — price moves above are surrogates. Run ingestion for full analysis.")
-
-        summary = (
+        urgency  = "high" if any(f.get("urgency") == "high" for f in findings) else "normal"
+        summary  = (
             f"News research: {len(findings)} findings. "
-            f"{'[!] High urgency items detected.' if any(f['urgency'] == 'high' for f in findings) else 'No critical alerts.'}"
+            f"{today_news} articles today. "
+            f"{'[!] High-impact events detected.' if urgency == 'high' else 'No critical alerts.'}"
         )
-        urgency = "high" if any(f["urgency"] == "high" for f in findings) else "normal"
 
         return {
             "title":           f"News Research — {today}",
@@ -292,6 +552,12 @@ class NewsResearchAgent(AgentBase):
             "findings":        findings,
             "recommendations": recommendations,
             "urgency":         urgency,
+            "metadata": {
+                "total_news":    total_news,
+                "today_news":    today_news,
+                "ingested_now":  ingested_now,
+                "news_available": news_available,
+            },
         }
 
 

@@ -113,24 +113,8 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 8 — Strategy research loop failed: %s", exc)
 
-    # Step 9: Multi-agent research pipeline
-    try:
-        from aqrti.database.engine import get_session_factory
-        from agents.agent_scheduler import run_daily_pipeline
-        _db = get_session_factory()()
-        try:
-            pipeline_report = run_daily_pipeline(_db)
-            _db.commit()
-            scheduler_logger.info(
-                "Step 9 — Agent Pipeline: agents=%d findings=%d brief=%s",
-                pipeline_report.get("agents_run", 0),
-                pipeline_report.get("total_findings", 0),
-                "issued" if pipeline_report.get("brief_generated") else "skipped",
-            )
-        finally:
-            _db.close()
-    except Exception as exc:
-        scheduler_logger.error("Step 9 — Agent pipeline failed: %s", exc)
+    # Step 9: Multi-agent research pipeline — handled by hourly_agents job (runs every 1 hr)
+    scheduler_logger.info("Step 9 — Agent pipeline runs via hourly_agents job (skipped in daily to avoid double-run)")
 
     # Step 10: Historical Intelligence Vault — archive everything
     try:
@@ -174,6 +158,35 @@ def _daily_job():
         scheduler_logger.error("Step 12 — Historical Intelligence pipeline failed: %s", exc)
 
     scheduler_logger.info("=== DAILY PIPELINE COMPLETE ===")
+
+
+def _hourly_agent_job():
+    """
+    Runs the full 7-agent research pipeline every hour.
+    Includes follow-up task execution at the end.
+    Separate from the daily pipeline so agents produce fresh findings
+    throughout the day, not just once after market close.
+    """
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+
+    try:
+        from aqrti.database.engine import get_session_factory
+        from agents.agent_scheduler import run_daily_pipeline
+        _db = get_session_factory()()
+        try:
+            report = run_daily_pipeline(_db)
+            _db.commit()
+            scheduler_logger.info(
+                "Hourly agents — follow_ups_run=%d",
+                report.get("follow_ups_run", 0),
+            )
+        finally:
+            _db.close()
+    except Exception as exc:
+        scheduler_logger.error("Hourly agent job failed: %s", exc)
 
 
 def _strategy_loop_job():
@@ -269,6 +282,18 @@ def start_scheduler() -> BackgroundScheduler:
         misfire_grace_time=3600,
     )
 
+    # Hourly agent pipeline — all 7 research agents run every hour
+    _scheduler.add_job(
+        _hourly_agent_job,
+        trigger="interval",
+        hours=1,
+        id="hourly_agents",
+        name="Hourly Agent Pipeline",
+        replace_existing=True,
+        misfire_grace_time=600,
+        max_instances=1,
+    )
+
     # Continuous strategy loop — runs every 5 minutes, always
     _scheduler.add_job(
         _strategy_loop_job,
@@ -283,7 +308,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     _scheduler.start()
     scheduler_logger.info(
-        "Scheduler started. Daily cron: %s IST | Strategy loop: every 5 min",
+        "Scheduler started. Daily cron: %s IST | Agents: every 1 hr | Strategy loop: every 5 min",
         settings.ingest_cron,
     )
     return _scheduler

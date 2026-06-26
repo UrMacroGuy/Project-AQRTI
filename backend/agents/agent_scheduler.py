@@ -127,8 +127,46 @@ def run_daily_pipeline(db: Session) -> dict:
             log.error("Agent %s pipeline error: %s", agent_id, exc)
             results[agent_id] = {"status": "error", "error": str(exc)}
 
-    log.info("=== DAILY AGENT PIPELINE COMPLETE ===")
-    return {"date": str(date.today()), "agents": results}
+    # Process follow-up tasks queued by CRO (e.g. "Follow-up: Strategy Decay: ...")
+    followup_result = run_followup_tasks(db)
+    log.info("=== DAILY AGENT PIPELINE COMPLETE === follow_ups_run=%d", followup_result["follow_ups_run"])
+    return {"date": str(date.today()), "agents": results, "follow_ups_run": followup_result["follow_ups_run"]}
+
+
+def run_followup_tasks(db: Session) -> dict:
+    """
+    Execute any pending follow_up tasks created by CRO (or other agents).
+    Called at end of daily pipeline so they don't accumulate as zombies.
+    """
+    pending = (
+        db.query(AgentTask)
+        .filter(AgentTask.task_type == "follow_up", AgentTask.status == "pending")
+        .order_by(AgentTask.priority.asc(), AgentTask.created_at.asc())
+        .limit(10)  # cap per cycle to avoid runaway
+        .all()
+    )
+    if not pending:
+        return {"follow_ups_run": 0}
+
+    log.info("Running %d pending follow-up tasks", len(pending))
+    ran = 0
+    for task in pending:
+        try:
+            agent_instance = _get_agent_instance(task.agent_id)
+            task.status     = "running"
+            task.started_at = datetime.utcnow()
+            db.commit()
+            findings = agent_instance.execute(db, task_id=task.task_id)
+            _complete_task(db, task.task_id, findings)
+            ran += 1
+            log.info("Follow-up task %s (%s) completed", task.task_id, task.agent_id)
+        except Exception as exc:
+            log.error("Follow-up task %s failed: %s", task.task_id, exc)
+            task.status        = "failed"
+            task.error_message = str(exc)
+            task.completed_at  = datetime.utcnow()
+            db.commit()
+    return {"follow_ups_run": ran}
 
 
 def _complete_task(db: Session, task_id: str, output: dict) -> None:
