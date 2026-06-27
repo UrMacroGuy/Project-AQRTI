@@ -32,12 +32,12 @@ EXPOSURE_ALERT     = 80.0
 
 SECTOR_MAP = {
     "RELIANCE": "Energy",    "ONGC": "Energy",       "COALINDIA": "Energy",  "BPCL": "Energy",
-    "TCS": "IT",             "INFY": "IT",           "WIPRO": "IT",          "LTIM": "IT",
+    "TCS": "IT",             "INFY": "IT",           "WIPRO": "IT",
     "HCLTECH": "IT",         "TECHM": "IT",
     "HDFCBANK": "Banking",   "ICICIBANK": "Banking", "AXISBANK": "Banking",
     "KOTAKBANK": "Banking",  "SBIN": "Banking",      "INDUSINDBK": "Banking",
     "BAJFINANCE": "NBFC",    "BAJAJFINSV": "NBFC",   "HDFCLIFE": "Insurance", "SBILIFE": "Insurance",
-    "MARUTI": "Auto",        "TATAMOTORS": "Auto",   "M&M": "Auto",
+    "MARUTI": "Auto",        "M&M": "Auto",
     "EICHERMOT": "Auto",     "HEROMOTOCO": "Auto",
     "SUNPHARMA": "Pharma",   "DRREDDY": "Pharma",    "CIPLA": "Pharma",      "DIVISLAB": "Pharma",
     "TATASTEEL": "Metal",    "HINDALCO": "Metal",    "JSWSTEEL": "Metal",

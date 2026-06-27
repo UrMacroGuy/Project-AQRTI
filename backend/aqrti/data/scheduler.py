@@ -106,6 +106,116 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 7 — Learning loop failed: %s", exc)
 
+    # Step 7B: Regime Discovery (K-Means unsupervised)
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.regime_discovery import run_regime_discovery
+        with _get_db() as _db:
+            r7b = run_regime_discovery(_db)
+        scheduler_logger.info("Step 7B — Regime Discovery: %s", r7b.get("status"))
+    except Exception as exc:
+        scheduler_logger.error("Step 7B — Regime Discovery failed: %s", exc)
+
+    # Step 7C: Counterfactual Analysis
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.counterfactual_engine import run_counterfactual_analysis
+        with _get_db() as _db:
+            r7c = run_counterfactual_analysis(_db, days=14)
+        scheduler_logger.info("Step 7C — Counterfactual: sims=%d lessons=%d",
+                              r7c.get("simulations_written", 0), r7c.get("lessons_generated", 0))
+    except Exception as exc:
+        scheduler_logger.error("Step 7C — Counterfactual failed: %s", exc)
+
+    # Step 7D: Strategy DNA Sync
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.strategy_dna import sync_strategy_dna
+        with _get_db() as _db:
+            r7d = sync_strategy_dna(_db, limit=200)
+        scheduler_logger.info("Step 7D — Strategy DNA: created=%d updated=%d",
+                              r7d.get("created", 0), r7d.get("updated", 0))
+    except Exception as exc:
+        scheduler_logger.error("Step 7D — Strategy DNA failed: %s", exc)
+
+    # Step 7E: Feature Discovery
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.feature_discovery import run_feature_discovery
+        with _get_db() as _db:
+            r7e = run_feature_discovery(_db)
+        scheduler_logger.info("Step 7E — Feature Discovery: approved=%d",
+                              r7e.get("approved", 0))
+    except Exception as exc:
+        scheduler_logger.error("Step 7E — Feature Discovery failed: %s", exc)
+
+    # Step 7F: Knowledge Graph Update
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.knowledge_graph_engine import run_full_graph_update
+        with _get_db() as _db:
+            r7f = run_full_graph_update(_db)
+        scheduler_logger.info("Step 7F — Knowledge Graph: nodes=%d edges=%d",
+                              r7f.get("nodes", 0), r7f.get("edges", 0))
+    except Exception as exc:
+        scheduler_logger.error("Step 7F — Knowledge Graph failed: %s", exc)
+
+    # Step 7G: Hypothesis Engine
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.hypothesis_engine import run_hypothesis_cycle
+        with _get_db() as _db:
+            r7g = run_hypothesis_cycle(_db)
+        scheduler_logger.info("Step 7G — Hypothesis: generated=%d experiments=%d",
+                              r7g.get("hypotheses_generated", 0), r7g.get("experiments_run", 0))
+    except Exception as exc:
+        scheduler_logger.error("Step 7G — Hypothesis Engine failed: %s", exc)
+
+    # Step 7H: Champion-Challenger Arena
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.champion_challenger import run_arena_evaluation
+        with _get_db() as _db:
+            r7h = run_arena_evaluation(_db)
+        scheduler_logger.info("Step 7H — Arena: arenas=%d results=%d",
+                              r7h.get("arenas_evaluated", 0), len(r7h.get("results", [])))
+    except Exception as exc:
+        scheduler_logger.error("Step 7H — Arena evaluation failed: %s", exc)
+
+    # Step 7I: Bayesian Uncertainty (active model)
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.bayesian_uncertainty import estimate_uncertainty
+        from aqrti.database.models import ModelRecord
+        with _get_db() as _db:
+            model = _db.query(ModelRecord).filter(ModelRecord.is_active == True).first()
+            if model:
+                r7i = estimate_uncertainty(_db, model_id=model.model_id)
+                scheduler_logger.info("Step 7I — Uncertainty: %s", r7i.get("label"))
+            else:
+                scheduler_logger.info("Step 7I — Uncertainty: no active model")
+    except Exception as exc:
+        scheduler_logger.error("Step 7I — Uncertainty estimation failed: %s", exc)
+
+    # Step 7J: Multi-Agent Decision (top 5 symbols)
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from intelligence.multi_agent_decision import run_multi_agent_decision
+        from aqrti.database.models import Stock
+        with _get_db() as _db:
+            top_syms = [s.symbol for s in _db.query(Stock).limit(5).all()]
+        decisions = []
+        for sym in top_syms:
+            try:
+                with _get_db() as _db:
+                    d = run_multi_agent_decision(_db, symbol=sym)
+                decisions.append(f"{sym}:{d.get('direction','?')}")
+            except Exception:
+                pass
+        scheduler_logger.info("Step 7J — Multi-Agent: %s", " | ".join(decisions))
+    except Exception as exc:
+        scheduler_logger.error("Step 7J — Multi-Agent failed: %s", exc)
+
     # Step 8: Strategy research loop
     try:
         from strategies.strategy_research_loop import run_daily_strategy_research
@@ -258,14 +368,36 @@ def _strategy_loop_job():
         scheduler_logger.error("Strategy loop failed: %s", exc)
 
 
+def _alert_check_job():
+    """Fast 5-min alert scan — checks for critical events without full agent run."""
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    try:
+        from aqrti.database.engine import get_db
+        from aqrti.database.models import EquityCurvePoint, KnowledgeScore
+        with get_db() as db:
+            eq = db.query(EquityCurvePoint).order_by(EquityCurvePoint.date.desc()).first()
+            ks = db.query(KnowledgeScore).order_by(KnowledgeScore.date.desc()).first()
+            if eq and eq.drawdown_pct and eq.drawdown_pct < -15:
+                scheduler_logger.warning("ALERT: Portfolio drawdown %.1f%% exceeded -15%% threshold", eq.drawdown_pct)
+            if ks and ks.overall_score and ks.overall_score < 35:
+                scheduler_logger.warning("ALERT: Knowledge score %.1f below 35 — system degrading", ks.overall_score)
+    except Exception as exc:
+        scheduler_logger.error("Alert check failed: %s", exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler and _scheduler.running:
         return _scheduler
 
+    import os
+    lite_mode = os.environ.get("AQRTI_LITE_MODE", "0").strip() not in ("0", "false", "False", "")
+
     settings = get_settings()
     parts = settings.ingest_cron.split()
-    # cron string: "minute hour day month day_of_week"
     if len(parts) == 5:
         minute, hour, day, month, day_of_week = parts
     else:
@@ -273,7 +405,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
-    # Daily full pipeline — runs once after NSE close
+    # Daily full pipeline — runs once after NSE close (always enabled)
     _scheduler.add_job(
         _daily_job,
         trigger=CronTrigger(
@@ -290,34 +422,51 @@ def start_scheduler() -> BackgroundScheduler:
         misfire_grace_time=3600,
     )
 
-    # Hourly agent pipeline — all 7 research agents run every hour
-    _scheduler.add_job(
-        _hourly_agent_job,
-        trigger="interval",
-        hours=1,
-        id="hourly_agents",
-        name="Hourly Agent Pipeline",
-        replace_existing=True,
-        misfire_grace_time=600,
-        max_instances=1,
-    )
+    if not lite_mode:
+        # Hourly agent pipeline — disabled in lite mode to save RAM
+        _scheduler.add_job(
+            _hourly_agent_job,
+            trigger="interval",
+            hours=1,
+            id="hourly_agents",
+            name="Hourly Agent Pipeline",
+            replace_existing=True,
+            misfire_grace_time=600,
+            max_instances=1,
+        )
 
-    # Continuous strategy loop — runs every 5 minutes, always
+        # Continuous strategy loop — disabled in lite mode (biggest RAM user)
+        _scheduler.add_job(
+            _strategy_loop_job,
+            trigger="interval",
+            minutes=5,
+            id="strategy_loop",
+            name="Strategy Research Loop",
+            replace_existing=True,
+            misfire_grace_time=300,
+            max_instances=1,
+        )
+
+    # Fast alert check — always enabled, very lightweight
     _scheduler.add_job(
-        _strategy_loop_job,
+        _alert_check_job,
         trigger="interval",
         minutes=5,
-        id="strategy_loop",
-        name="Strategy Research Loop",
+        id="alert_check",
+        name="5-Min Alert Check",
         replace_existing=True,
-        misfire_grace_time=300,
+        misfire_grace_time=120,
         max_instances=1,
     )
 
     _scheduler.start()
+    mode_label = "LITE (agents/strategy-loop disabled)" if lite_mode else "FULL"
     scheduler_logger.info(
-        "Scheduler started. Daily cron: %s IST | Agents: every 1 hr | Strategy loop: every 5 min",
+        "Scheduler started [%s]. Daily cron: %s IST | Agents: %s | Strategy loop: %s",
+        mode_label,
         settings.ingest_cron,
+        "disabled" if lite_mode else "every 1 hr",
+        "disabled" if lite_mode else "every 5 min",
     )
     return _scheduler
 

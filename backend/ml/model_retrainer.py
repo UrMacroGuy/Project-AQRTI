@@ -45,9 +45,11 @@ log = get_logger("model_retrainer")
 
 # ── Thresholds ────────────────────────────────────────────────
 WIN_RATE_FLOOR        = 50.0   # below this → trigger retraining
+WIN_RATE_TARGET       = 75.0   # new model must achieve this on eval set to be promoted
 ACCURACY_EVAL_DAYS    = 30     # evaluate accuracy over last N days
 MODEL_STALE_DAYS      = 45     # retrain if model hasn't been updated in N days
 MIN_PREDICTIONS_EVAL  = 20     # need at least this many evaluated predictions
+MAX_RETRAIN_ATTEMPTS  = 5      # max retrain loops before giving up
 
 
 def _current_regime(db: Session) -> str:
@@ -231,11 +233,16 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
             elapsed, best_model.model_type, next_version, best_metrics.get("accuracy", 0),
         )
 
+        # win_rate on test set (% of correctly predicted directions)
+        accuracy = best_metrics.get("accuracy", 0.0)
+        win_rate_pct = round(accuracy * 100, 2)
+
         return {
             "status":      "ok",
             "model":       best_model.model_type,
             "version":     next_version,
-            "accuracy":    best_metrics.get("accuracy"),
+            "accuracy":    accuracy,
+            "win_rate":    win_rate_pct,
             "metrics":     metrics_list,
             "elapsed_sec": elapsed,
             "trigger":     trigger_reason,
@@ -352,17 +359,55 @@ def check_and_retrain(db: Session, force: bool = False) -> dict:
         }
 
     log.info("Triggering retraining: %s", trigger_reason)
-    result = _run_training_pipeline(db, trigger_reason)
+
+    # Retry loop: keep retraining until win_rate >= WIN_RATE_TARGET or max attempts
+    attempt = 0
+    result = {}
+    while attempt < MAX_RETRAIN_ATTEMPTS:
+        attempt += 1
+        attempt_trigger = f"{trigger_reason} (attempt {attempt}/{MAX_RETRAIN_ATTEMPTS})"
+        log.info("Retrain attempt %d/%d", attempt, MAX_RETRAIN_ATTEMPTS)
+        result = _run_training_pipeline(db, attempt_trigger)
+
+        if result.get("status") != "ok":
+            log.warning("Retrain attempt %d failed: %s", attempt, result.get("reason"))
+            break
+
+        achieved_wr = result.get("win_rate", 0.0)
+        log.info("Attempt %d: win_rate=%.1f%% (target=%.1f%%)", attempt, achieved_wr, WIN_RATE_TARGET)
+
+        if achieved_wr >= WIN_RATE_TARGET:
+            log.info("Win rate target achieved (%.1f%% >= %.1f%%) — promoting model", achieved_wr, WIN_RATE_TARGET)
+            break
+        else:
+            log.info(
+                "Win rate %.1f%% below target %.1f%% — retiring model and retraining",
+                achieved_wr, WIN_RATE_TARGET,
+            )
+            # Roll back the is_active promotion from _run_training_pipeline so the
+            # next attempt starts clean (it will bump version again)
+            from aqrti.database.models import ModelVersion as _MV
+            just_trained = (
+                db.query(_MV)
+                .filter(_MV.version == result.get("version"), _MV.is_active == True)
+                .first()
+            )
+            if just_trained:
+                just_trained.is_active = False
+                db.commit()
 
     if result.get("status") == "ok":
         _record_lesson(db, accuracy, result)
 
     return {
-        "retrained":     True,
-        "trigger_reason": trigger_reason,
-        "accuracy_check": accuracy,
-        "staleness":      staleness,
-        "result":         result,
+        "retrained":       True,
+        "attempts":        attempt,
+        "trigger_reason":  trigger_reason,
+        "accuracy_check":  accuracy,
+        "staleness":       staleness,
+        "result":          result,
+        "win_rate_target": WIN_RATE_TARGET,
+        "win_rate_achieved": result.get("win_rate"),
     }
 
 

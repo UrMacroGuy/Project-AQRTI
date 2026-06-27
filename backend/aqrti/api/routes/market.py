@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr
 from datetime import date, timedelta
+from io import StringIO
+import threading
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,6 +22,33 @@ from aqrti.data.market_data import (
 from aqrti.config.settings import get_settings
 
 router = APIRouter()
+_YF_LIVE_LOCK = threading.Lock()
+
+
+def _latest_stock_quote(db: Session, symbol: str, label: str) -> dict:
+    rows = (
+        db.query(DailyPrice.close, DailyPrice.date)
+        .filter(DailyPrice.symbol == symbol)
+        .order_by(DailyPrice.date.desc())
+        .limit(2)
+        .all()
+    )
+    if not rows:
+        return {"key": symbol, "label": label, "price": None, "prev": None, "change": None, "changePct": None}
+    price = float(rows[0][0] or 0.0)
+    prev = float(rows[1][0] or 0.0) if len(rows) > 1 and rows[1][0] else None
+    change = (price - prev) if prev else 0.0
+    change_pct = (change / prev * 100) if prev else 0.0
+    return {
+        "key": symbol,
+        "label": label,
+        "price": round(price, 2),
+        "prev": round(prev, 2) if prev else None,
+        "change": round(change, 2),
+        "changePct": round(change_pct, 2),
+        "source": "database",
+        "asOf": str(rows[0][1]),
+    }
 
 
 def _sector_strength(db: Session, symbols: list[str]) -> list[dict]:
@@ -155,7 +185,9 @@ def _fetch_price(key: str, sym: str, label: str) -> dict:
         price, prev = None, None
 
         try:
-            fi = ticker.fast_info
+            yf_stderr = StringIO()
+            with _YF_LIVE_LOCK, redirect_stderr(yf_stderr):
+                fi = ticker.fast_info
             price = getattr(fi, "last_price", None)
             prev  = getattr(fi, "previous_close", None)
             if price is not None:
@@ -166,7 +198,9 @@ def _fetch_price(key: str, sym: str, label: str) -> dict:
             pass
 
         if price is None:
-            hist = ticker.history(period="2d", interval="1m", auto_adjust=True)
+            yf_stderr = StringIO()
+            with _YF_LIVE_LOCK, redirect_stderr(yf_stderr):
+                hist = ticker.history(period="2d", interval="1m", auto_adjust=True)
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
                 today = hist.index[-1].date()
@@ -177,7 +211,9 @@ def _fetch_price(key: str, sym: str, label: str) -> dict:
             raise ValueError("no price")
 
         if prev is None:
-            daily = ticker.history(period="5d", interval="1d", auto_adjust=True)
+            yf_stderr = StringIO()
+            with _YF_LIVE_LOCK, redirect_stderr(yf_stderr):
+                daily = ticker.history(period="5d", interval="1d", auto_adjust=True)
             if len(daily) >= 2:
                 prev = float(daily["Close"].iloc[-2])
             elif len(daily) == 1:
@@ -192,6 +228,7 @@ def _fetch_price(key: str, sym: str, label: str) -> dict:
             "prev":      round(prev, 2) if prev else None,
             "change":    round(change, 2),
             "changePct": round(change_pct, 2),
+            "source":    "yfinance",
         }
     except Exception:
         return {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None}
@@ -254,7 +291,7 @@ _STOCKS_TTL = 60  # 60s — live price cache for stocks
 
 
 @router.get("/live/stocks")
-def get_live_stock_prices():
+def get_live_stock_prices(db: Session = Depends(get_db_dependency)):
     """Live prices for all 18 NSE stocks in the universe (60s server-side cache)."""
     now = _time.time()
     if _stocks_cache["data"] and (now - _stocks_cache["ts"]) < _STOCKS_TTL:
@@ -265,6 +302,10 @@ def get_live_stock_prices():
         raise HTTPException(status_code=503, detail="yfinance not installed")
 
     data = _fetch_parallel(_NSE_STOCKS_MAP, timeout=25)
+    data = [
+        item if item.get("price") is not None else _latest_stock_quote(db, item["key"], item["label"])
+        for item in data
+    ]
     _stocks_cache["ts"]   = now
     _stocks_cache["data"] = data
     return data

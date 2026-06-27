@@ -17,7 +17,7 @@ if backend_dir not in sys.path:
 
 from sqlalchemy.orm import Session
 from aqrti.database.models import (
-    MarketRegime, DailyPrice, IndexData, SentimentRecord,
+    MarketRegime, DailyPrice, IndexData, SentimentRecord, MarketBreadth,
 )
 from aqrti.utils.logger import get_logger
 from agents.agent_base import AgentBase
@@ -28,8 +28,8 @@ log = get_logger("agent.market_research")
 STOCK_UNIVERSE = [
     # Original 20
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "WIPRO", "AXISBANK",
-    "LTIM", "NESTLEIND", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TATASTEEL",
-    "TATAMOTORS", "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
+    "NESTLEIND", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TATASTEEL",
+    "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
     # Expanded 30
     "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
     "BAJAJFINSV", "NTPC", "ADANIENT", "ADANIPORTS", "JSWSTEEL",
@@ -41,12 +41,12 @@ STOCK_UNIVERSE = [
 
 SECTOR_MAP = {
     "RELIANCE": "Energy",    "ONGC": "Energy",       "COALINDIA": "Energy",  "BPCL": "Energy",
-    "TCS": "IT",             "INFY": "IT",           "WIPRO": "IT",          "LTIM": "IT",
+    "TCS": "IT",             "INFY": "IT",           "WIPRO": "IT",
     "HCLTECH": "IT",         "TECHM": "IT",
     "HDFCBANK": "Banking",   "ICICIBANK": "Banking", "AXISBANK": "Banking",
     "KOTAKBANK": "Banking",  "SBIN": "Banking",      "INDUSINDBK": "Banking",
     "BAJFINANCE": "NBFC",    "BAJAJFINSV": "NBFC",   "HDFCLIFE": "Insurance", "SBILIFE": "Insurance",
-    "MARUTI": "Auto",        "TATAMOTORS": "Auto",   "M&M": "Auto",
+    "MARUTI": "Auto",        "M&M": "Auto",
     "EICHERMOT": "Auto",     "HEROMOTOCO": "Auto",
     "SUNPHARMA": "Pharma",   "DRREDDY": "Pharma",    "CIPLA": "Pharma",      "DIVISLAB": "Pharma",
     "TATASTEEL": "Metal",    "HINDALCO": "Metal",    "JSWSTEEL": "Metal",
@@ -267,6 +267,123 @@ class MarketResearchAgent(AgentBase):
                         recommendations.append(f"Overweight {top_s}; underweight {bot_s} in next rebalance.")
         except Exception as exc:
             log.debug("Breadth/sector analysis skipped: %s", exc)
+
+        # ── 5. Market Breadth Evolution ───────────────────────────
+        try:
+            breadth_rows = (
+                db.query(MarketBreadth)
+                .filter(MarketBreadth.breadth_date >= cutoff_30d)
+                .order_by(MarketBreadth.breadth_date.desc())
+                .limit(10)
+                .all()
+            )
+            if len(breadth_rows) >= 4:
+                # Check advance_decline_ratio declining for 3+ consecutive days
+                ratios = [r.advance_decline_ratio for r in breadth_rows if r.advance_decline_ratio is not None]
+                if len(ratios) >= 3:
+                    consecutive_declines = 0
+                    for i in range(len(ratios) - 1):
+                        if ratios[i] < ratios[i + 1]:
+                            consecutive_declines += 1
+                        else:
+                            break
+                    if consecutive_declines >= 3:
+                        findings.append({
+                            "title":       f"Breadth Deterioration: A/D Ratio declining for {consecutive_declines}+ days",
+                            "description": (
+                                f"Advance/Decline ratio has been falling for {consecutive_declines} consecutive days: "
+                                f"{' → '.join(f'{r:.2f}' for r in ratios[:consecutive_declines+1][::-1])}."
+                            ),
+                            "evidence":    f"consecutive_ad_declines={consecutive_declines}, latest_ad={ratios[0]:.2f}",
+                            "implication": "Deteriorating breadth often precedes broader market weakness.",
+                            "urgency":     "high" if consecutive_declines >= 5 else "normal",
+                            "subcategory": "breadth_deterioration",
+                        })
+        except Exception as exc:
+            log.debug("Breadth evolution check skipped: %s", exc)
+
+        # ── 6. Volatility Clustering ──────────────────────────────
+        try:
+            nifty_90d = (
+                db.query(IndexData.returns, IndexData.date)
+                .filter(IndexData.index_name == "NIFTY50", IndexData.date >= today - timedelta(days=95))
+                .order_by(IndexData.date.desc())
+                .limit(90)
+                .all()
+            )
+            if len(nifty_90d) >= 20:
+                all_rets   = [r.returns for r in nifty_90d if r.returns is not None]
+                last_10    = all_rets[:10]
+                prior_80   = all_rets[10:]
+
+                if len(last_10) >= 5 and len(prior_80) >= 20:
+                    def _std(vals):
+                        if not vals:
+                            return 0.0
+                        m = sum(vals) / len(vals)
+                        return (sum((v - m) ** 2 for v in vals) / len(vals)) ** 0.5
+
+                    std_10d  = _std(last_10)
+                    std_90d  = _std(prior_80)
+                    if std_90d > 0 and std_10d > 2 * std_90d:
+                        findings.append({
+                            "title":       f"Volatility Cluster: 10d std ({std_10d:.4f}) is {std_10d/std_90d:.1f}x 90d avg ({std_90d:.4f})",
+                            "description": (
+                                f"NIFTY50 daily return std over last 10 days ({std_10d:.4f}) is "
+                                f"{std_10d/std_90d:.1f}x higher than the 90-day baseline ({std_90d:.4f}). "
+                                f"Volatility clustering indicates risk-off or news-driven regime."
+                            ),
+                            "evidence":    f"std_10d={std_10d:.5f}, std_90d={std_90d:.5f}, ratio={std_10d/std_90d:.2f}x",
+                            "implication": "High volatility cluster: reduce position sizes, widen stops, avoid momentum entries.",
+                            "urgency":     "high",
+                            "subcategory": "volatility_cluster",
+                        })
+        except Exception as exc:
+            log.debug("Volatility clustering check skipped: %s", exc)
+
+        # ── 7. Volume Anomaly Detection ───────────────────────────
+        try:
+            volume_anomalies = []
+            for symbol in STOCK_UNIVERSE:
+                vol_rows = (
+                    db.query(DailyPrice.volume, DailyPrice.date, DailyPrice.close)
+                    .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)
+                    .order_by(DailyPrice.date.desc())
+                    .limit(22)
+                    .all()
+                )
+                if len(vol_rows) < 5:
+                    continue
+                today_vol = vol_rows[0].volume
+                if today_vol is None or today_vol == 0:
+                    continue
+                avg_20d = sum(r.volume for r in vol_rows[1:21] if r.volume) / max(len([r for r in vol_rows[1:21] if r.volume]), 1)
+                if avg_20d > 0 and today_vol > 5 * avg_20d:
+                    volume_anomalies.append({
+                        "symbol":    symbol,
+                        "ratio":     today_vol / avg_20d,
+                        "volume":    today_vol,
+                        "avg_20d":   avg_20d,
+                        "close":     vol_rows[0].close,
+                        "date":      vol_rows[0].date,
+                    })
+
+            for anomaly in sorted(volume_anomalies, key=lambda x: x["ratio"], reverse=True)[:3]:
+                findings.append({
+                    "title":       f"Volume Anomaly: {anomaly['symbol']} at {anomaly['ratio']:.1f}x avg",
+                    "description": (
+                        f"{anomaly['symbol']} traded {anomaly['volume']:,.0f} shares on {anomaly['date']} "
+                        f"({anomaly['ratio']:.1f}x its 20d avg of {anomaly['avg_20d']:,.0f}). "
+                        f"Close: {anomaly['close']:.2f}."
+                    ),
+                    "evidence":    f"symbol={anomaly['symbol']}, vol={anomaly['volume']:.0f}, avg_20d={anomaly['avg_20d']:.0f}, ratio={anomaly['ratio']:.2f}x",
+                    "implication": "Unusual volume may signal institutional activity, news event, or breakout.",
+                    "urgency":     "high" if anomaly["ratio"] > 10 else "normal",
+                    "subcategory": "volume_anomaly",
+                    "symbol":      anomaly["symbol"],
+                })
+        except Exception as exc:
+            log.debug("Volume anomaly detection skipped: %s", exc)
 
         # ── Fallback ──────────────────────────────────────────────
         if not findings:

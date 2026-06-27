@@ -533,16 +533,19 @@ async function renderLearning() {
   // ── Intelligence Score Growth ─────────────────────────────
   const growthLabels = scoreHistory.map(r => r.date?.slice(5) || '');
   const growthVals   = scoreHistory.map(r => r.overall_score ?? r.score ?? 0);
+  // Always render chart — with real data or a single seed point so canvas is never blank
+  const _growthL = growthLabels.length ? growthLabels : ['Today'];
+  const _growthV = growthVals.length   ? growthVals   : [liveData?.intelligenceScore ?? 0];
   ChartRegistry.create('knowledgeGrowthChart', {
     type: 'line',
     data: {
-      labels: growthLabels.length ? growthLabels : [],
+      labels: _growthL,
       datasets: [{
         label: 'Intelligence Score',
-        data: growthVals.length ? growthVals : [],
+        data: _growthV,
         borderColor: '#ff8c00',
         borderWidth: 2,
-        pointRadius: 0,
+        pointRadius: _growthL.length <= 3 ? 4 : 0,
         tension: 0.4,
         fill: true,
         backgroundColor: 'rgba(255,140,0,0.08)',
@@ -551,7 +554,7 @@ async function renderLearning() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` Score: ${ctx.parsed.y.toFixed(1)}` } } },
       scales: {
         y: { min: 0, max: 100, ticks: { maxTicksLimit: 5, color: '#666' }, grid: { color: 'rgba(255,255,255,0.04)' } },
         x: { ticks: { maxTicksLimit: 8, color: '#666' }, grid: { color: 'rgba(255,255,255,0.04)' } },
@@ -561,6 +564,8 @@ async function renderLearning() {
 
   // ── Score Components radar ────────────────────────────────
   const comp = liveData?.components || {};
+  // Use latest scoreHistory row for components if liveData.components is missing
+  const lastHist = scoreHistory.length ? scoreHistory[scoreHistory.length - 1] : null;
   ChartRegistry.create('scoreComponentsChart', {
     type: 'radar',
     data: {
@@ -568,12 +573,12 @@ async function renderLearning() {
       datasets: [{
         label: 'Score',
         data: [
-          comp.predictionQuality  ?? 50,
-          comp.portfolioQuality   ?? 50,
-          comp.riskQuality        ?? 50,
-          comp.learningQuality    ?? 50,
-          comp.calibrationQuality ?? 50,
-          comp.featureQuality     ?? 50,
+          comp.predictionQuality  ?? lastHist?.prediction_quality  ?? 50,
+          comp.portfolioQuality   ?? lastHist?.portfolio_quality   ?? 50,
+          comp.riskQuality        ?? lastHist?.risk_quality        ?? 50,
+          comp.learningQuality    ?? lastHist?.learning_quality    ?? 50,
+          comp.calibrationQuality ?? lastHist?.calibration_quality ?? 50,
+          comp.featureQuality     ?? lastHist?.feature_quality     ?? 50,
         ],
         borderColor: '#ff8c00',
         backgroundColor: 'rgba(255,140,0,0.10)',
@@ -585,14 +590,14 @@ async function renderLearning() {
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
-      scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, color: '#666' }, grid: { color: 'rgba(255,255,255,0.06)' }, pointLabels: { color: '#aaa' } } },
+      scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, color: '#666' }, grid: { color: 'rgba(255,255,255,0.06)' }, pointLabels: { color: '#aaa', font: { size: 11 } } } },
     },
   });
 
   // ── Failure Category Chart ────────────────────────────────
   const byCat    = liveData?.failuresByCategory || {};
-  const catKeys  = Object.keys(byCat).length ? Object.keys(byCat) : [];
-  const catVals  = Object.keys(byCat).length ? Object.values(byCat) : [];
+  const catKeys  = Object.keys(byCat).length ? Object.keys(byCat) : ['No failures'];
+  const catVals  = Object.keys(byCat).length ? Object.values(byCat) : [0];
   ChartRegistry.create('failureCatChart', {
     type: 'bar',
     data: {
@@ -600,7 +605,7 @@ async function renderLearning() {
       datasets: [{
         label: 'Count',
         data: catVals,
-        backgroundColor: 'rgba(239,68,68,0.6)',
+        backgroundColor: catKeys[0] === 'No failures' ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.6)',
         borderRadius: 4,
       }],
     },
@@ -617,37 +622,37 @@ async function renderLearning() {
   });
 
   // ── Failure Timeline Chart ────────────────────────────────
-  const timeline = liveData?.recentEvents
-    ? (() => {
-        const counts = {};
-        (liveData.recentEvents || []).forEach(e => {
-          const d = (e.date || '').slice(5);
-          counts[d] = (counts[d] || 0) + 1;
-        });
-        return { labels: Object.keys(counts), vals: Object.values(counts) };
-      })()
-    : { labels: [], vals: [] };
-
-  if (timeline.labels.length > 0) {
-    ChartRegistry.create('failureTimelineChart', {
-      type: 'bar',
-      data: {
-        labels: timeline.labels,
-        datasets: [{
-          label: 'Events',
-          data: timeline.vals,
-          backgroundColor: 'rgba(245,158,11,0.6)',
-          borderRadius: 3,
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: { x: { ticks: { maxTicksLimit: 10, color: '#666' }, grid: { color: 'rgba(255,255,255,0.04)' } } },
-      },
+  const timeline = (() => {
+    const counts = {};
+    (liveData?.recentEvents || []).forEach(e => {
+      const d = (e.date || '').slice(5);
+      if (d) counts[d] = (counts[d] || 0) + 1;
     });
-  }
+    const labels = Object.keys(counts).sort();
+    return { labels: labels.length ? labels : ['Today'], vals: labels.length ? labels.map(k => counts[k]) : [0] };
+  })();
+
+  ChartRegistry.create('failureTimelineChart', {
+    type: 'bar',
+    data: {
+      labels: timeline.labels,
+      datasets: [{
+        label: 'Events',
+        data: timeline.vals,
+        backgroundColor: timeline.labels[0] === 'Today' ? 'rgba(107,114,128,0.3)' : 'rgba(245,158,11,0.6)',
+        borderRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { maxTicksLimit: 10, color: '#666' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#666', stepSize: 1 }, grid: { color: 'rgba(255,255,255,0.04)' } },
+      },
+    },
+  });
 
   // ── Failures Table ────────────────────────────────────────
   const tbody = el('failure-table-body');
@@ -716,14 +721,36 @@ async function renderLearning() {
       },
     });
   } else if (calCanvas) {
-    calCanvas.style.display = 'none';
-    if (calWrapper) {
-      const msg = calWrapper.querySelector('#lc-cal-empty') || document.createElement('div');
-      msg.id = 'lc-cal-empty';
-      msg.style.cssText = 'color:var(--text-muted);font-size:0.72rem;padding:20px;text-align:center';
-      msg.textContent = 'No evaluated predictions yet — calibration data builds after the first predictions close.';
-      if (!calWrapper.contains(msg)) calWrapper.appendChild(msg);
-    }
+    // Show reference "perfect calibration" line even with no evaluated predictions
+    if (calCanvas) calCanvas.style.display = '';
+    const oldMsg = calWrapper && calWrapper.querySelector('#lc-cal-empty');
+    if (oldMsg) oldMsg.remove();
+    ChartRegistry.create('lcCalibrationChart', {
+      type: 'line',
+      data: {
+        labels: ['50–60%', '60–70%', '70–80%', '80–90%', '90–100%'],
+        datasets: [
+          {
+            label: 'Perfect Calibration',
+            data: [55, 65, 75, 85, 95],
+            borderColor: 'rgba(255,255,255,0.25)',
+            borderWidth: 1.5,
+            borderDash: [4, 4],
+            pointRadius: 3,
+            fill: false,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: true, labels: { font: { size: 10 }, color: '#aaa' } }, tooltip: { enabled: false } },
+        scales: {
+          y: { min: 40, max: 100, ticks: { callback: v => `${v}%`, color: '#666' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+          x: { ticks: { color: '#666' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        },
+      },
+    });
   }
 
   // ── Model Drift Panel ─────────────────────────────────────
@@ -4174,7 +4201,23 @@ async function runIntelligencePipeline(btn) {
   if (status) { status.textContent = '⟳ Running pipeline…'; status.style.color = 'var(--accent)'; }
   if (result) result.textContent = '';
   try {
-    const res = await Api.triggerIntelligence();
+    // Intelligence pipeline can take several minutes — bypass the 10s global timeout.
+    const _ctrl = new AbortController();
+    const _timer = setTimeout(() => _ctrl.abort(), 300000); // 5 min
+    let res;
+    try {
+      const _r = await fetch('http://localhost:8000/admin/intelligence', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}), signal: _ctrl.signal,
+      });
+      clearTimeout(_timer);
+      if (!_r.ok) throw new Error(`HTTP ${_r.status}`);
+      res = await _r.json();
+    } catch (fetchErr) {
+      clearTimeout(_timer);
+      if (fetchErr.name === 'AbortError') throw new Error('Pipeline timed out after 5 minutes');
+      throw fetchErr;
+    }
     if (!res) throw new Error('No response from server — is the backend running?');
     const errors = res.errors || 0;
     const stepColor = s => {
@@ -4214,6 +4257,9 @@ document.querySelectorAll('.nav-item').forEach(item => {
     const pageId = clone.dataset.page;
     activatePage(pageId);
     renderPage(pageId);
+    // Always re-hydrate on every visit (renderPage skips after first render)
+    if (pageId === 'screener')  hydrateScreener();
+    if (pageId === 'analytics') hydrateAnalytics();
   });
 });
 
@@ -4459,28 +4505,37 @@ async function hydrateModelCenter() {
     ]);
 
     // ── KPI Row ──────────────────────────────────────────────
+    const metricsArr0 = Array.isArray(metrics) ? metrics : [];
+    const eceRow0     = metricsArr0.find(m => m.metricName === 'ece');
+    const eceVal0     = eceRow0 ? eceRow0.metricValue : (stats?.avgECE ?? null);
+    s('model-calibration-ece', eceVal0 != null ? eceVal0.toFixed(4) : '—');
+
     if (!stats || !stats.available) {
-      s('model-ensemble-acc', 'No models');
-      s('model-best-name', 'Run /admin/train');
-      s('model-best-acc', 'No trained models in registry');
+      s('model-ensemble-acc', 'No data');
+      s('model-best-name', '—');
+      s('model-best-acc', 'No model metrics in database');
       s('model-active-count', '0');
       s('model-last-retrain', 'Never');
       s('model-last-retrain-sub', 'Run the training pipeline first');
       s('model-features-count', '—');
       sc('model-ensemble-acc', 'negative');
     } else {
-      if (stats.bestAUC != null) {
-        s('model-ensemble-acc', `${(stats.bestAUC * 100).toFixed(1)}%`);
-        s('model-ensemble-acc-sub', stats.bestAUC >= 0.65 ? 'Good' : stats.bestAUC >= 0.55 ? 'Acceptable' : 'Poor');
-        sc('model-ensemble-acc', stats.bestAUC >= 0.60 ? 'positive' : stats.bestAUC >= 0.55 ? 'accent' : 'negative');
+      const primary = stats.bestAUC ?? stats.bestAccuracy;
+      if (primary != null) {
+        s('model-ensemble-acc', `${(primary * 100).toFixed(1)}%`);
+        s('model-ensemble-acc-sub', primary >= 0.90 ? 'Excellent (check overfit)' : primary >= 0.65 ? 'Good' : primary >= 0.55 ? 'Acceptable' : 'Poor');
+        sc('model-ensemble-acc', primary >= 0.65 ? 'positive' : primary >= 0.55 ? 'accent' : 'negative');
       }
-      const activeModels = Array.isArray(models) ? models.filter(m => m.isActive) : [];
-      const bestDir = activeModels.find(m => m.task === 'direction') || activeModels[0];
+      const modelArr0 = Array.isArray(models) ? models : [];
+      const bestDir = modelArr0.find(m => m.task === 'direction') || modelArr0[0];
       if (bestDir) {
         s('model-best-name', bestDir.modelName);
-        s('model-best-acc', bestDir.primaryMetric != null ? `${(bestDir.primaryMetric * 100).toFixed(1)}% primary metric` : 'No metric');
+        s('model-best-acc', bestDir.primaryMetric != null ? `${(bestDir.primaryMetric * 100).toFixed(1)}% AUC` : 'See metrics below');
+      } else if ((stats.modelTypes || []).length) {
+        s('model-best-name', stats.modelTypes[0]);
+        s('model-best-acc', primary != null ? `${(primary * 100).toFixed(1)}% best metric` : 'Metrics in table below');
       }
-      s('model-active-count', stats.activeModels || '0');
+      s('model-active-count', stats.activeModels || (stats.modelTypes || []).length || '0');
       s('model-active-sub', (stats.modelTypes || []).join(' · ') || 'Ensemble Active');
       if (stats.lastTrainedAt) {
         const d = new Date(stats.lastTrainedAt);
@@ -4492,8 +4547,8 @@ async function hydrateModelCenter() {
         s('model-last-retrain', 'Never'); sc('model-last-retrain', 'negative');
       }
       const featCount = Object.keys(bestDir?.featureImportance || {}).length;
-      s('model-features-count', featCount || '—');
-      s('model-features-sub', featCount ? `${featCount} features in active model` : 'Out of 300+ Target');
+      s('model-features-count', featCount || (metricsArr0.length ? `${metricsArr0.length} metrics` : '—'));
+      s('model-features-sub', featCount ? `${featCount} features in active model` : (stats.totalFolds ? `${stats.totalFolds} walk-forward folds` : 'Out of 300+ Target'));
     }
 
     // ── Accuracy chart ────────────────────────────────────────
@@ -4540,19 +4595,19 @@ async function hydrateModelCenter() {
             type: 'bar',
             data: {
               labels: toShow.map(m => `${m.modelName} / ${m.task}`),
-              datasets: [{ label: 'Primary Metric', data: toShow.map(m => +(m.primaryMetric * 100).toFixed(2)), backgroundColor: 'rgba(255,140,0,0.5)', borderColor: 'rgba(255,140,0,0.9)', borderWidth: 1 }],
+              datasets: [{ label: 'Primary Metric', data: toShow.map(m => +(m.primaryMetric * 100).toFixed(2)), backgroundColor: toShow.map(m => m.primaryMetric >= 0.60 ? 'rgba(34,197,94,0.6)' : m.primaryMetric >= 0.55 ? 'rgba(255,140,0,0.6)' : 'rgba(239,68,68,0.6)'), borderRadius: 4 }],
             },
             options: {
               responsive: true, maintainAspectRatio: false,
-              plugins: { legend: { display: false } },
+              plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y.toFixed(1)}%` } } },
               scales: {
                 x: { ticks: { color: '#777', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
-                y: { ticks: { color: '#777', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.04)' }, min: 0, max: 100 },
+                y: { ticks: { color: '#777', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.04)' }, min: 40, max: 100 },
               },
             },
           });
         } else {
-          _modelNoData(accCanvas, 'No trained models yet — run POST /api/v1/admin/train');
+          _modelNoData(accCanvas, '⬡ No trained models yet<br><span style="font-size:11px;opacity:0.6">Use <code>POST /api/v1/admin/train</code> to run the training pipeline</span>');
         }
       }
     }
@@ -4605,21 +4660,18 @@ async function hydrateModelCenter() {
     if (tbody) {
       const modelArr   = Array.isArray(models)  ? models  : [];
       const metricsArr = Array.isArray(metrics) ? metrics : [];
-      if (!modelArr.length) {
-        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">
-          No models registered.<br>
-          <span style="font-size:12px">Use <code>POST /api/v1/admin/train</code> to run the full training pipeline.</span>
-        </td></tr>`;
-      } else {
+
+      if (modelArr.length) {
+        // Full model list from backend
         const activeCount = modelArr.filter(m => m.isActive).length || 1;
         tbody.innerHTML = modelArr.map(m => {
           const acc      = m.primaryMetric != null ? `${(m.primaryMetric*100).toFixed(1)}%` : '—';
-          const accColor = m.primaryMetric >= 0.60 ? 'var(--positive)' : m.primaryMetric >= 0.55 ? 'var(--warning)' : m.primaryMetric ? 'var(--negative)' : 'var(--muted)';
+          const accColor = m.primaryMetric >= 0.60 ? 'var(--positive)' : m.primaryMetric >= 0.55 ? 'var(--accent)' : m.primaryMetric ? 'var(--negative)' : 'var(--muted)';
           const trained  = m.trainedAt ? new Date(m.trainedAt).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
           const featCount = Object.keys(m.featureImportance||{}).length;
           const topFeat   = Object.entries(m.featureImportance||{}).sort((a,b)=>b[1]-a[1]).slice(0,2).map(([f])=>f).join(', ')||'—';
           const eceRow   = metricsArr.find(mm => mm.metricName === 'ece' && mm.modelName === m.modelName);
-          const ece      = eceRow ? eceRow.metricValue.toFixed(3) : '—';
+          const ece      = eceRow ? eceRow.metricValue.toFixed(3) : (m.metrics?.ece != null ? m.metrics.ece.toFixed(3) : '—');
           return `<tr>
             <td style="font-family:monospace;font-size:11px;color:var(--muted)">v${m.version||1}</td>
             <td><span style="color:var(--accent);font-weight:600">${m.modelName||'—'}</span></td>
@@ -4632,6 +4684,35 @@ async function hydrateModelCenter() {
             <td style="font-size:11px;color:var(--muted)" title="${topFeat}">${featCount||'—'}</td>
           </tr>`;
         }).join('');
+      } else if (metricsArr.length) {
+        // Synthesise rows from raw model_metrics when no model_versions rows exist
+        const byModel = {};
+        metricsArr.forEach(m => {
+          const key = `${m.modelName}::${m.task}`;
+          if (!byModel[key]) byModel[key] = { modelName: m.modelName, task: m.task, version: m.version, trainedAt: m.computedAt, metrics: {} };
+          byModel[key].metrics[m.metricName] = m.metricValue;
+        });
+        tbody.innerHTML = Object.values(byModel).map(m => {
+          const acc = m.metrics.accuracy != null ? `${(m.metrics.accuracy*100).toFixed(1)}%` : '—';
+          const auc = m.metrics.auc_roc   != null ? `${(m.metrics.auc_roc  *100).toFixed(1)}%` : '—';
+          const ece = m.metrics.ece       != null ? m.metrics.ece.toFixed(3) : '—';
+          const primary = m.metrics.auc_roc ?? m.metrics.accuracy;
+          const accColor = primary >= 0.65 ? 'var(--positive)' : primary >= 0.55 ? 'var(--accent)' : primary ? 'var(--negative)' : 'var(--muted)';
+          const trained = m.trainedAt ? new Date(m.trainedAt).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+          return `<tr>
+            <td style="font-family:monospace;font-size:11px;color:var(--muted)">v${m.version||1}</td>
+            <td><span style="color:var(--accent);font-weight:600">${m.modelName}</span></td>
+            <td style="color:var(--muted)">${m.task}</td>
+            <td style="color:${accColor};font-weight:600">${auc !== '—' ? auc + ' AUC' : acc}</td>
+            <td style="color:var(--muted)">${ece}</td>
+            <td style="color:var(--muted);font-size:11px">—</td>
+            <td><span style="color:var(--positive);font-size:12px">● Active</span></td>
+            <td style="font-size:11px;color:var(--muted)">${trained}</td>
+            <td style="font-size:11px;color:var(--muted)">${Object.keys(m.metrics).length} metrics</td>
+          </tr>`;
+        }).join('');
+      } else {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:24px">No model data yet — run the training pipeline.</td></tr>`;
       }
     }
 
@@ -5532,6 +5613,8 @@ async function runScreener() {
   const bearEl  = document.getElementById('scr-bear');
   const cntEl   = document.getElementById('scr-result-count');
 
+  const totalEl = document.getElementById('scr-total');
+  if (totalEl && data?.total_universe) totalEl.textContent = data.total_universe;
   if (matchEl) matchEl.textContent = stocks.length;
   if (bullEl)  bullEl.textContent  = stocks.filter(s => s.signal === 'bullish').length;
   if (bearEl)  bearEl.textContent  = stocks.filter(s => s.signal === 'bearish').length;

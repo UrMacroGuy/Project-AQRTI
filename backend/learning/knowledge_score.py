@@ -36,17 +36,21 @@ from learning.knowledge_metrics import (
     learning_quality_score,
     calibration_quality_score,
     feature_quality_score,
+    uncertainty_quality_score,
+    multi_agent_agreement_score,
 )
 
 log = get_logger("knowledge_score")
 
 WEIGHTS = {
-    "prediction_quality":   0.25,
-    "portfolio_quality":    0.20,
-    "risk_quality":         0.20,
-    "learning_quality":     0.15,
-    "calibration_quality":  0.10,
-    "feature_quality":      0.10,
+    "prediction_quality":    0.23,
+    "portfolio_quality":     0.18,
+    "risk_quality":          0.18,
+    "learning_quality":      0.14,
+    "calibration_quality":   0.09,
+    "feature_quality":       0.09,
+    "uncertainty_quality":   0.05,
+    "agent_agreement":       0.04,
 }
 
 
@@ -63,13 +67,15 @@ def compute_intelligence_score(db: Session, days: int = 30) -> dict:
         "learning_quality":     learning_quality_score(db, days),
         "calibration_quality":  calibration_quality_score(db, days),
         "feature_quality":      feature_quality_score(db, days),
+        "uncertainty_quality":  uncertainty_quality_score(db, days),
+        "agent_agreement":      multi_agent_agreement_score(db, days),
     }
 
     overall = sum(score * WEIGHTS[key] for key, score in components.items())
     overall = round(overall, 2)
 
     log.info(
-        "Intelligence score: overall=%.1f pred=%.1f port=%.1f risk=%.1f learn=%.1f calib=%.1f feat=%.1f",
+        "Intelligence score: overall=%.1f pred=%.1f port=%.1f risk=%.1f learn=%.1f calib=%.1f feat=%.1f uq=%.1f ma=%.1f",
         overall,
         components["prediction_quality"],
         components["portfolio_quality"],
@@ -77,6 +83,8 @@ def compute_intelligence_score(db: Session, days: int = 30) -> dict:
         components["learning_quality"],
         components["calibration_quality"],
         components["feature_quality"],
+        components["uncertainty_quality"],
+        components["agent_agreement"],
     )
     return {"overall": overall, **components, "days": days}
 

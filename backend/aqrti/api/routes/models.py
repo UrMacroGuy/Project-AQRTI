@@ -1,6 +1,8 @@
 """
 Models API — /api/v1/models
 Returns model registry, metrics, and walk-forward validation results.
+Reads from model_metrics + walk_forward_folds (populated by ML retrainer).
+model_versions is a secondary registry; data lives in model_metrics.
 """
 
 from __future__ import annotations
@@ -29,70 +31,146 @@ except Exception:
     _RETRAINER_AVAILABLE = False
 
 
+def _model_names_from_metrics(db: Session) -> list[str]:
+    rows = db.query(ModelMetric.model_name).distinct().all()
+    return [r[0] for r in rows]
+
+
+def _best_metric(db: Session, model_name: str, metric_name: str) -> float | None:
+    row = db.query(func.max(ModelMetric.metric_value)).filter(
+        ModelMetric.model_name == model_name,
+        ModelMetric.metric_name == metric_name,
+        ModelMetric.split == "test",
+    ).scalar()
+    return float(row) if row is not None else None
+
+
+def _latest_fold_date(db: Session) -> str | None:
+    row = db.query(func.max(ModelMetric.computed_at)).scalar()
+    return str(row) if row else None
+
+
 @router.get("")
 def get_models(
     task:   str     = Query(default="all"),
     db:     Session = Depends(get_db_dependency),
 ):
-    """List all registered model versions."""
+    """List all registered model versions. Falls back to model_metrics if model_versions is empty."""
+    # Try model_versions first
     q = db.query(ModelVersion)
     if task != "all":
         q = q.filter_by(task=task)
     rows = q.order_by(ModelVersion.trained_at.desc()).all()
 
-    return [
-        {
-            "id":                r.id,
-            "modelName":         r.model_name,
-            "task":              r.task,
-            "labelCol":          r.label_col,
-            "version":           r.version,
-            "primaryMetric":     r.primary_metric,
-            "metrics":           json.loads(r.metrics_json or "{}"),
-            "featureImportance": json.loads(r.importance_json or "{}"),
-            "trainRows":         r.train_rows,
-            "trainedAt":         str(r.trained_at) if r.trained_at else None,
-            "isActive":          r.is_active,
-        }
-        for r in rows
-    ]
+    if rows:
+        return [
+            {
+                "id":                r.id,
+                "modelName":         r.model_name,
+                "task":              r.task,
+                "labelCol":          r.label_col,
+                "version":           r.version,
+                "primaryMetric":     r.primary_metric,
+                "metrics":           json.loads(r.metrics_json or "{}"),
+                "featureImportance": json.loads(r.importance_json or "{}"),
+                "trainRows":         r.train_rows,
+                "trainedAt":         str(r.trained_at) if r.trained_at else None,
+                "isActive":          r.is_active,
+            }
+            for r in rows
+        ]
+
+    # Fallback: synthesise model list from model_metrics
+    model_names = _model_names_from_metrics(db)
+    result = []
+    for name in model_names:
+        # get all tasks for this model
+        tasks = [r[0] for r in db.query(ModelMetric.task).filter(
+            ModelMetric.model_name == name).distinct().all()]
+        for t in tasks:
+            if task != "all" and t != task:
+                continue
+            acc  = _best_metric(db, name, "accuracy")
+            auc  = _best_metric(db, name, "auc_roc")
+            ece  = _best_metric(db, name, "ece")
+            last = _latest_fold_date(db)
+            result.append({
+                "id":                None,
+                "modelName":         name,
+                "task":              t,
+                "labelCol":          "direction_5d" if t == "direction" else t,
+                "version":           1,
+                "primaryMetric":     auc or acc,
+                "metrics":           {"accuracy": acc, "auc_roc": auc, "ece": ece},
+                "featureImportance": {},
+                "trainRows":         None,
+                "trainedAt":         last,
+                "isActive":          True,
+            })
+    return result
 
 
 @router.get("/stats")
 def get_model_stats(db: Session = Depends(get_db_dependency)):
     """Summary statistics for the Model Center page."""
+    # Try model_versions first
     versions = db.query(ModelVersion).filter_by(is_active=True).all()
-    if not versions:
+
+    if versions:
+        folds_count = db.query(func.count(WalkForwardFold.id)).scalar() or 0
+        dir_models = [v for v in versions if v.task == "direction"]
+        best_auc = None
+        if dir_models:
+            aucs = [json.loads(v.metrics_json or "{}").get("auc_roc") for v in dir_models]
+            aucs = [a for a in aucs if a is not None]
+            best_auc = round(max(aucs), 4) if aucs else None
+        trained_ats = [v.trained_at for v in versions if v.trained_at]
+        last_trained = str(max(trained_ats)) if trained_ats else None
+        return {
+            "available":      True,
+            "activeModels":   len(versions),
+            "totalFolds":     folds_count,
+            "bestAUC":        best_auc,
+            "lastTrainedAt":  last_trained,
+            "modelTypes":     list({v.model_name for v in versions}),
+            "tasks":          list({v.task for v in versions}),
+        }
+
+    # Fallback: synthesise from model_metrics
+    model_names = _model_names_from_metrics(db)
+    if not model_names:
         return {"available": False, "activeModels": 0}
 
     folds_count = db.query(func.count(WalkForwardFold.id)).scalar() or 0
 
-    dir_models = [v for v in versions if v.task == "direction"]
-    best_auc   = None
-    if dir_models:
-        aucs = [json.loads(v.metrics_json or "{}").get("auc_roc") for v in dir_models]
-        aucs = [a for a in aucs if a is not None]
-        best_auc = round(max(aucs), 4) if aucs else None
+    best_auc = None
+    for name in model_names:
+        auc = _best_metric(db, name, "auc_roc")
+        if auc and (best_auc is None or auc > best_auc):
+            best_auc = auc
 
-    ret_models = [v for v in versions if v.task == "expected_return"]
-    best_ic    = None
-    if ret_models:
-        ics = [json.loads(v.metrics_json or "{}").get("ic") for v in ret_models]
-        ics = [ic for ic in ics if ic is not None]
-        best_ic = round(max(ics), 4) if ics else None
+    best_acc = None
+    for name in model_names:
+        acc = _best_metric(db, name, "accuracy")
+        if acc and (best_acc is None or acc > best_acc):
+            best_acc = acc
 
-    trained_ats = [v.trained_at for v in versions if v.trained_at]
-    last_trained = str(max(trained_ats)) if trained_ats else None
+    ece_row = db.query(func.avg(ModelMetric.metric_value)).filter(
+        ModelMetric.metric_name == "ece", ModelMetric.split == "test").scalar()
+
+    last_trained = _latest_fold_date(db)
+    tasks = [r[0] for r in db.query(ModelMetric.task).distinct().all()]
 
     return {
         "available":      True,
-        "activeModels":   len(versions),
+        "activeModels":   len(model_names),
         "totalFolds":     folds_count,
-        "bestAUC":        best_auc,
-        "bestIC":         best_ic,
+        "bestAUC":        round(best_auc, 4) if best_auc else None,
+        "bestAccuracy":   round(best_acc, 4) if best_acc else None,
+        "avgECE":         round(float(ece_row), 4) if ece_row else None,
         "lastTrainedAt":  last_trained,
-        "modelTypes":     list({v.model_name for v in versions}),
-        "tasks":          list({v.task for v in versions}),
+        "modelTypes":     model_names,
+        "tasks":          tasks,
     }
 
 

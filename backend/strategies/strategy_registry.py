@@ -71,22 +71,26 @@ def get_family_summary(db: Session) -> dict:
 
 def get_leaderboard(db: Session, top_n: int = 20, status: str | None = None) -> list[dict]:
     """Top-N strategies ranked by live trade stats from strategy_backtest_trades, falling back to fitness_score."""
-    from aqrti.database.models import StrategyBacktestTrade
-    from sqlalchemy import func, case
+    from sqlalchemy import text, func, case
 
-    # Pull real trade stats in one query
-    trade_stats = (
-        db.query(
-            StrategyBacktestTrade.strategy_id,
-            func.count(StrategyBacktestTrade.id).label("tc"),
-            func.avg(StrategyBacktestTrade.pnl_pct).label("avg_pnl"),
-            func.sum(case((StrategyBacktestTrade.pnl_pct > 0, 1), else_=0)).label("wins"),
-        )
-        .group_by(StrategyBacktestTrade.strategy_id)
-        .all()
-    )
+    # Ensure index exists for fast GROUP BY (idempotent)
+    try:
+        db.execute(text("CREATE INDEX IF NOT EXISTS idx_sbt_strategy_id ON strategy_backtest_trades (strategy_id)"))
+        db.commit()
+    except Exception:
+        pass
+
+    # Fast raw-SQL aggregate — avoids ORM overhead on 376k rows
+    raw = db.execute(text("""
+        SELECT strategy_id,
+               COUNT(*)           AS tc,
+               AVG(pnl_pct)       AS avg_pnl,
+               SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS wins
+        FROM strategy_backtest_trades
+        GROUP BY strategy_id
+    """)).fetchall()
     live_map: dict[str, dict] = {}
-    for row in trade_stats:
+    for row in raw:
         tc = row.tc or 0
         wins = row.wins or 0
         live_map[row.strategy_id] = {
@@ -130,11 +134,12 @@ def get_leaderboard(db: Session, top_n: int = 20, status: str | None = None) -> 
         real_tc = live.get("real_trade_count", r.trade_count or 0)
         live_wr = live.get("live_win_rate", r.win_rate or 0)
         avg_pnl = live.get("avg_pnl", 0)
-        # Score: prefer strategies with actual trades and positive avg P&L
-        sort_key = (real_tc > 0, real_tc, avg_pnl)
+        # Score: fitness first (primary), then trade evidence, then avg P&L
+        fitness = r.fitness_score or 0
+        sort_key = (fitness, real_tc, avg_pnl)
         enriched.append((sort_key, r, real_tc, live_wr, avg_pnl))
 
-    # Sort: strategies with real trades first, then by trade count desc, then avg_pnl
+    # Sort: by fitness desc, then trade count, then avg_pnl
     enriched.sort(key=lambda x: x[0], reverse=True)
 
     result = []

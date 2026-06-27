@@ -30,7 +30,9 @@ log = get_logger("strategy_lifecycle")
 PROMOTE_THRESHOLD  = 35.0    # fitness score required for promotion (0–100 scale)
 RETIRE_THRESHOLD   = 8.0     # fitness below this → retirement candidate
 DRAWDOWN_LIMIT     = -9999.0 # disabled — cumsum MDD metric is unreliable (divide-by-near-zero artifact)
-MIN_TRADES         = 50      # minimum backtest trades before promotion
+MIN_TRADES         = 30      # minimum backtest trades before promotion
+MIN_WIN_RATE       = 70.0    # minimum win rate % required for promotion and paper trading
+PAPER_WIN_RATE     = 70.0    # paper trading gate — only strategies >= this go live
 
 
 def promote_strategy(
@@ -51,6 +53,8 @@ def promote_strategy(
         return {"success": False, "error": f"fitness {row.fitness_score} below threshold {PROMOTE_THRESHOLD}"}
     if (row.trade_count or 0) < MIN_TRADES:
         return {"success": False, "error": f"insufficient trades ({row.trade_count})"}
+    if (row.win_rate or 0) < MIN_WIN_RATE:
+        return {"success": False, "error": f"win_rate {row.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"}
 
     old_status   = row.status
     row.status   = "promoted"
@@ -74,49 +78,53 @@ def retire_strategy(
     Retire a strategy: update status → retired, write to graveyard.
     Strategies are NEVER deleted.
     """
-    row = db.query(StrategyV2).filter(StrategyV2.strategy_id == strategy_id).first()
-    if not row:
-        return {"success": False, "error": "strategy not found"}
-    if row.status == "archived":
-        return {"success": False, "error": "already archived"}
+    try:
+        row = db.query(StrategyV2).filter(StrategyV2.strategy_id == strategy_id).first()
+        if not row:
+            return {"success": False, "error": "strategy not found"}
+        if row.status == "archived":
+            return {"success": False, "error": "already archived"}
 
-    # Extract lessons before archiving
-    lessons = _extract_retirement_lessons(row, failure_reason)
+        lessons = _extract_retirement_lessons(row, failure_reason)
 
-    row.status     = "retired"
-    row.retired_at = datetime.utcnow()
-    row.status_reason = failure_reason
-    row.updated_at = datetime.utcnow()
+        row.status        = "retired"
+        row.retired_at    = datetime.utcnow()
+        row.status_reason = failure_reason
+        row.updated_at    = datetime.utcnow()
 
-    # Write graveyard record
-    already = (
-        db.query(StrategyGraveyard)
-        .filter(StrategyGraveyard.strategy_id == strategy_id)
-        .first()
-    )
-    if not already:
-        grave = StrategyGraveyard(
-            strategy_id    = strategy_id,
-            name           = row.name,
-            family         = row.family,
-            generation     = row.generation,
-            dsl_json       = row.dsl_json,
-            final_fitness  = row.fitness_score,
-            final_sharpe   = row.sharpe,
-            final_win_rate = row.win_rate,
-            failure_reason = failure_reason,
-            failure_detail = failure_detail,
-            regime_at_death = regime_at,
-            lessons_json   = json.dumps(lessons),
-            lifespan_days  = (date.today() - row.created_at.date()).days if row.created_at else None,
-            trade_count    = row.trade_count,
+        already = (
+            db.query(StrategyGraveyard)
+            .filter(StrategyGraveyard.strategy_id == strategy_id)
+            .first()
         )
-        db.add(grave)
+        if not already:
+            grave = StrategyGraveyard(
+                strategy_id     = strategy_id,
+                name            = row.name,
+                family          = row.family,
+                generation      = row.generation,
+                dsl_json        = row.dsl_json,
+                final_fitness   = row.fitness_score,
+                final_sharpe    = row.sharpe,
+                final_win_rate  = row.win_rate,
+                failure_reason  = failure_reason,
+                failure_detail  = failure_detail,
+                regime_at_death = regime_at,
+                lessons_json    = json.dumps(lessons),
+                lifespan_days   = (date.today() - row.created_at.date()).days if row.created_at else 0,
+                trade_count     = row.trade_count,
+            )
+            db.add(grave)
 
-    _log_event(db, strategy_id, "strategy_retired",
-               f"Retired. Reason: {failure_reason}. Fitness={row.fitness_score}. {failure_detail}")
-    log.info("Strategy %s retired. Reason: %s", strategy_id, failure_reason)
-    return {"success": True, "strategy_id": strategy_id, "failure_reason": failure_reason, "lessons": lessons}
+        _log_event(db, strategy_id, "strategy_retired",
+                   f"Retired. Reason: {failure_reason}. Fitness={row.fitness_score or 0}. {failure_detail}")
+        db.commit()
+        log.info("Strategy %s retired. Reason: %s", strategy_id, failure_reason)
+        return {"success": True, "strategy_id": strategy_id, "failure_reason": failure_reason, "lessons": lessons}
+    except Exception as exc:
+        db.rollback()
+        log.error("retire_strategy %s failed: %s", strategy_id, exc)
+        return {"success": False, "error": str(exc)}
 
 
 def run_lifecycle_sweep(db: Session) -> dict:
@@ -127,19 +135,23 @@ def run_lifecycle_sweep(db: Session) -> dict:
     promoted = []
     retired  = []
 
-    # Promote candidates / shadow strategies with high fitness
+    # Promote candidates / shadow strategies that pass all gates
     candidates = (
         db.query(StrategyV2)
         .filter(StrategyV2.status.in_(["candidate", "shadow"]))
         .all()
     )
     for s in candidates:
-        if (s.fitness_score or 0) >= PROMOTE_THRESHOLD and (s.trade_count or 0) >= MIN_TRADES:
+        if (
+            (s.fitness_score or 0) >= PROMOTE_THRESHOLD
+            and (s.trade_count or 0) >= MIN_TRADES
+            and (s.win_rate or 0) >= MIN_WIN_RATE
+        ):
             r = promote_strategy(db, s.strategy_id)
             if r["success"]:
                 promoted.append(s.strategy_id)
 
-    # Retire promoted/shadow strategies with fitness below threshold
+    # Retire shadow/promoted strategies that fall below thresholds
     at_risk = (
         db.query(StrategyV2)
         .filter(StrategyV2.status.in_(["shadow", "promoted"]))
@@ -154,6 +166,9 @@ def run_lifecycle_sweep(db: Session) -> dict:
         elif (s.max_drawdown or 0) < DRAWDOWN_LIMIT:
             reason = "drawdown"
             detail = f"max_drawdown={s.max_drawdown:.1f}% exceeded limit {DRAWDOWN_LIMIT}%"
+        elif s.status == "promoted" and (s.win_rate or 0) < MIN_WIN_RATE:
+            reason = "low_win_rate"
+            detail = f"win_rate={s.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"
         if reason:
             r = retire_strategy(db, s.strategy_id, failure_reason=reason, failure_detail=detail)
             if r["success"]:
@@ -167,10 +182,10 @@ def run_lifecycle_sweep(db: Session) -> dict:
 def _extract_retirement_lessons(row: StrategyV2, failure_reason: str) -> list[str]:
     lessons = []
     if failure_reason == "low_fitness":
-        lessons.append(f"Family '{row.family}' gen {row.generation}: fitness degraded to {row.fitness_score}. "
-                       f"Sharpe={row.sharpe}, win_rate={row.win_rate}.")
+        lessons.append(f"Family '{row.family}' gen {row.generation}: fitness degraded to {row.fitness_score or 0}. "
+                       f"Sharpe={row.sharpe or 0}, win_rate={row.win_rate or 0}.")
     if failure_reason == "drawdown":
-        lessons.append(f"Max drawdown {row.max_drawdown}% exceeded limits — position sizing or stop-loss insufficient.")
+        lessons.append(f"Max drawdown {row.max_drawdown or 0}% exceeded limits — position sizing or stop-loss insufficient.")
     if row.trade_count and row.trade_count < MIN_TRADES:
         lessons.append("Strategy fired too few signals — rules may be too restrictive.")
     try:

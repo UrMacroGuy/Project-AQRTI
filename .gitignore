@@ -41,3 +41,4 @@ Thumbs.db
 .vscode/settings.json
 *.suo
 *.user
+.gstack/

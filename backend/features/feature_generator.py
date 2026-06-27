@@ -107,19 +107,23 @@ def _load_universe_data(
             .all()
         )
         if rows:
-            universe_dfs[stock.symbol] = pd.DataFrame([
+            df_tmp = pd.DataFrame([
                 {
                     "date":            r.date,
-                    "open":            r.open,
-                    "high":            r.high,
-                    "low":             r.low,
-                    "close":           r.close,
-                    "volume":          r.volume,
-                    "delivery_volume": r.delivery_volume,
-                    "daily_return":    r.daily_return,
+                    "open":            pd.to_numeric(r.open, errors="coerce"),
+                    "high":            pd.to_numeric(r.high, errors="coerce"),
+                    "low":             pd.to_numeric(r.low, errors="coerce"),
+                    "close":           pd.to_numeric(r.close, errors="coerce"),
+                    "volume":          pd.to_numeric(r.volume, errors="coerce"),
+                    "delivery_volume": pd.to_numeric(r.delivery_volume, errors="coerce"),
+                    "daily_return":    pd.to_numeric(r.daily_return, errors="coerce"),
                 }
                 for r in rows
             ])
+            # Drop rows with no close price — feature modules require valid close
+            df_tmp = df_tmp.dropna(subset=["close"]).reset_index(drop=True)
+            if not df_tmp.empty:
+                universe_dfs[stock.symbol] = df_tmp
 
     # Load NIFTY50
     nifty_rows = (
@@ -129,9 +133,11 @@ def _load_universe_data(
         .all()
     )
     nifty_df = pd.DataFrame([
-        {"date": r.date, "close": r.close, "returns": r.returns}
+        {"date": r.date,
+         "close":   pd.to_numeric(r.close, errors="coerce"),
+         "returns": pd.to_numeric(r.returns, errors="coerce")}
         for r in nifty_rows
-    ]) if nifty_rows else pd.DataFrame()
+    ]).dropna(subset=["close"]).reset_index(drop=True) if nifty_rows else pd.DataFrame()
 
     log.info("Loaded %d symbols, %d NIFTY rows.", len(universe_dfs), len(nifty_df))
     return universe_dfs, nifty_df, sector_map
@@ -148,6 +154,13 @@ def _compute_all_features(
     sector_map: dict[str, str],
 ) -> dict[str, Optional[float]]:
     """Merge all feature category outputs into one flat dict."""
+    # Ensure all numeric columns are float dtype (None → NaN) to prevent
+    # TypeError when feature modules do arithmetic on object-typed columns.
+    num_cols = ["open", "high", "low", "close", "volume", "delivery_volume", "daily_return"]
+    for col in num_cols:
+        if col in stock_df.columns:
+            stock_df[col] = pd.to_numeric(stock_df[col], errors="coerce")
+
     features: dict[str, Optional[float]] = {}
 
     features.update(compute_price_features(stock_df, nifty_df))

@@ -50,7 +50,10 @@ def _get_best_strategy(db: Session) -> dict | None:
         from aqrti.database.models import StrategyV2
         row = (
             db.query(StrategyV2)
-            .filter(StrategyV2.status.in_(["promoted", "active"]))
+            .filter(
+                StrategyV2.status.in_(["promoted", "active"]),
+                StrategyV2.win_rate >= 70.0,
+            )
             .order_by(StrategyV2.fitness_score.desc())
             .first()
         )

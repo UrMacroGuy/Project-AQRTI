@@ -7,7 +7,9 @@ Computes daily returns and basic derived fields.
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr
 from datetime import date, datetime, timedelta
+from io import StringIO
 from typing import Optional
 
 import pandas as pd
@@ -31,13 +33,11 @@ STOCK_META: dict[str, dict] = {
     "ICICIBANK":  {"name": "ICICI Bank Ltd",                  "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
     "WIPRO":      {"name": "Wipro Ltd",                       "sector": "IT",           "industry": "IT Services",         "nifty": True},
     "AXISBANK":   {"name": "Axis Bank Ltd",                   "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
-    "LTIM":       {"name": "LTIMindtree Ltd",                 "sector": "IT",           "industry": "IT Services",         "nifty": True},
     "NESTLEIND":  {"name": "Nestle India Ltd",                "sector": "FMCG",         "industry": "Food Products",       "nifty": True},
     "BAJFINANCE": {"name": "Bajaj Finance Ltd",               "sector": "NBFC",         "industry": "Finance",             "nifty": True},
     "MARUTI":     {"name": "Maruti Suzuki India Ltd",         "sector": "Auto",         "industry": "Automobiles",         "nifty": True},
     "SUNPHARMA":  {"name": "Sun Pharmaceutical Industries",   "sector": "Pharma",       "industry": "Pharmaceuticals",     "nifty": True},
     "TATASTEEL":  {"name": "Tata Steel Ltd",                  "sector": "Metal",        "industry": "Steel",               "nifty": True},
-    "TATAMOTORS": {"name": "Tata Motors Ltd",                 "sector": "Auto",         "industry": "Automobiles",         "nifty": True},
     "KOTAKBANK":  {"name": "Kotak Mahindra Bank Ltd",         "sector": "Banking",      "industry": "Private Bank",        "nifty": True},
     "TITAN":      {"name": "Titan Company Ltd",               "sector": "Consumer",     "industry": "Consumer Durables",   "nifty": True},
     "ONGC":       {"name": "Oil & Natural Gas Corporation",   "sector": "Energy",       "industry": "Oil & Gas",           "nifty": True},
@@ -82,6 +82,8 @@ INDEX_META: dict[str, str] = {
     "^NSEBANK": "BANKNIFTY",
 }
 
+LEGACY_SYMBOLS: set[str] = {"LTIM", "TATAMOTORS", "LTM", "TMPV"}
+
 
 # ══════════════════════════════════════════════════════════════
 # SEED UNIVERSE
@@ -99,6 +101,16 @@ def seed_stock_universe(db: Session) -> None:
                 nifty_member = meta["nifty"],
                 active       = True,
             ))
+        else:
+            existing.name = meta["name"]
+            existing.sector = meta["sector"]
+            existing.industry = meta["industry"]
+            existing.nifty_member = meta["nifty"]
+            existing.active = True
+    for symbol in LEGACY_SYMBOLS:
+        existing = db.query(Stock).filter_by(symbol=symbol).first()
+        if existing:
+            existing.active = False
     db.commit()
     data_logger.info("Stock universe seeded — %d stocks.", len(STOCK_META))
 
@@ -163,13 +175,18 @@ def download_stock_prices(
                 continue
 
             data_logger.info("Downloading %s from %s …", ticker_ns, fetch_start)
-            df = yf.download(
-                ticker_ns,
-                start=str(fetch_start),
-                end=str(date.today() + timedelta(days=1)),
-                progress=False,
-                auto_adjust=True,
-            )
+            yf_stderr = StringIO()
+            with redirect_stderr(yf_stderr):
+                df = yf.download(
+                    ticker_ns,
+                    start=str(fetch_start),
+                    end=str(date.today() + timedelta(days=1)),
+                    progress=False,
+                    auto_adjust=True,
+                )
+            yf_noise = yf_stderr.getvalue().strip()
+            if yf_noise:
+                data_logger.debug("%s yfinance detail: %s", ticker_ns, yf_noise)
 
             if df.empty:
                 data_logger.warning("%s: no data returned.", ticker_ns)
@@ -246,13 +263,18 @@ def download_index_data(db: Session, start_override: Optional[date] = None) -> d
                 continue
 
             data_logger.info("Downloading index %s from %s …", index_name, fetch_start)
-            df = yf.download(
-                ticker,
-                start=str(fetch_start),
-                end=str(date.today() + timedelta(days=1)),
-                progress=False,
-                auto_adjust=True,
-            )
+            yf_stderr = StringIO()
+            with redirect_stderr(yf_stderr):
+                df = yf.download(
+                    ticker,
+                    start=str(fetch_start),
+                    end=str(date.today() + timedelta(days=1)),
+                    progress=False,
+                    auto_adjust=True,
+                )
+            yf_noise = yf_stderr.getvalue().strip()
+            if yf_noise:
+                data_logger.debug("%s yfinance detail: %s", ticker, yf_noise)
 
             if df.empty:
                 data_logger.warning("%s: no index data.", index_name)
@@ -440,11 +462,15 @@ def _fetch_live_index(index_name: str) -> Optional[dict]:
     try:
         import yfinance as yf
         ticker = yf.Ticker(yf_sym)
-        fi = ticker.fast_info
+        yf_stderr = StringIO()
+        with redirect_stderr(yf_stderr):
+            fi = ticker.fast_info
         price = getattr(fi, "last_price", None)
         prev  = getattr(fi, "previous_close", None)
         if price is None:
-            hist = ticker.history(period="2d", interval="1d", auto_adjust=True)
+            yf_stderr = StringIO()
+            with redirect_stderr(yf_stderr):
+                hist = ticker.history(period="2d", interval="1d", auto_adjust=True)
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
                 prev  = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else None

@@ -38,6 +38,14 @@ PIPELINE_ORDER = [
     "strategy_research",
     "risk_research",
     "cro",
+    # Phase 9: Autonomous Research Division
+    "feature_discovery",
+    "failure_scientist",
+    "model_scientist",
+    "data_quality",
+    "macro_intelligence",
+    "sector_intelligence",
+    "alert",
 ]
 
 

@@ -8,52 +8,10 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from aqrti.api.routes import (
-    overview, market, predictions, news,
-    sentiment, strategies, models, learning, risk, portfolio,
-)
-from aqrti.api.routes import features as features_router
-from aqrti.api.routes import market_regime as market_regime_router
-from aqrti.api.routes import confidence as confidence_router
-from aqrti.api.routes import patterns as patterns_router
-from aqrti.api.routes import paper_portfolio as paper_portfolio_router
-from aqrti.api.routes import paper_trades as paper_trades_router
-from aqrti.api.routes import performance as performance_router
-from aqrti.api.routes import equity_curve as equity_curve_router
-from aqrti.api.routes import rebalance as rebalance_router
-from aqrti.api.routes import failures as failures_router
-from aqrti.api.routes import knowledge as knowledge_router
-from aqrti.api.routes import drift as drift_router
-from aqrti.api.routes import feature_intelligence as feature_intelligence_router
-from aqrti.api.routes import lessons as lessons_router
-from aqrti.api.routes import strategy_performance as strategy_performance_router
-from aqrti.api.routes import strategy_evolution as strategy_evolution_router
-from aqrti.api.routes import graveyard as graveyard_router
-from aqrti.api.routes import research as research_router
-from aqrti.api.routes import agents as agents_router
-from aqrti.api.routes import research_briefs as research_briefs_router
-from aqrti.api.routes import research_findings as research_findings_router
-from aqrti.api.routes import intelligence as intelligence_router
-from aqrti.api.routes import vault as vault_router
-from aqrti.api.routes import replay as replay_router
-from aqrti.api.routes import archives as archives_router
-from aqrti.api.routes import vault_briefs as vault_briefs_router
-from aqrti.api.routes import vault_export as vault_export_router
-from aqrti.api.routes import backups as backups_router
-from aqrti.api.routes import corporate as corporate_router
-from aqrti.api.routes import fii_dii as fii_dii_router
-from aqrti.api.routes import options_intelligence as options_intelligence_router
-from aqrti.api.routes import market_breadth as market_breadth_router
-from aqrti.api.routes import sector_rotation as sector_rotation_router
-from aqrti.api.routes import earnings as earnings_router
-from aqrti.api.routes import data_quality as data_quality_router
-from aqrti.api.routes import screener as screener_router
-from aqrti.api.routes import watchlist as watchlist_router
-from aqrti.api.routes import stress_test as stress_test_router
-from aqrti.api.routes import universe as universe_router
+# Only import what's needed at module level — everything else is lazy-loaded
+# inside create_app() so Python doesn't pay the import cost until the app starts.
 from aqrti.config.settings import get_settings
 from aqrti.database.engine import init_db, checkpoint_wal
-from aqrti.data.market_data import run_daily_ingestion, run_new_symbol_backfill
 from aqrti.data.scheduler import start_scheduler, stop_scheduler
 from aqrti.utils.logger import api_logger
 import threading
@@ -111,6 +69,7 @@ def _run_boot_sequence():
     # Step 1 — Market Data
     _boot_step("market_data", "running")
     try:
+        from aqrti.data.market_data import run_daily_ingestion, run_new_symbol_backfill
         # Backfill 3-year history for any new symbols before normal incremental ingest
         bf = run_new_symbol_backfill(years=3)
         if bf["backfilled"]:
@@ -294,15 +253,16 @@ def create_app() -> FastAPI:
     # ── Startup / Shutdown ───────────────────────────────────────
     @app.on_event("startup")
     async def on_startup():
-        import asyncio
         api_logger.info("AQRTI Backend starting up …")
         init_db()
         checkpoint_wal()
         start_scheduler()
-        api_logger.info("AQRTI Backend ready on port %d — boot pipeline starting in background", settings.port)
-        # Run full boot sequence in background: market data → features → news →
-        # sentiment → predictions → paper trading → agents → strategies → learning
-        t = threading.Thread(target=_run_boot_sequence, name="boot-sequence", daemon=True)
+        api_logger.info("AQRTI Backend ready — boot pipeline starting in background")
+        # Defer boot sequence by 1s so uvicorn fully binds and /health responds first
+        def _deferred_boot():
+            _time.sleep(1)
+            _run_boot_sequence()
+        t = threading.Thread(target=_deferred_boot, name="boot-sequence", daemon=True)
         t.start()
 
     @app.on_event("shutdown")
@@ -311,6 +271,59 @@ def create_app() -> FastAPI:
         checkpoint_wal()
         api_logger.info("AQRTI Backend shut down.")
 
+    # ── Lazy route imports (deferred so startup is fast) ─────────
+    from aqrti.api.routes import (
+        overview, market, predictions, news,
+        sentiment, strategies, models, learning, risk, portfolio,
+    )
+    from aqrti.api.routes import features as features_router
+    from aqrti.api.routes import market_regime as market_regime_router
+    from aqrti.api.routes import confidence as confidence_router
+    from aqrti.api.routes import patterns as patterns_router
+    from aqrti.api.routes import paper_portfolio as paper_portfolio_router
+    from aqrti.api.routes import paper_trades as paper_trades_router
+    from aqrti.api.routes import performance as performance_router
+    from aqrti.api.routes import equity_curve as equity_curve_router
+    from aqrti.api.routes import rebalance as rebalance_router
+    from aqrti.api.routes import failures as failures_router
+    from aqrti.api.routes import knowledge as knowledge_router
+    from aqrti.api.routes import drift as drift_router
+    from aqrti.api.routes import feature_intelligence as feature_intelligence_router
+    from aqrti.api.routes import lessons as lessons_router
+    from aqrti.api.routes import strategy_performance as strategy_performance_router
+    from aqrti.api.routes import strategy_evolution as strategy_evolution_router
+    from aqrti.api.routes import graveyard as graveyard_router
+    from aqrti.api.routes import research as research_router
+    from aqrti.api.routes import agents as agents_router
+    from aqrti.api.routes import research_briefs as research_briefs_router
+    from aqrti.api.routes import research_findings as research_findings_router
+    from aqrti.api.routes import intelligence as intelligence_router
+    from aqrti.api.routes import vault as vault_router
+    from aqrti.api.routes import replay as replay_router
+    from aqrti.api.routes import archives as archives_router
+    from aqrti.api.routes import vault_briefs as vault_briefs_router
+    from aqrti.api.routes import vault_export as vault_export_router
+    from aqrti.api.routes import backups as backups_router
+    from aqrti.api.routes import corporate as corporate_router
+    from aqrti.api.routes import fii_dii as fii_dii_router
+    from aqrti.api.routes import options_intelligence as options_intelligence_router
+    from aqrti.api.routes import market_breadth as market_breadth_router
+    from aqrti.api.routes import sector_rotation as sector_rotation_router
+    from aqrti.api.routes import earnings as earnings_router
+    from aqrti.api.routes import data_quality as data_quality_router
+    from aqrti.api.routes import screener as screener_router
+    from aqrti.api.routes import watchlist as watchlist_router
+    from aqrti.api.routes import stress_test as stress_test_router
+    from aqrti.api.routes import universe as universe_router
+    from aqrti.api.routes import regime_discovery as regime_discovery_router
+    from aqrti.api.routes import counterfactual as counterfactual_router
+    from aqrti.api.routes import strategy_dna as strategy_dna_router
+    from aqrti.api.routes import feature_discovery as feature_discovery_router
+    from aqrti.api.routes import knowledge_graph as knowledge_graph_router
+    from aqrti.api.routes import hypothesis as hypothesis_router
+    from aqrti.api.routes import champion_challenger as champion_challenger_router
+    from aqrti.api.routes import uncertainty as uncertainty_router
+    from aqrti.api.routes import multi_agent as multi_agent_router
     # ── Routes ───────────────────────────────────────────────────
     PREFIX = "/api/v1"
 
@@ -366,6 +379,17 @@ def create_app() -> FastAPI:
     # ── Phase 8.5: Historical Intelligence Training System ────────
     HI = f"{PREFIX}"
     app.include_router(intelligence_router.router, prefix=HI, tags=["Historical Intelligence"])
+
+    # ── Phase 9: Self-Learning Intelligence Upgrade ───────────────
+    app.include_router(regime_discovery_router.router,    prefix=f"{PREFIX}/regime-discovery",    tags=["Regime Discovery"])
+    app.include_router(counterfactual_router.router,      prefix=f"{PREFIX}/counterfactual",      tags=["Counterfactual"])
+    app.include_router(strategy_dna_router.router,        prefix=f"{PREFIX}/strategy-dna",        tags=["Strategy DNA"])
+    app.include_router(feature_discovery_router.router,   prefix=f"{PREFIX}/feature-discovery",   tags=["Feature Discovery"])
+    app.include_router(knowledge_graph_router.router,     prefix=f"{PREFIX}/knowledge-graph",     tags=["Knowledge Graph"])
+    app.include_router(hypothesis_router.router,          prefix=f"{PREFIX}/hypothesis",          tags=["Hypothesis"])
+    app.include_router(champion_challenger_router.router, prefix=f"{PREFIX}/champion-challenger", tags=["Champion Challenger"])
+    app.include_router(uncertainty_router.router,         prefix=f"{PREFIX}/uncertainty",         tags=["Uncertainty"])
+    app.include_router(multi_agent_router.router,         prefix=f"{PREFIX}/multi-agent",         tags=["Multi Agent"])
 
     # ── System Status (boot progress) ────────────────────────────
     @app.get("/api/v1/system/status", tags=["System"])

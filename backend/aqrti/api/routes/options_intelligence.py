@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from io import StringIO
 import sys, os
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -85,7 +87,9 @@ def get_options_chain(
 
         # Get spot price
         try:
-            fi = ticker.fast_info
+            yf_stderr = StringIO()
+            with redirect_stderr(yf_stderr):
+                fi = ticker.fast_info
             spot = float(getattr(fi, "last_price", None) or 0)
         except Exception:
             spot = None

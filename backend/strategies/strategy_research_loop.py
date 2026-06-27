@@ -104,8 +104,7 @@ def _backtest_unscored(db, max_stocks: int = 200) -> dict:
             backtest_and_update(db, dsl, start_date=start_date, end_date=end_date)
             tested += 1
         except Exception as exc:
-            import traceback
-            log.warning("Backtest failed for %s: %s\n%s", row.strategy_id, exc, traceback.format_exc())
+            log.warning("Backtest failed for %s: %s", row.strategy_id, exc)
             errors += 1
 
     return {"backtested": tested, "errors": errors, "total_queued": len(rows)}

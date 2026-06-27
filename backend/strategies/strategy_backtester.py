@@ -125,8 +125,8 @@ ROUND_TRIP_COST = _EXCHANGE_ROUND_TRIP_COST["NSE"]
 STOCK_UNIVERSE = [
     # Original 20
     "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
-    "WIPRO", "AXISBANK", "LTIM", "NESTLEIND", "BAJFINANCE",
-    "MARUTI", "SUNPHARMA", "TATASTEEL", "TATAMOTORS", "KOTAKBANK",
+    "WIPRO", "AXISBANK", "NESTLEIND", "BAJFINANCE",
+    "MARUTI", "SUNPHARMA", "TATASTEEL", "KOTAKBANK",
     "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
     # Expanded 30
     "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
@@ -169,6 +169,8 @@ def _simple_rsi(closes: list[float], period: int = 14) -> Optional[float]:
         (gains if delta > 0 else losses).append(abs(delta))
     avg_gain = sum(gains) / period if gains else 0.0
     avg_loss = sum(losses) / period if losses else 1e-9
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
@@ -378,6 +380,62 @@ def _get_all_price_dates(db: Session, start: date, end: date) -> list[date]:
     return [r[0] for r in rows]
 
 
+def _preload_prices(
+    db: Session, universe: list[str], start: date, end: date
+) -> tuple[dict, dict, dict]:
+    """
+    Bulk-load all prices for universe in one query.
+    Returns:
+      price_on_date:  {(symbol, date): close}  — exact date
+      sorted_dates_by_sym: {symbol: [date, ...]} sorted asc
+      closes_by_sym:  {symbol: {date: close}}
+    """
+    rows = (
+        db.query(DailyPrice.symbol, DailyPrice.date, DailyPrice.close)
+        .filter(
+            DailyPrice.symbol.in_(universe),
+            DailyPrice.date >= start - timedelta(days=180),  # extra history for technicals
+            DailyPrice.date <= end + timedelta(days=3),       # extra days for next-day entry
+            DailyPrice.close.isnot(None),
+        )
+        .order_by(DailyPrice.symbol, DailyPrice.date.asc())
+        .all()
+    )
+    closes_by_sym: dict[str, dict[date, float]] = {}
+    for sym, dt, close in rows:
+        closes_by_sym.setdefault(sym, {})[dt] = close
+
+    sorted_dates_by_sym: dict[str, list[date]] = {
+        sym: sorted(d.keys()) for sym, d in closes_by_sym.items()
+    }
+    return closes_by_sym, sorted_dates_by_sym
+
+
+def _price_on_cached(closes_by_sym: dict, sorted_dates: dict, symbol: str, on_date: date, look_ahead: int = 0) -> Optional[float]:
+    """Get close on or after on_date + look_ahead days from cache using bisect."""
+    import bisect
+    target = on_date + timedelta(days=look_ahead)
+    dates = sorted_dates.get(symbol, [])
+    if not dates:
+        return None
+    idx = bisect.bisect_left(dates, target)
+    if idx < len(dates):
+        return closes_by_sym[symbol][dates[idx]]
+    return None
+
+
+def _price_before_cached(closes_by_sym: dict, sorted_dates: dict, symbol: str, on_date: date) -> Optional[float]:
+    """Get most recent close on or before on_date from cache using bisect."""
+    import bisect
+    dates = sorted_dates.get(symbol, [])
+    if not dates:
+        return None
+    idx = bisect.bisect_right(dates, on_date) - 1
+    if idx >= 0:
+        return closes_by_sym[symbol][dates[idx]]
+    return None
+
+
 def _load_ml_predictions(
     db: Session, start_date: date, end_date: date, universe: list[str]
 ) -> dict[date, dict[str, dict]]:
@@ -474,12 +532,14 @@ def backtest_strategy(
     start_date:       date,
     end_date:         date,
     universe:         Optional[list[str]] = None,
-    min_confidence:   float = 60.0,
+    min_confidence:   float = 50.0,
     stop_loss_pct:    float = -7.0,
     take_profit_pct:  float = 12.0,
-    max_holding_days: int   = 15,
+    max_holding_days: int   = 20,
     allowed_regimes:  Optional[list[str]] = None,
     use_technical_fallback: bool = True,
+    entry_conditions: Optional[object] = None,   # ConditionGroup from StrategyDSL
+    exit_conditions:  Optional[object] = None,   # ConditionGroup from StrategyDSL
 ) -> BacktestResult:
     """
     Signal-driven backtest using ML predictions + price technicals.
@@ -490,7 +550,8 @@ def backtest_strategy(
     system has run predictions for every historical date.
 
     Entry: signal Bullish >= min_confidence, regime allowed, NIFTY not falling
-    Exit:  stop-loss | take-profit | max-hold | bearish signal flip
+           + DSL entry_conditions evaluated against feature vectors (if available)
+    Exit:  stop-loss | take-profit | max-hold | bearish signal flip | DSL exit_conditions
     """
     if universe is None:
         universe = get_backtest_universe(db)
@@ -515,9 +576,77 @@ def backtest_strategy(
         )
         return result
 
+    # Pre-load ALL price data in one bulk query (replaces per-day/per-sym DB calls in hot loop)
+    closes_by_sym, sorted_dates_by_sym = _preload_prices(db, universe, start_date, end_date)
+
+    # Pre-load feature vectors for DSL condition evaluation (only when DSL has conditions)
+    feature_cache: dict[tuple, dict] = {}
+    if entry_conditions is not None or exit_conditions is not None:
+        from aqrti.database.models import FeatureValue
+        feat_rows = (
+            db.query(FeatureValue.symbol, FeatureValue.date, FeatureValue.feature_name, FeatureValue.value)
+            .filter(
+                FeatureValue.symbol.in_(universe),
+                FeatureValue.date >= start_date,
+                FeatureValue.date <= end_date,
+                FeatureValue.version == 1,
+            )
+            .all()
+        )
+        for sym, dt, fname, fval in feat_rows:
+            key = (sym, dt)
+            if key not in feature_cache:
+                feature_cache[key] = {}
+            feature_cache[key][fname] = fval
+
     # Pre-load ML predictions
     ml_preds = _load_ml_predictions(db, start_date, end_date, universe)
     has_ml = bool(ml_preds)
+
+    # Pre-load regimes and NIFTY trend for all dates in one pass
+    all_regimes = (
+        db.query(MarketRegime.date, MarketRegime.regime)
+        .filter(MarketRegime.date >= start_date - timedelta(days=30), MarketRegime.date <= end_date)
+        .order_by(MarketRegime.date.asc())
+        .all()
+    )
+    regime_by_date: dict[date, str] = {}
+    last_regime = "BULL"
+    for rd, rg in all_regimes:
+        regime_by_date[rd] = rg
+        last_regime = rg
+
+    nifty_rows = (
+        db.query(IndexData.date, IndexData.returns)
+        .filter(IndexData.index_name == "NIFTY50",
+                IndexData.date >= start_date - timedelta(days=30),
+                IndexData.date <= end_date)
+        .order_by(IndexData.date.asc())
+        .all()
+    )
+    nifty_ret_by_date: dict[date, float] = {r[0]: r[1] for r in nifty_rows if r[1] is not None}
+    nifty_dates_sorted = sorted(nifty_ret_by_date.keys())
+
+    _regime_dates_sorted = sorted(regime_by_date.keys())
+
+    def _regime_on(d: date) -> str:
+        """Regime on or before date d using bisect."""
+        import bisect
+        idx = bisect.bisect_right(_regime_dates_sorted, d) - 1
+        if idx >= 0:
+            return regime_by_date[_regime_dates_sorted[idx]]
+        return "BULL"
+
+    def _nifty_trend_on(d: date, lookback: int = 5) -> str:
+        rets = [nifty_ret_by_date[nd] for nd in nifty_dates_sorted if nd <= d][-lookback:]
+        if not rets:
+            return "FLAT"
+        positive = sum(1 for r in rets if r > 0)
+        if positive >= len(rets) * 0.7:
+            return "UP"
+        if positive <= len(rets) * 0.3:
+            return "DOWN"
+        return "FLAT"
 
     open_positions: dict[str, dict] = {}
     regime_returns: dict[str, list[float]] = {
@@ -525,15 +654,15 @@ def backtest_strategy(
     }
 
     for d in all_dates:
-        regime      = _get_regime(db, d)
-        nifty_trend = _get_nifty_trend(db, d)
+        regime      = _regime_on(d)
+        nifty_trend = _nifty_trend_on(d)
         ml_day      = ml_preds.get(d, {})
 
         # ── Process exits ──────────────────────────────────
         for sym in list(open_positions.keys()):
             pos = open_positions[sym]
             pos["holding_days"] += 1
-            cur_price = _price_before(db, sym, d)
+            cur_price = _price_before_cached(closes_by_sym, sorted_dates_by_sym, sym, d)
             if cur_price is None:
                 continue
 
@@ -555,6 +684,11 @@ def backtest_strategy(
                 flip = ml_day.get(sym, {})
                 if flip.get("direction") == "Bearish" and flip.get("confidence", 0) >= 65:
                     exit_reason = "bearish_flip"
+                # DSL exit conditions evaluated against feature vectors
+                elif exit_conditions is not None:
+                    feat_vec = feature_cache.get((sym, d), {})
+                    if feat_vec and exit_conditions.evaluate(feat_vec):
+                        exit_reason = "exit_rule"
 
             if exit_reason:
                 exit_cost_pct = _transaction_cost("sell", sym) * 100
@@ -591,12 +725,17 @@ def backtest_strategy(
             if sym in ml_day:
                 signals.append((sym, ml_day[sym]))
             elif use_technical_fallback:
-                hist_since = d - timedelta(days=120)
-                closes = _load_price_history(db, sym, hist_since, d)
-                if len(closes) >= 22:
-                    sig = _technical_signal(closes)
-                    sig["source"] = "technical"
-                    signals.append((sym, sig))
+                # Use cached price history with bisect for O(log n) slice
+                import bisect
+                sym_dates = sorted_dates_by_sym.get(sym, [])
+                sym_closes = closes_by_sym.get(sym, {})
+                if sym_dates:
+                    end_idx = bisect.bisect_right(sym_dates, d)
+                    hist_closes = [sym_closes[sym_dates[i]] for i in range(max(0, end_idx-120), end_idx)]
+                    if len(hist_closes) >= 22:
+                        sig = _technical_signal(hist_closes)
+                        sig["source"] = "technical"
+                        signals.append((sym, sig))
 
         # Sort by confidence descending — highest conviction first
         signals.sort(key=lambda x: x[1]["confidence"], reverse=True)
@@ -608,10 +747,16 @@ def backtest_strategy(
             if not _should_enter(signal, regime, nifty_trend, min_confidence, allowed_regimes):
                 continue
 
+            # Evaluate DSL entry conditions against pre-loaded feature vectors
+            if entry_conditions is not None:
+                feat_vec = feature_cache.get((sym, d), {})
+                if feat_vec and not entry_conditions.evaluate(feat_vec):
+                    continue  # DSL conditions not met — skip
+
             # Enter at next-day close; fall back to same-day if not available
-            entry_price = _price_on(db, sym, d, look_ahead=1)
+            entry_price = _price_on_cached(closes_by_sym, sorted_dates_by_sym, sym, d, look_ahead=1)
             if entry_price is None:
-                entry_price = _price_before(db, sym, d)
+                entry_price = _price_before_cached(closes_by_sym, sorted_dates_by_sym, sym, d)
             if entry_price is None or entry_price <= 0:
                 continue
 
@@ -627,7 +772,7 @@ def backtest_strategy(
 
     # Force-close remaining positions at end_date
     for sym, pos in open_positions.items():
-        cur_price = _price_before(db, sym, end_date)
+        cur_price = _price_before_cached(closes_by_sym, sorted_dates_by_sym, sym, end_date)
         if cur_price is None or pos["entry_price"] <= 0:
             continue
         pnl_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
@@ -680,24 +825,28 @@ def backtest_and_update(
     from aqrti.database.models import StrategyBacktestTrade
 
     end   = end_date   or date.today()
-    start = start_date or (end - timedelta(days=365))
+    start = start_date or (end - timedelta(days=5*365))
 
     # Extract params from StrategyDSL if provided
+    entry_conds = None
+    exit_conds  = None
     if hasattr(strategy, "strategy_id"):
         sid               = strategy.strategy_id()
-        min_confidence    = getattr(strategy, "min_confidence",   60.0)
+        min_confidence    = getattr(strategy, "min_confidence",   50.0)
         stop_loss_pct     = getattr(strategy, "stop_loss_pct",    -7.0)
         take_profit_pct   = getattr(strategy, "take_profit_pct",  12.0)
-        max_holding_days  = getattr(strategy, "max_holding_days", 15)
+        max_holding_days  = getattr(strategy, "max_holding_days", 20)
         allowed_regimes   = getattr(strategy, "allowed_regimes",  ["BULL", "SIDEWAYS", "BEAR", "VOLATILE"])
         family            = getattr(strategy, "family",           "hybrid")
         name              = getattr(strategy, "name",             "")
+        entry_conds       = getattr(strategy, "entry_conditions", None)
+        exit_conds        = getattr(strategy, "exit_conditions",  None)
     else:
         sid               = strategy.get("strategy_id", "UNKNOWN")
-        min_confidence    = strategy.get("min_confidence",   60.0)
+        min_confidence    = strategy.get("min_confidence",   50.0)
         stop_loss_pct     = strategy.get("stop_loss_pct",    -7.0)
         take_profit_pct   = strategy.get("take_profit_pct",  12.0)
-        max_holding_days  = strategy.get("max_holding_days", 15)
+        max_holding_days  = strategy.get("max_holding_days", 20)
         allowed_regimes   = strategy.get("allowed_regimes",  ["BULL", "SIDEWAYS", "BEAR", "VOLATILE"])
         family            = strategy.get("family",           "hybrid")
         name              = strategy.get("name",             "")
@@ -714,44 +863,49 @@ def backtest_and_update(
         max_holding_days = max_holding_days,
         allowed_regimes  = allowed_regimes,
         use_technical_fallback = True,
+        entry_conditions = entry_conds,
+        exit_conditions  = exit_conds,
     )
 
-    upsert_strategy(db, {
-        "strategy_id":       result.strategy_id,
-        "sharpe":            result.sharpe,
-        "sortino":           result.sortino,
-        "win_rate":          result.win_rate,
-        "profit_factor":     result.profit_factor,
-        "max_drawdown":      result.max_drawdown,
-        "expectancy":        result.expectancy,
-        "trade_count":       result.trade_count,
-        "avg_holding_days":  result.avg_holding_days,
-        "bull_sharpe":       result.bull_sharpe,
-        "bear_sharpe":       result.bear_sharpe,
-        "sideways_sharpe":   result.sideways_sharpe,
-        "volatile_sharpe":   result.volatile_sharpe,
-        "backtest_start":    start,
-        "backtest_end":      end,
-        "backtest_universe": result.universe_size,
-        "status":            "shadow",
-        "family":            family,
-        "name":              name,
-    })
+    # Write results in a dedicated short-lived session to avoid holding the
+    # long read session open during the commit (prevents SQLite "database is locked").
+    from aqrti.database.engine import get_db as _get_write_db
+    with _get_write_db() as write_db:
+        upsert_strategy(write_db, {
+            "strategy_id":       result.strategy_id,
+            "sharpe":            result.sharpe,
+            "sortino":           result.sortino,
+            "win_rate":          result.win_rate,
+            "profit_factor":     result.profit_factor,
+            "max_drawdown":      result.max_drawdown,
+            "expectancy":        result.expectancy,
+            "trade_count":       result.trade_count,
+            "avg_holding_days":  result.avg_holding_days,
+            "bull_sharpe":       result.bull_sharpe,
+            "bear_sharpe":       result.bear_sharpe,
+            "sideways_sharpe":   result.sideways_sharpe,
+            "volatile_sharpe":   result.volatile_sharpe,
+            "backtest_start":    start,
+            "backtest_end":      end,
+            "backtest_universe": result.universe_size,
+            "status":            "shadow",
+            "family":            family,
+            "name":              name,
+        })
 
-    # Persist individual trades — delete stale, insert fresh
-    db.query(StrategyBacktestTrade).filter_by(strategy_id=result.strategy_id).delete()
-    for t in result.trades:
-        db.add(StrategyBacktestTrade(
-            strategy_id  = result.strategy_id,
-            symbol       = t.symbol,
-            entry_date   = t.entry_date,
-            exit_date    = t.exit_date,
-            entry_price  = t.entry_price,
-            exit_price   = t.exit_price,
-            pnl_pct      = t.pnl_pct,
-            exit_reason  = t.exit_reason,
-            holding_days = t.holding_days,
-        ))
+        # Persist individual trades — delete stale, insert fresh
+        write_db.query(StrategyBacktestTrade).filter_by(strategy_id=result.strategy_id).delete()
+        for t in result.trades:
+            write_db.add(StrategyBacktestTrade(
+                strategy_id  = result.strategy_id,
+                symbol       = t.symbol,
+                entry_date   = t.entry_date,
+                exit_date    = t.exit_date,
+                entry_price  = t.entry_price,
+                exit_price   = t.exit_price,
+                pnl_pct      = t.pnl_pct,
+                exit_reason  = t.exit_reason,
+                holding_days = t.holding_days,
+            ))
 
-    db.commit()
     return result

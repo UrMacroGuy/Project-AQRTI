@@ -242,12 +242,13 @@ def _check_live_divergence(db: Session, strategy_id: str) -> dict:
     demote = (
         len(closed) >= DEMOTION_MIN_TRADES and (
             sharpe_gap  > SHARPE_DIVERGE_LIMIT or
-            winrate_gap > WINRATE_DIVERGE_LIMIT
+            winrate_gap > WINRATE_DIVERGE_LIMIT or
+            live_winrate < 70.0   # absolute floor — live win_rate must stay ≥ 70%
         )
     )
     reason = (
         f"live_divergence: sharpe_gap={sharpe_gap:.2f} winrate_gap={winrate_gap:.1f}pp "
-        f"live_trades={len(closed)}"
+        f"live_wr={live_winrate:.1f}% live_trades={len(closed)}"
     )
     log.debug("Divergence %s: %s demote=%s", strategy_id, reason, demote)
     return {"demote": demote, "flag": flag, "reason": reason}

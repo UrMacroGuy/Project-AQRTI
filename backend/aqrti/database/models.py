@@ -1786,3 +1786,447 @@ class DataQualityLog(Base):
     quality_grade   = Column(String(2),  nullable=True)      # A|B|C|D|F
     issues_json     = Column(Text,       nullable=True)      # JSON list of detected issues
     scraped_at      = Column(DateTime,   default=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 15: AUTOMATIC REGIME DISCOVERY
+# ══════════════════════════════════════════════════════════════
+
+class DiscoveredRegime(Base):
+    __tablename__ = "discovered_regimes"
+    __table_args__ = (UniqueConstraint("regime_id", name="uq_discovered_regime_id"),)
+
+    id                     = Column(Integer, primary_key=True, autoincrement=True)
+    regime_id              = Column(String(20), nullable=False, unique=True, index=True)
+    label                  = Column(String(80), nullable=True)
+    description            = Column(Text, nullable=True)
+    cluster_center_json    = Column(Text, nullable=True)
+    feature_names_json     = Column(Text, nullable=True)
+    avg_volatility         = Column(Float, nullable=True)
+    avg_breadth            = Column(Float, nullable=True)
+    avg_momentum           = Column(Float, nullable=True)
+    avg_volume_ratio       = Column(Float, nullable=True)
+    momentum_failure_rate  = Column(Float, nullable=True)
+    typical_duration_days  = Column(Float, nullable=True)
+    sample_count           = Column(Integer, default=0)
+    first_seen             = Column(Date, nullable=True)
+    last_seen              = Column(Date, nullable=True)
+    is_active              = Column(Boolean, default=True)
+    created_at             = Column(DateTime, default=datetime.utcnow)
+    updated_at             = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DailyRegimeAssignment(Base):
+    __tablename__ = "daily_regime_assignments"
+    __table_args__ = (UniqueConstraint("date", name="uq_regime_date"),)
+
+    id                     = Column(Integer, primary_key=True, autoincrement=True)
+    date                   = Column(Date, nullable=False, unique=True, index=True)
+    regime_id              = Column(String(20), nullable=False, index=True)
+    confidence             = Column(Float, nullable=True)
+    transition_probability = Column(Float, nullable=True)
+    feature_vector_json    = Column(Text, nullable=True)
+    nearest_centroid_dist  = Column(Float, nullable=True)
+    created_at             = Column(DateTime, default=datetime.utcnow)
+
+
+class RegimeTransitionMatrix(Base):
+    __tablename__ = "regime_transition_matrix"
+    __table_args__ = (UniqueConstraint("from_regime", "to_regime", name="uq_regime_transition"),)
+
+    id                        = Column(Integer, primary_key=True, autoincrement=True)
+    from_regime               = Column(String(20), nullable=False, index=True)
+    to_regime                 = Column(String(20), nullable=False)
+    transition_count          = Column(Integer, default=0)
+    transition_probability    = Column(Float, default=0.0)
+    avg_duration_before_days  = Column(Float, nullable=True)
+    updated_at                = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 16: COUNTERFACTUAL LEARNING
+# ══════════════════════════════════════════════════════════════
+
+class CounterfactualSimulation(Base):
+    __tablename__ = "counterfactual_simulations"
+
+    id                   = Column(Integer, primary_key=True, autoincrement=True)
+    source_type          = Column(String(20), nullable=False)
+    source_id            = Column(Integer, nullable=False, index=True)
+    symbol               = Column(String(20), nullable=False, index=True)
+    original_date        = Column(Date, nullable=False)
+    scenario_type        = Column(String(60), nullable=False)
+    scenario_params_json = Column(Text, nullable=True)
+    original_return      = Column(Float, nullable=True)
+    simulated_return     = Column(Float, nullable=True)
+    return_delta         = Column(Float, nullable=True)
+    original_regime      = Column(String(30), nullable=True)
+    lesson_generated     = Column(Text, nullable=True)
+    confidence           = Column(Float, nullable=True)
+    created_at           = Column(DateTime, default=datetime.utcnow)
+
+
+class CounterfactualLesson(Base):
+    __tablename__ = "counterfactual_lessons"
+
+    id                       = Column(Integer, primary_key=True, autoincrement=True)
+    lesson_date              = Column(Date, nullable=False, index=True)
+    scenario_type            = Column(String(60), nullable=False, index=True)
+    regime                   = Column(String(30), nullable=True)
+    title                    = Column(String(200), nullable=False)
+    description              = Column(Text, nullable=False)
+    avg_return_delta         = Column(Float, nullable=True)
+    sample_count             = Column(Integer, default=0)
+    confidence               = Column(Float, nullable=True)
+    applies_to_families_json = Column(Text, nullable=True)
+    applied_count            = Column(Integer, default=0)
+    created_at               = Column(DateTime, default=datetime.utcnow)
+    updated_at               = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 17: STRATEGY DNA & GENEALOGY
+# ══════════════════════════════════════════════════════════════
+
+class StrategyDNA(Base):
+    __tablename__ = "strategy_dna"
+    __table_args__ = (UniqueConstraint("strategy_id", name="uq_dna_strategy"),)
+
+    id                       = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_id              = Column(String(40), nullable=False, unique=True, index=True)
+    family                   = Column(String(40), nullable=True)
+    dominant_features_json   = Column(Text, nullable=True)
+    indicator_set_json       = Column(Text, nullable=True)
+    avg_holding_days         = Column(Float, nullable=True)
+    avg_volatility_at_entry  = Column(Float, nullable=True)
+    avg_drawdown             = Column(Float, nullable=True)
+    preferred_regime         = Column(String(30), nullable=True)
+    worst_regime             = Column(String(30), nullable=True)
+    avg_confidence           = Column(Float, nullable=True)
+    sector_preference_json   = Column(Text, nullable=True)
+    generation               = Column(Integer, default=0)
+    mutation_history_json    = Column(Text, nullable=True)
+    parent_ids_json          = Column(Text, nullable=True)
+    child_ids_json           = Column(Text, nullable=True)
+    dna_hash                 = Column(String(64), nullable=True, index=True)
+    similarity_scores_json   = Column(Text, nullable=True)
+    created_at               = Column(DateTime, default=datetime.utcnow)
+    updated_at               = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 18: FEATURE DISCOVERY
+# ══════════════════════════════════════════════════════════════
+
+class FeatureCandidate(Base):
+    __tablename__ = "feature_candidates"
+
+    id                    = Column(Integer, primary_key=True, autoincrement=True)
+    candidate_id          = Column(String(40), nullable=False, unique=True, index=True)
+    name                  = Column(String(100), nullable=False)
+    formula               = Column(Text, nullable=False)
+    category              = Column(String(40), nullable=True)
+    source                = Column(String(40), nullable=True)
+    parent_features_json  = Column(Text, nullable=True)
+    hypothesis            = Column(Text, nullable=True)
+    ic_score              = Column(Float, nullable=True)
+    ic_by_regime_json     = Column(Text, nullable=True)
+    validation_status     = Column(String(20), default="pending")
+    validation_details_json = Column(Text, nullable=True)
+    rejection_reason      = Column(Text, nullable=True)
+    backtest_sharpe       = Column(Float, nullable=True)
+    sample_count          = Column(Integer, default=0)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+    validated_at          = Column(DateTime, nullable=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 19: KNOWLEDGE GRAPH
+# ══════════════════════════════════════════════════════════════
+
+class KnowledgeNode(Base):
+    __tablename__ = "knowledge_nodes"
+    __table_args__ = (UniqueConstraint("node_type", "node_key", name="uq_node"),)
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    node_type       = Column(String(30), nullable=False, index=True)
+    node_key        = Column(String(100), nullable=False, index=True)
+    label           = Column(String(200), nullable=True)
+    properties_json = Column(Text, nullable=True)
+    confidence      = Column(Float, default=1.0)
+    evidence_count  = Column(Integer, default=0)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class KnowledgeEdge(Base):
+    __tablename__ = "knowledge_edges"
+    __table_args__ = (UniqueConstraint("from_node_id", "to_node_id", "edge_type", name="uq_edge"),)
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    from_node_id  = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False, index=True)
+    to_node_id    = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False, index=True)
+    edge_type     = Column(String(40), nullable=False, index=True)
+    weight        = Column(Float, default=1.0)
+    confidence    = Column(Float, default=1.0)
+    evidence_json = Column(Text, nullable=True)
+    evidence_count = Column(Integer, default=1)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 20: HYPOTHESIS & EXPERIMENT ENGINE
+# ══════════════════════════════════════════════════════════════
+
+class ResearchHypothesis(Base):
+    __tablename__ = "research_hypotheses"
+
+    id                    = Column(Integer, primary_key=True, autoincrement=True)
+    hypothesis_id         = Column(String(40), nullable=False, unique=True, index=True)
+    title                 = Column(String(300), nullable=False)
+    description           = Column(Text, nullable=False)
+    category              = Column(String(60), nullable=True)
+    priority              = Column(Float, default=50.0)
+    status                = Column(String(20), default="pending")
+    generated_by          = Column(String(40), nullable=True)
+    evidence_for_json     = Column(Text, nullable=True)
+    evidence_against_json = Column(Text, nullable=True)
+    experiment_design_json = Column(Text, nullable=True)
+    result_summary        = Column(Text, nullable=True)
+    significance_score    = Column(Float, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+    resolved_at           = Column(DateTime, nullable=True)
+
+
+class ResearchExperiment(Base):
+    __tablename__ = "research_experiments"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    experiment_id  = Column(String(40), nullable=False, unique=True, index=True)
+    hypothesis_id  = Column(String(40), nullable=False, index=True)
+    name           = Column(String(200), nullable=False)
+    design_json    = Column(Text, nullable=True)
+    status         = Column(String(20), default="scheduled")
+    result_json    = Column(Text, nullable=True)
+    p_value        = Column(Float, nullable=True)
+    effect_size    = Column(Float, nullable=True)
+    sample_size    = Column(Integer, nullable=True)
+    conclusion     = Column(Text, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    completed_at   = Column(DateTime, nullable=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 21: CHAMPION-CHALLENGER FRAMEWORK
+# ══════════════════════════════════════════════════════════════
+
+class ModelArena(Base):
+    __tablename__ = "model_arena"
+    __table_args__ = (UniqueConstraint("model_name", "version", name="uq_arena_model"),)
+
+    id                = Column(Integer, primary_key=True, autoincrement=True)
+    model_name        = Column(String(60), nullable=False, index=True)
+    version           = Column(Integer, nullable=False)
+    role              = Column(String(20), default="challenger")
+    artifact_path     = Column(String(300), nullable=True)
+    accuracy          = Column(Float, nullable=True)
+    precision_score   = Column(Float, nullable=True)
+    recall_score      = Column(Float, nullable=True)
+    auc               = Column(Float, nullable=True)
+    calibration_ece   = Column(Float, nullable=True)
+    paper_win_rate    = Column(Float, nullable=True)
+    paper_sharpe      = Column(Float, nullable=True)
+    paper_drawdown    = Column(Float, nullable=True)
+    eval_sample_count = Column(Integer, default=0)
+    promoted_at       = Column(DateTime, nullable=True)
+    retired_at        = Column(DateTime, nullable=True)
+    retire_reason     = Column(Text, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ArenaEvaluation(Base):
+    __tablename__ = "arena_evaluations"
+
+    id                    = Column(Integer, primary_key=True, autoincrement=True)
+    eval_date             = Column(Date, nullable=False, index=True)
+    champion_model        = Column(String(60), nullable=True)
+    challenger_models_json = Column(Text, nullable=True)
+    winner                = Column(String(60), nullable=True)
+    promotion_triggered   = Column(Boolean, default=False)
+    stats_json            = Column(Text, nullable=True)
+    decision_rationale    = Column(Text, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 22: BAYESIAN UNCERTAINTY
+# ══════════════════════════════════════════════════════════════
+
+class UncertaintyEstimate(Base):
+    __tablename__ = "uncertainty_estimates"
+
+    id                      = Column(Integer, primary_key=True, autoincrement=True)
+    prediction_id           = Column(Integer, nullable=False, index=True)
+    symbol                  = Column(String(20), nullable=False)
+    estimate_date           = Column(Date, nullable=False)
+    base_confidence         = Column(Float, nullable=True)
+    uncertainty_pct         = Column(Float, nullable=True)
+    adjusted_confidence     = Column(Float, nullable=True)
+    epistemic_uncertainty   = Column(Float, nullable=True)
+    aleatoric_uncertainty   = Column(Float, nullable=True)
+    regime_familiarity      = Column(Float, nullable=True)
+    feature_stability       = Column(Float, nullable=True)
+    model_agreement         = Column(Float, nullable=True)
+    historical_calibration  = Column(Float, nullable=True)
+    similar_cases_count     = Column(Integer, default=0)
+    components_json         = Column(Text, nullable=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER 23: MULTI-AGENT DECISION SYSTEM
+# ══════════════════════════════════════════════════════════════
+
+class SpecialistAgentOpinion(Base):
+    __tablename__ = "specialist_agent_opinions"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    session_id    = Column(String(40), nullable=False, index=True)
+    prediction_id = Column(Integer, nullable=False, index=True)
+    symbol        = Column(String(20), nullable=False)
+    opinion_date  = Column(Date, nullable=False)
+    agent_name    = Column(String(40), nullable=False)
+    direction     = Column(String(20), nullable=True)
+    confidence    = Column(Float, nullable=True)
+    reasoning     = Column(Text, nullable=True)
+    evidence_json = Column(Text, nullable=True)
+    weight        = Column(Float, default=1.0)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+
+class ModeratorDecision(Base):
+    __tablename__ = "moderator_decisions"
+    __table_args__ = (UniqueConstraint("session_id", name="uq_moderator_session"),)
+
+    id                   = Column(Integer, primary_key=True, autoincrement=True)
+    session_id           = Column(String(40), nullable=False, unique=True, index=True)
+    prediction_id        = Column(Integer, nullable=False, index=True)
+    symbol               = Column(String(20), nullable=False)
+    decision_date        = Column(Date, nullable=False)
+    final_direction      = Column(String(20), nullable=True)
+    final_confidence     = Column(Float, nullable=True)
+    agreement_score      = Column(Float, nullable=True)
+    disagreement_score   = Column(Float, nullable=True)
+    dominant_agent       = Column(String(40), nullable=True)
+    minority_opinion     = Column(Text, nullable=True)
+    final_rationale      = Column(Text, nullable=True)
+    agents_summary_json  = Column(Text, nullable=True)
+    created_at           = Column(DateTime, default=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# PHASE 9: CHAMPION-CHALLENGER ARENA V2
+# ══════════════════════════════════════════════════════════════
+
+class P9Arena(Base):
+    __tablename__ = "p9_arenas"
+
+    id                         = Column(Integer, primary_key=True, autoincrement=True)
+    arena_id                   = Column(String(40), unique=True, nullable=False, index=True)
+    name                       = Column(String(100), nullable=False)
+    champion_model_id          = Column(String(100), nullable=False)
+    previous_champion_id       = Column(String(100), nullable=True)
+    challenger_model_ids_json  = Column(Text, default="[]")
+    status                     = Column(String(20), default="active")
+    last_evaluated             = Column(Date, nullable=True)
+    created_at                 = Column(DateTime, default=datetime.utcnow)
+
+
+class P9ArenaEval(Base):
+    __tablename__ = "p9_arena_evaluations"
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    eval_id             = Column(String(40), unique=True, nullable=False, index=True)
+    arena_id            = Column(String(40), nullable=False, index=True)
+    champion_model_id   = Column(String(100), nullable=False)
+    challenger_model_id = Column(String(100), nullable=False)
+    eval_date           = Column(Date, nullable=False)
+    champion_accuracy   = Column(Float, nullable=True)
+    challenger_accuracy = Column(Float, nullable=True)
+    acc_delta           = Column(Float, nullable=True)
+    champion_auc        = Column(Float, nullable=True)
+    challenger_auc      = Column(Float, nullable=True)
+    auc_delta           = Column(Float, nullable=True)
+    eval_sample_count   = Column(Integer, default=0)
+    verdict             = Column(String(30), nullable=True)
+    promotion_reason    = Column(Text, nullable=True)
+    thresholds_json     = Column(Text, nullable=True)
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# PHASE 9: UNCERTAINTY ESTIMATES V2
+# ══════════════════════════════════════════════════════════════
+
+class P9Uncertainty(Base):
+    __tablename__ = "p9_uncertainty_estimates"
+
+    id                      = Column(Integer, primary_key=True, autoincrement=True)
+    model_id                = Column(String(100), nullable=False, index=True)
+    symbol                  = Column(String(20), nullable=True)
+    estimate_date           = Column(Date, nullable=False)
+    base_confidence         = Column(Float, nullable=True)
+    epistemic_uncertainty   = Column(Float, nullable=True)
+    aleatoric_uncertainty   = Column(Float, nullable=True)
+    regime_familiarity      = Column(Float, nullable=True)
+    feature_stability       = Column(Float, nullable=True)
+    historical_calibration  = Column(Float, nullable=True)
+    composite_uncertainty   = Column(Float, nullable=True)
+    final_confidence        = Column(Float, nullable=True)
+    confidence_label        = Column(String(30), nullable=True)
+    breakdown_json          = Column(Text, nullable=True)
+    explanation             = Column(Text, nullable=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# PHASE 9: MULTI-AGENT OPINIONS V2
+# ══════════════════════════════════════════════════════════════
+
+class P9AgentOpinion(Base):
+    __tablename__ = "p9_agent_opinions"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    session_id      = Column(String(40), nullable=False, index=True)
+    agent_name      = Column(String(40), nullable=False)
+    symbol          = Column(String(20), nullable=False)
+    strategy_id     = Column(String(60), nullable=True)
+    direction       = Column(String(20), nullable=True)
+    confidence      = Column(Float, nullable=True)
+    reasoning       = Column(Text, nullable=True)
+    regime_context  = Column(String(40), nullable=True)
+    indicators_used = Column(Text, nullable=True)
+    weight          = Column(Float, default=1.0)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+class P9ModeratorDecision(Base):
+    __tablename__ = "p9_moderator_decisions"
+
+    id                    = Column(Integer, primary_key=True, autoincrement=True)
+    session_id            = Column(String(40), unique=True, nullable=False, index=True)
+    symbol                = Column(String(20), nullable=False)
+    strategy_id           = Column(String(60), nullable=True)
+    final_direction       = Column(String(20), nullable=True)
+    final_confidence      = Column(Float, nullable=True)
+    agreement_score       = Column(Float, nullable=True)
+    bull_weight           = Column(Float, nullable=True)
+    bear_weight           = Column(Float, nullable=True)
+    neutral_weight        = Column(Float, nullable=True)
+    agent_summary_json    = Column(Text, nullable=True)
+    dissenting_agents_json= Column(Text, nullable=True)
+    reasoning             = Column(Text, nullable=True)
+    decision_date         = Column(Date, nullable=False)
+    created_at            = Column(DateTime, default=datetime.utcnow)

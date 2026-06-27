@@ -6,6 +6,8 @@ Prices: DB daily_prices (EOD) with yfinance intraday fallback for open positions
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from io import StringIO
 import os
 from datetime import date, datetime
 from typing import Optional
@@ -28,7 +30,6 @@ _NSE_TO_YF = {
     "TITAN":      "TITAN.NS",      "WIPRO":      "WIPRO.NS",      "ONGC":       "ONGC.NS",
     "SUNPHARMA":  "SUNPHARMA.NS",  "NESTLEIND":  "NESTLEIND.NS",  "BHARTIARTL": "BHARTIARTL.NS",
     "KOTAKBANK":  "KOTAKBANK.NS",  "TATASTEEL":  "TATASTEEL.NS",  "HINDALCO":   "HINDALCO.NS",
-    "TATAMOTORS": "TATAMOTORS.NS", "LTIM":       "LTIM.NS",
     # Expanded 30
     "HCLTECH":    "HCLTECH.NS",    "ITC":        "ITC.NS",        "LT":         "LT.NS",
     "HINDUNILVR": "HINDUNILVR.NS", "ULTRACEMCO": "ULTRACEMCO.NS", "BAJAJFINSV": "BAJAJFINSV.NS",
@@ -61,14 +62,18 @@ def _live_price_yf(symbol: str) -> Optional[float]:
         ticker = yf.Ticker(yf_sym)
         price = None
         try:
-            fi = ticker.fast_info
+            yf_stderr = StringIO()
+            with redirect_stderr(yf_stderr):
+                fi = ticker.fast_info
             price = getattr(fi, "last_price", None)
             if price is not None:
                 price = float(price)
         except Exception:
             pass
         if price is None:
-            hist = ticker.history(period="1d", interval="1m", auto_adjust=True)
+            yf_stderr = StringIO()
+            with redirect_stderr(yf_stderr):
+                hist = ticker.history(period="1d", interval="1m", auto_adjust=True)
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
         if price and price > 0:

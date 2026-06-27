@@ -210,7 +210,7 @@ def screen_stocks(
     # Sort by score descending
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    return {"stocks": results, "total": len(results)}
+    return {"stocks": results, "total": len(results), "total_universe": len(symbols)}
 
 
 # ── Presets Endpoint ─────────────────────────────────────────────

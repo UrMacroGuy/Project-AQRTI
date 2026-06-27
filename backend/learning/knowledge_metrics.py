@@ -186,6 +186,32 @@ def portfolio_quality_score(db: Session, days: int = 30) -> float:
         return 50.0
 
 
+def uncertainty_quality_score(db: Session, days: int = 30) -> float:
+    """Score 0-100: how low the average Bayesian uncertainty is across all estimates."""
+    try:
+        import sys, os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+        from intelligence.bayesian_uncertainty import uncertainty_quality_score as _uqs
+        return round(_uqs(db, days=days) * 100, 2)
+    except Exception:
+        return 50.0
+
+
+def multi_agent_agreement_score(db: Session, days: int = 30) -> float:
+    """Score 0-100: average agreement score across multi-agent decisions."""
+    try:
+        import sys, os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+        from intelligence.multi_agent_decision import multi_agent_agreement_score as _maas
+        return round(_maas(db, days=days) * 100, 2)
+    except Exception:
+        return 50.0
+
+
 def compute_all_metrics(db: Session, days: int = 30) -> dict:
     pred  = prediction_quality_score(db, days)
     port  = portfolio_quality_score(db, days)
@@ -193,12 +219,16 @@ def compute_all_metrics(db: Session, days: int = 30) -> dict:
     learn = learning_quality_score(db, days)
     calib = calibration_quality_score(db, days)
     feat  = feature_quality_score(db, days)
+    uq    = uncertainty_quality_score(db, days)
+    ma    = multi_agent_agreement_score(db, days)
     return {
-        "predictionQuality":  pred,
-        "portfolioQuality":   port,
-        "riskQuality":        risk,
-        "learningQuality":    learn,
-        "calibrationQuality": calib,
-        "featureQuality":     feat,
-        "days":               days,
+        "predictionQuality":       pred,
+        "portfolioQuality":        port,
+        "riskQuality":             risk,
+        "learningQuality":         learn,
+        "calibrationQuality":      calib,
+        "featureQuality":          feat,
+        "uncertaintyQuality":      uq,
+        "multiAgentAgreement":     ma,
+        "days":                    days,
     }

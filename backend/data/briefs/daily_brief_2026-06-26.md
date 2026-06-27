@@ -5,11 +5,11 @@
 Regime: SIDEWAYS. Market: SIDEWAYS (conf=55%). 5 findings. News research: 8 findings. 268 articles today. [!] High-impact events detected. [!] Regime change detected: Best for SIDEWAYS: VolSurge_1.48x (regime Sharpe=2.68)
 
 ## Top Opportunities
-- news_research: Sector Themes: Auto leading, IT under pressure
-- market_research: Sector Rotation: Banking leading (+2.0%), Metal lagging (-5.5%)
-- news_research: Sector Themes: Auto leading, IT under pressure
-- market_research: Sector Rotation: Banking leading (+2.0%), Metal lagging (-5.5%)
-- news_research: Sector Themes: Auto leading, IT under pressure
+- news_research: Sector Themes: Auto leading, Banking under pressure
+- market_research: Sector Rotation: Pharma leading (+3.3%), Metal lagging (-5.1%)
+- news_research: Sector Themes: Auto leading, Banking under pressure
+- market_research: Sector Rotation: Pharma leading (+3.3%), Metal lagging (-5.1%)
+- news_research: Sector Themes: Auto leading, Banking under pressure
 
 ## Major Risks
 - [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
@@ -19,7 +19,7 @@ Regime: SIDEWAYS. Market: SIDEWAYS (conf=55%). 5 findings. News research: 8 find
 - [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
 - [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
 - [CRITICAL] strategy_research: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum]
-- [CRITICAL] cro: Daily Brief Issued — 2026-06-26
+- [CRITICAL] strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
 
 ## Model Insights
 - Live Trade Win Rate: 14.3% (2/14 trades) — Paper trading: 14 closed trades in 30d, win rate=14.3%, avg return=-0.24%.
@@ -43,16 +43,16 @@ Regime: SIDEWAYS. Market: SIDEWAYS (conf=55%). 5 findings. News research: 8 find
 - strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
 - strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
 - strategy_research: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum]
-- cro: Daily Brief Issued — 2026-06-26
 - strategy_research: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum]
 - strategy_research: Critical Decay: QualMom_momentum_4.62 fitness=0.0 [quality_momentum]
+- strategy_research: Critical Decay: QualMom_relative_5.05 fitness=0.0 [quality_momentum]
 
 ## Lessons Learned
 - [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
 - [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
 - [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
 - [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
-- [portfolio] Trade Loss — TATASTEEL
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
 
 ## Action Items (Human Review Required)
 - [URGENT]: Critical Decay: QualMom_momentum_5.28 fitness=0.0 [quality_momentum] -- requires immediate human review

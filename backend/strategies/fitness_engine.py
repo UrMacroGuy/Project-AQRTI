@@ -52,8 +52,8 @@ W_LONGEVITY        = 0.05
 TARGET_SHARPE        = 1.2     # raised — Nifty50 long-only ≈ 0.8; must beat it
 TARGET_PROFIT_FACTOR = 2.0     # raised — must clear cost friction
 TARGET_WIN_RATE      = 55.0    # 55% realistic for trend-following on Indian equities
-TARGET_TRADES        = 200     # 200+ trades in 3-year window = statistically meaningful
-MIN_TRADES           = 50      # hard floor — below this, longevity = 0
+TARGET_TRADES        = 300     # 300+ trades in 5-year window = statistically meaningful
+MIN_TRADES           = 30      # hard floor — below this, longevity = 0
 
 # ── Cost model constants (match backtester) ───────────────────
 ROUND_TRIP_COST_PCT  = 0.28    # % — realistic NSE delivery round-trip

@@ -145,6 +145,14 @@ def _import_all_agents():
         "agents.risk_research_agent",
         "agents.pattern_research_agent",
         "agents.cro_agent",
+        # Phase 9: Autonomous Research Division
+        "agents.feature_discovery_agent",
+        "agents.failure_scientist_agent",
+        "agents.model_scientist_agent",
+        "agents.data_quality_agent",
+        "agents.macro_intelligence_agent",
+        "agents.sector_intelligence_agent",
+        "agents.alert_agent",
     ]:
         try:
             importlib.import_module(mod)

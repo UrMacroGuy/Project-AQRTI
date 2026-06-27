@@ -33,6 +33,8 @@ def _build_engine():
         cursor.execute("PRAGMA synchronous=NORMAL")
         # Checkpoint every 50 pages (~200 KB) so the WAL stays small
         cursor.execute("PRAGMA wal_autocheckpoint=50")
+        # Wait up to 10 seconds when locked instead of failing immediately
+        cursor.execute("PRAGMA busy_timeout=10000")
         cursor.close()
 
     return engine
@@ -80,10 +82,19 @@ def checkpoint_wal() -> None:
 
 
 def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist. Skips if DB already has tables."""
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
-    db_logger.info("Database initialized — all tables verified.")
+    with engine.connect() as conn:
+        existing = conn.execute(
+            text("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+        ).scalar()
+    if existing and existing > 5:
+        # DB already initialized — just ensure any new tables are added
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+        db_logger.info("Database already initialized (%d tables found).", existing)
+    else:
+        Base.metadata.create_all(bind=engine)
+        db_logger.info("Database initialized — all tables created.")
 
 
 def get_db_dependency():

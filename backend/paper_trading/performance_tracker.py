@@ -9,6 +9,8 @@ Metrics:
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from io import StringIO
 import math
 from datetime import date, timedelta
 from typing import Optional
@@ -38,7 +40,9 @@ def _get_nifty_close(db: Session) -> Optional[float]:
         return float(row[0])
     try:
         import yfinance as yf
-        hist = yf.Ticker("^NSEI").history(period="2d", interval="1d", auto_adjust=True)
+        yf_stderr = StringIO()
+        with redirect_stderr(yf_stderr):
+            hist = yf.Ticker("^NSEI").history(period="2d", interval="1d", auto_adjust=True)
         if not hist.empty:
             return float(hist["Close"].iloc[-1])
     except Exception:
