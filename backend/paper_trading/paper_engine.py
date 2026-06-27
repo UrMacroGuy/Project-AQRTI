@@ -37,15 +37,21 @@ def _get_nifty_close(db) -> Optional[float]:
     return row[0] if row else None
 
 
-def run_paper_trading_cycle(version: int = 1) -> dict:
+def run_paper_trading_cycle(version: int = 1, strategy_id: str | None = None) -> dict:
     """
     Full daily paper trading cycle.
 
     Returns a report dict:
       {status, date, opened, closed, rebalance_errors,
        portfolioValue, totalReturnPct, openPositions, timestamp}
+
+    If strategy_id is provided, use that specific strategy's parameters instead of
+    the best promoted strategy.
     """
-    log.info("=== PAPER TRADING CYCLE STARTED ===")
+    if strategy_id:
+        log.info("=== PAPER TRADING CYCLE STARTED (strategy=%s) ===", strategy_id)
+    else:
+        log.info("=== PAPER TRADING CYCLE STARTED ===")
     today  = date.today()
 
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -68,7 +74,7 @@ def run_paper_trading_cycle(version: int = 1) -> dict:
         portfolio = get_or_create_portfolio(db)
 
         # ── Step 2: Build target weights from predictions ─────────
-        target = build_target_portfolio(db, version=version)
+        target = build_target_portfolio(db, version=version, strategy_id=strategy_id)
         if not target.get("weights"):
             log.warning("No target weights generated — skipping rebalance")
             mtm = mark_to_market(db)

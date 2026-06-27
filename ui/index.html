@@ -1692,13 +1692,20 @@
     <section class="page" id="page-paper">
 
       <!-- Action Bar -->
-      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
         <button class="panel-action-btn" style="background:var(--accent);color:#000;font-weight:700;padding:7px 18px" onclick="triggerPaperCycle()">▶ Run Trade Cycle</button>
         <button class="panel-action-btn" style="padding:7px 14px" onclick="triggerMTM()">⚡ Mark to Market</button>
         <button class="panel-action-btn" style="padding:7px 14px" onclick="hydratePaperPortfolio()">⟳ Refresh</button>
         <span id="pp-live-badge" style="font-size:0.65rem;padding:2px 7px;background:rgba(0,200,100,0.12);border:1px solid rgba(0,200,100,0.3);border-radius:3px;color:#00cc66">● LIVE 60s</span>
         <span id="pp-cycle-status" style="font-size:0.72rem;color:var(--text-muted);flex:1"></span>
         <span id="pp-strategy-badge" style="font-size:0.68rem;padding:4px 10px;background:rgba(255,140,0,0.1);border:1px solid rgba(255,140,0,0.3);border-radius:4px;color:var(--accent)">Loading strategy…</span>
+      </div>
+      <!-- Strategy-specific paper trading -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:9px 14px">
+        <span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">Trade on specific strategy:</span>
+        <input id="pp-strategy-id-input" type="text" placeholder="AQRTI_STR_XXXXXXXX" style="flex:1;min-width:220px;max-width:380px;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:5px 10px;color:var(--text);font-size:0.8rem;font-family:monospace" oninput="this.value=this.value.toUpperCase()" />
+        <button class="panel-action-btn" style="padding:6px 14px;font-size:0.78rem" onclick="triggerPaperCycleForStrategy()">▶ Run for Strategy</button>
+        <span id="pp-strategy-cycle-status" style="font-size:0.72rem;color:var(--text-muted)"></span>
       </div>
 
       <!-- KPI Row -->

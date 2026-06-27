@@ -1,4 +1,22 @@
-﻿## [2026-06-27h] — RAM Reduction + LITE Mode + PC Cleanup + Kill Switch
+﻿## [2026-06-27i] — Paper Trading Fixed + Strategy-Specific Paper Trading
+
+### Paper Trading Fixed
+- Root cause: `feature_values` table was empty so prediction pipeline loaded 0 features → 0 predictions → 0 paper trades
+- **Fix 1**: Ran full feature generation (542,741 rows written for 48 symbols)
+- **Fix 2**: On-boot feature gen now detects empty DB and runs `run_full_feature_generation()` instead of incremental when `feature_values < 1000` rows
+- **Fix 3**: Neutral-direction filter in `risk_allocator.py` lowered from confidence ≥ 70 to ≥ 60 (all current ML predictions are Neutral ~62-64 confidence)
+- Paper trading now opens 12 positions correctly (ADANIGREEN, AIAENG, BOSCHLTD, CHOLAFIN, COFORGE, DRREDDY, FEDERALBNK, GAIL, GRINDWELL, NAVINFLUOR, NYKAA, SUNPHARMA)
+
+### Strategy-Specific Paper Trading
+- New `POST /admin/paper-trade-strategy` endpoint accepts `{"strategy_id": "AQRTI_STR_..."}` body
+- Backend: `run_paper_trading_cycle(strategy_id=...)` → `build_target_portfolio(strategy_id=...)` → `get_investable_candidates(strategy_id=...)` → `_get_best_strategy(strategy_id=...)`
+- When strategy_id provided, loads that specific strategy's `min_confidence`, `allowed_regimes`, `stop_loss_pct`, `take_profit_pct`, `max_holding_days`
+- UI: Added "Trade on specific strategy" row under Paper Portfolio action bar — text input for strategy ID + "Run for Strategy" button
+- Prediction pipeline now writes 48 predictions (one per symbol) after feature gen fix
+
+---
+
+## [2026-06-27h] — RAM Reduction + LITE Mode + PC Cleanup + Kill Switch
 
 ### RAM Reduction — LITE Mode
 - Added `AQRTI_LITE_MODE=1` env var to `scheduler.py` — disables the every-5-min strategy loop and hourly agent pipeline (biggest RAM consumers)

@@ -44,19 +44,22 @@ def _get_current_regime(db: Session) -> str:
     return row[0].upper() if row else "SIDEWAYS"
 
 
-def _get_best_strategy(db: Session) -> dict | None:
-    """Return the best promoted or active strategy's key parameters."""
+def _get_best_strategy(db: Session, strategy_id: str | None = None) -> dict | None:
+    """Return a strategy's key parameters. If strategy_id given, load that one directly."""
     try:
         from aqrti.database.models import StrategyV2
-        row = (
-            db.query(StrategyV2)
-            .filter(
-                StrategyV2.status.in_(["promoted", "active"]),
-                StrategyV2.win_rate >= 55.0,
+        if strategy_id:
+            row = db.query(StrategyV2).filter(StrategyV2.strategy_id == strategy_id).first()
+        else:
+            row = (
+                db.query(StrategyV2)
+                .filter(
+                    StrategyV2.status.in_(["promoted", "active"]),
+                    StrategyV2.win_rate >= 55.0,
+                )
+                .order_by(StrategyV2.fitness_score.desc())
+                .first()
             )
-            .order_by(StrategyV2.fitness_score.desc())
-            .first()
-        )
         if not row:
             return None
         dsl = json.loads(row.dsl_json) if row.dsl_json else {}
@@ -108,6 +111,7 @@ def get_investable_candidates(
     version:      int = 1,
     top_n:        int = MAX_HOLDINGS,
     method:       str = "confidence_weighted",
+    strategy_id:  str | None = None,
 ) -> tuple[list[dict], float]:
     """
     Query today's predictions, apply all risk filters, and return:
@@ -115,13 +119,15 @@ def get_investable_candidates(
 
     Each candidate dict:
       {symbol, confidence, expected_return, direction, sector, volatility, risk_level}
+
+    If strategy_id is provided, use that strategy's parameters instead of the best promoted one.
     """
     settings = get_settings()
     regime   = _get_current_regime(db)
     max_expo = REGIME_EXPO_LIMITS.get(regime, 50.0)
 
-    # Load best promoted/active strategy to drive parameters
-    best_strategy = _get_best_strategy(db)
+    # Load strategy to drive parameters — specific one if requested, else best promoted
+    best_strategy = _get_best_strategy(db, strategy_id=strategy_id)
     if best_strategy:
         min_conf = best_strategy["min_confidence"] or settings.min_confidence
         allowed_regimes = best_strategy["allowed_regimes"] or []
@@ -182,7 +188,7 @@ def get_investable_candidates(
         direction_lower = (p.direction or "").lower()
         if direction_lower in ("bearish", "sell", "short"):
             continue
-        if direction_lower == "neutral" and (p.confidence or 0) < 70:
+        if direction_lower == "neutral" and (p.confidence or 0) < 60:
             continue
 
         # Use absolute expected return — model currently outputs negative values

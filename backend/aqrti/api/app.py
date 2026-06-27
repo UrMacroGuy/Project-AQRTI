@@ -84,10 +84,20 @@ def _run_boot_sequence():
     # Step 2 — Feature Engineering
     _boot_step("features", "running")
     try:
-        from features.feature_generator import run_incremental_feature_generation
-        r = run_incremental_feature_generation()
+        from aqrti.database.engine import get_db as _get_db
+        from aqrti.database.models import FeatureValue as _FV
+        with _get_db() as _db:
+            _fv_count = _db.query(_FV).count()
+        if _fv_count < 1000:
+            # DB is nearly empty — run full generation to backfill all history
+            api_logger.info("Boot step 2 — feature_values nearly empty (%d rows), running full generation", _fv_count)
+            from features.feature_generator import run_full_feature_generation
+            r = run_full_feature_generation()
+        else:
+            from features.feature_generator import run_incremental_feature_generation
+            r = run_incremental_feature_generation()
         _boot_step("features", "done", f"status={r.get('status','?')}")
-        api_logger.info("Boot step 2 — Features: %s", r.get("status"))
+        api_logger.info("Boot step 2 — Features: %s rows=%d", r.get("status"), r.get("total_rows_written", 0))
     except Exception as e:
         _boot_step("features", "error", str(e))
         api_logger.error("Boot step 2 — Features failed: %s", e)
@@ -547,11 +557,10 @@ def create_app() -> FastAPI:
 
     @app.post("/admin/paper-trade", tags=["Admin"])
     async def trigger_paper_trade():
-        """Run a full paper trading cycle: portfolio build → execute → mark-to-market → performance."""
+        """Run a full paper trading cycle using the best promoted strategy."""
         import sys, os, importlib
         backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
         sys.path.insert(0, backend_dir)
-        # Force reload risk_allocator so direction-filter fix is always active
         import portfolio.risk_allocator as _ra
         importlib.reload(_ra)
         import portfolio.portfolio_builder as _pb
@@ -560,6 +569,27 @@ def create_app() -> FastAPI:
         import asyncio
         api_logger.info("Manual paper trading cycle triggered.")
         return await asyncio.to_thread(run_paper_trading_cycle)
+
+    @app.post("/admin/paper-trade-strategy", tags=["Admin"])
+    async def trigger_paper_trade_strategy(body: dict = None):
+        """Run a paper trading cycle using a specific strategy ID.
+
+        Body: {"strategy_id": "AQRTI_STR_XXXXXXXX"}
+        """
+        import sys, os, importlib
+        backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        sys.path.insert(0, backend_dir)
+        import portfolio.risk_allocator as _ra
+        importlib.reload(_ra)
+        import portfolio.portfolio_builder as _pb
+        importlib.reload(_pb)
+        from paper_trading.paper_engine import run_paper_trading_cycle
+        import asyncio
+        strategy_id = (body or {}).get("strategy_id") if body else None
+        if not strategy_id:
+            return {"status": "error", "error": "strategy_id is required in request body"}
+        api_logger.info("Paper trading cycle triggered for strategy %s.", strategy_id)
+        return await asyncio.to_thread(run_paper_trading_cycle, 1, strategy_id)
 
     @app.post("/admin/paper-mtm", tags=["Admin"])
     async def trigger_paper_mtm():

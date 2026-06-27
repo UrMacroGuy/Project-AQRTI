@@ -1524,6 +1524,42 @@ async function triggerPaperCycle() {
   }
 }
 
+async function triggerPaperCycleForStrategy() {
+  const input = document.getElementById('pp-strategy-id-input');
+  const statusEl = document.getElementById('pp-strategy-cycle-status');
+  const btn = document.querySelector('[onclick="triggerPaperCycleForStrategy()"]');
+  const strategyId = (input ? input.value.trim() : '');
+  if (!strategyId) {
+    if (statusEl) { statusEl.textContent = '⚠ Enter a strategy ID first'; statusEl.style.color = '#ff9900'; }
+    return;
+  }
+  if (statusEl) { statusEl.textContent = '⟳ Running…'; statusEl.style.color = 'var(--text-muted)'; }
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API_CONFIG.BASE}/admin/paper-trade-strategy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strategy_id: strategyId }),
+    });
+    const data = await res.json();
+    if (data.status === 'error') {
+      if (statusEl) { statusEl.textContent = '✗ ' + (data.error || 'Unknown error'); statusEl.style.color = '#ff4444'; }
+    } else {
+      const opened = (data.opened || []).length;
+      const value  = Math.round(data.portfolioValue || 0).toLocaleString('en-IN');
+      let msg = `✓ NAV ₹${value}`;
+      if (opened) msg += `  · Opened: ${opened}`;
+      if (data.status === 'no_signals') msg = '⚠ No signals for this strategy';
+      if (statusEl) { statusEl.textContent = msg; statusEl.style.color = 'var(--accent)'; }
+      await hydratePaperPortfolio();
+    }
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '✗ ' + e.message; statusEl.style.color = '#ff4444'; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ── Live hydration ────────────────────────────────────────────
 async function hydratePaperPortfolio() {
   // Silently backfill equity curve from trade history on first load (idempotent)

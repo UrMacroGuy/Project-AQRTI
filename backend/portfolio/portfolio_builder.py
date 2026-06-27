@@ -32,10 +32,11 @@ _DEFAULT_METHOD = "confidence_weighted"
 
 
 def build_target_portfolio(
-    db:      Session,
-    version: int = 1,
-    method:  str = _DEFAULT_METHOD,
-    top_n:   int = 12,
+    db:          Session,
+    version:     int = 1,
+    method:      str = _DEFAULT_METHOD,
+    top_n:       int = 12,
+    strategy_id: str | None = None,
 ) -> dict:
     """
     Build today's target portfolio.
@@ -56,7 +57,9 @@ def build_target_portfolio(
         equal_weight_sizing,
     )
 
-    candidates, max_expo = get_investable_candidates(db, today, version=version, top_n=top_n)
+    candidates, max_expo = get_investable_candidates(
+        db, today, version=version, top_n=top_n, strategy_id=strategy_id
+    )
 
     if not candidates:
         log.warning("No investable candidates for %s", today)
