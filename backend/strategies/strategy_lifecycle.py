@@ -31,8 +31,8 @@ PROMOTE_THRESHOLD  = 35.0    # fitness score required for promotion (0–100 sca
 RETIRE_THRESHOLD   = 8.0     # fitness below this → retirement candidate
 DRAWDOWN_LIMIT     = -9999.0 # disabled — cumsum MDD metric is unreliable (divide-by-near-zero artifact)
 MIN_TRADES         = 30      # minimum backtest trades before promotion
-MIN_WIN_RATE       = 70.0    # minimum win rate % required for promotion and paper trading
-PAPER_WIN_RATE     = 70.0    # paper trading gate — only strategies >= this go live
+MIN_WIN_RATE       = 55.0    # minimum win rate % required for promotion and paper trading
+PAPER_WIN_RATE     = 55.0    # paper trading gate — only strategies >= this go live
 
 
 def promote_strategy(

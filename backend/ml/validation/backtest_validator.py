@@ -212,11 +212,15 @@ def load_active_models() -> dict[str, dict[str, BaseModel]]:
     """
     Load all active trained models from disk.
 
+    Primary: query model_versions table for is_active=True rows.
+    Fallback: scan ml_models/ directory for .pkl files when table is empty.
+
     Returns:
         {label_col: {model_name: BaseModel instance}}
     """
     active: dict[str, dict[str, BaseModel]] = {}
 
+    # ── Primary path: DB registry ────────────────────────────────
     try:
         from aqrti.database.engine import get_db
         from aqrti.database.models import ModelVersion
@@ -250,5 +254,66 @@ def load_active_models() -> dict[str, dict[str, BaseModel]]:
 
     except Exception as exc:
         log.error("load_active_models failed: %s", exc)
+
+    # ── Fallback: scan ml_models/ when DB registry is empty ──────
+    if not active:
+        log.warning(
+            "model_versions table empty — scanning %s for .pkl files", ML_MODELS_DIR
+        )
+        TASK_TO_LABEL = {
+            "direction":       "direction_5d",
+            "expected_return": "expected_return",
+        }
+        # Pick the highest version per (model_name, task) pair
+        best: dict[tuple, tuple] = {}  # (model_name, task) -> (version, path)
+        for pkl_path in sorted(ML_MODELS_DIR.glob("*.pkl")):
+            stem = pkl_path.stem   # e.g. lightgbm_direction_v7
+            if "_fold" in stem:
+                continue           # skip per-fold artifacts; use final models only
+            parts = stem.split("_v")
+            if len(parts) != 2:
+                continue
+            try:
+                version = int(parts[1])
+            except ValueError:
+                continue
+            prefix = parts[0]      # e.g. lightgbm_direction
+            for task_key in ("expected_return", "direction"):
+                if prefix.endswith("_" + task_key):
+                    model_name = prefix[: -(len(task_key) + 1)]
+                    if model_name in MODEL_CLASSES:
+                        cur_ver = best.get((model_name, task_key), (0, None))[0]
+                        if version > cur_ver:
+                            best[(model_name, task_key)] = (version, pkl_path)
+                    break
+
+        for (model_name, task_key), (version, pkl_path) in best.items():
+            label_col = TASK_TO_LABEL.get(task_key)
+            if not label_col:
+                continue
+            ModelClass = MODEL_CLASSES.get(model_name)
+            if not ModelClass:
+                continue
+            try:
+                model = ModelClass.load(pkl_path)
+                if label_col not in active:
+                    active[label_col] = {}
+                active[label_col][model_name] = model
+                log.info(
+                    "Fallback loaded %s/%s v%d from %s",
+                    model_name, label_col, version, pkl_path,
+                )
+            except Exception as exc:
+                log.error("Fallback load failed %s: %s", pkl_path, exc)
+
+        if active:
+            log.info(
+                "Fallback scan loaded %d tasks, %d models total",
+                len(active), sum(len(v) for v in active.values()),
+            )
+        else:
+            log.error(
+                "No models loaded from fallback scan — run /admin/train to produce models"
+            )
 
     return active

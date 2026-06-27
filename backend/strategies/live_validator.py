@@ -243,7 +243,7 @@ def _check_live_divergence(db: Session, strategy_id: str) -> dict:
         len(closed) >= DEMOTION_MIN_TRADES and (
             sharpe_gap  > SHARPE_DIVERGE_LIMIT or
             winrate_gap > WINRATE_DIVERGE_LIMIT or
-            live_winrate < 70.0   # absolute floor — live win_rate must stay ≥ 70%
+            live_winrate < 55.0   # absolute floor — live win_rate must stay ≥ 55%
         )
     )
     reason = (

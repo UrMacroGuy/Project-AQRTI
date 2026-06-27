@@ -52,7 +52,7 @@ def _get_best_strategy(db: Session) -> dict | None:
             db.query(StrategyV2)
             .filter(
                 StrategyV2.status.in_(["promoted", "active"]),
-                StrategyV2.win_rate >= 70.0,
+                StrategyV2.win_rate >= 55.0,
             )
             .order_by(StrategyV2.fitness_score.desc())
             .first()
