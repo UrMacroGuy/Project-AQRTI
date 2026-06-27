@@ -42,3 +42,10 @@ Thumbs.db
 *.suo
 *.user
 .gstack/
+
+# Large data files — never commit
+backend/aqrti.db
+backend/aqrti.db-wal
+backend/aqrti.db-shm
+backend/ml_models/*.pkl
+backend/.yfinance-cache/
