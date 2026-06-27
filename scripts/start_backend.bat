@@ -16,12 +16,12 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING 2^
 )
 timeout /t 1 /nobreak >nul
 
-:: LITE MODE = 1 disables the every-5-min strategy loop and hourly agents (saves ~500MB RAM)
-:: Set to 0 to run full mode (strategy loop + agents run continuously)
-set AQRTI_LITE_MODE=1
+:: Use AQRTI_LITE_MODE from parent env if set, otherwise default to 1 (lite)
+if "%AQRTI_LITE_MODE%"=="" set AQRTI_LITE_MODE=1
 
 :loop
 echo [%time%] Starting AQRTI backend (LITE_MODE=%AQRTI_LITE_MODE%)...
+set AQRTI_LITE_MODE=%AQRTI_LITE_MODE%
 .venv\Scripts\python.exe main.py
 echo [%time%] Backend stopped -- restarting in 3s...
 timeout /t 3 /nobreak >nul

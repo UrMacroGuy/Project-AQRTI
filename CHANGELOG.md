@@ -1,4 +1,34 @@
-﻿## [2026-06-27g] — Intelligence Pipeline Timeout Fix + Model/Learning Center Fixes
+﻿## [2026-06-27h] — RAM Reduction + LITE Mode + PC Cleanup + Kill Switch
+
+### RAM Reduction — LITE Mode
+- Added `AQRTI_LITE_MODE=1` env var to `scheduler.py` — disables the every-5-min strategy loop and hourly agent pipeline (biggest RAM consumers)
+- Backend now uses **228 MB RAM** in LITE mode (was 800MB+ with strategy loop running)
+- Daily data ingestion and alert checks still run in LITE mode
+- Set `AQRTI_LITE_MODE=0` for full mode (training + agents run continuously)
+
+### START AQRTI.bat — Mode Chooser
+- Now asks at startup: LITE (default, low RAM) or FULL (background training)
+- Paper trading agent only starts in FULL mode
+- `start_backend.bat` respects `AQRTI_LITE_MODE` from parent env, defaults to 1
+
+### STOP AQRTI.bat — Desktop Kill Switch
+- Created `STOP AQRTI.bat` on Desktop — kills all Python + Node + browse processes instantly
+- Also clears ports 8000 and 3000
+
+### PC Cleanup
+- Merged 385 MB WAL file into main DB (deleted `aqrti.db-wal` and `aqrti.db-shm`)
+- Deleted all `__pycache__` directories and `.pyc` files from project
+- Cleared backend logs and `.claude/worktrees` leftovers
+- Cleared Windows Temp files older than 7 days and User Temp older than 3 days
+
+### Cloud Hosting — Honest Assessment
+- DB is 3.26 GB (18.5M feature_values rows + 820K price rows) — exceeds ALL free cloud tier limits
+- Koyeb/Render/Railway free tiers max at 512MB-2GB storage — not viable for this DB
+- **Solution: keep local, use LITE mode** to run on ~228MB RAM instead of 800MB+
+
+---
+
+## [2026-06-27g] — Intelligence Pipeline Timeout Fix + Model/Learning Center Fixes
 
 ### Intelligence Pipeline — Timeout Fixed
 - `runIntelligencePipeline()` now bypasses the global 10s `API_CONFIG.TIMEOUT`
