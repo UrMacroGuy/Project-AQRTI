@@ -403,8 +403,15 @@ def create_app() -> FastAPI:
     async def trigger_ingestion():
         """Manually trigger full market data ingestion."""
         import asyncio
+        from fastapi.responses import JSONResponse
+        from aqrti.data.market_data import run_daily_ingestion as _ingest
         api_logger.info("Manual ingestion triggered via admin endpoint.")
-        return await asyncio.to_thread(run_daily_ingestion)
+        try:
+            result = await asyncio.to_thread(_ingest)
+            return result
+        except Exception as exc:
+            api_logger.error("Admin ingest failed: %s", exc)
+            return JSONResponse(status_code=500, content={"error": str(exc), "status": "failed"})
 
     @app.post("/admin/backfill", tags=["Admin"])
     async def trigger_backfill(years: int = 3):
@@ -416,14 +423,20 @@ def create_app() -> FastAPI:
         """
         import asyncio
         from datetime import date, timedelta
+        from fastapi.responses import JSONResponse
+        from aqrti.data.market_data import run_daily_ingestion as _ingest
         start = date.today() - timedelta(days=int(years) * 365)
         api_logger.info("Historical backfill triggered: %d years back to %s", years, start)
         def _run():
-            report = run_daily_ingestion(start_override=start)
+            report = _ingest(start_override=start)
             report["backfill_start"] = str(start)
             report["years_requested"] = years
             return report
-        return await asyncio.to_thread(_run)
+        try:
+            return await asyncio.to_thread(_run)
+        except Exception as exc:
+            api_logger.error("Admin backfill failed: %s", exc)
+            return JSONResponse(status_code=500, content={"error": str(exc), "status": "failed"})
 
     @app.get("/admin/data-status", tags=["Admin"])
     async def data_status():

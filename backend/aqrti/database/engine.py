@@ -33,8 +33,8 @@ def _build_engine():
         cursor.execute("PRAGMA synchronous=NORMAL")
         # Checkpoint every 50 pages (~200 KB) so the WAL stays small
         cursor.execute("PRAGMA wal_autocheckpoint=50")
-        # Wait up to 10 seconds when locked instead of failing immediately
-        cursor.execute("PRAGMA busy_timeout=10000")
+        # Wait up to 30 seconds when locked instead of failing immediately
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()
 
     return engine

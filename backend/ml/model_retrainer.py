@@ -212,7 +212,12 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         # Save model artifact to disk (version already set on model)
         save_path = best_model.save()
 
-        # Register in DB
+        # Register in DB — delete ALL records for this version (any model name) to avoid UNIQUE collision
+        db.query(ModelVersion).filter(
+            ModelVersion.task == "direction",
+            ModelVersion.version == next_version,
+        ).delete(synchronize_session=False)
+        db.flush()
         new_mv = ModelVersion(
             model_name    = best_model.model_type,
             task          = "direction",
@@ -373,6 +378,9 @@ def check_and_retrain(db: Session, force: bool = False) -> dict:
             log.warning("Retrain attempt %d failed: %s", attempt, result.get("reason"))
             break
 
+        # Commit after each attempt so the next attempt starts with a clean session state
+        db.commit()
+
         achieved_wr = result.get("win_rate", 0.0)
         log.info("Attempt %d: win_rate=%.1f%% (target=%.1f%%)", attempt, achieved_wr, WIN_RATE_TARGET)
 
@@ -384,17 +392,10 @@ def check_and_retrain(db: Session, force: bool = False) -> dict:
                 "Win rate %.1f%% below target %.1f%% — retiring model and retraining",
                 achieved_wr, WIN_RATE_TARGET,
             )
-            # Roll back the is_active promotion from _run_training_pipeline so the
-            # next attempt starts clean (it will bump version again)
+            # Mark the just-trained model inactive so next attempt can promote the new one
             from aqrti.database.models import ModelVersion as _MV
-            just_trained = (
-                db.query(_MV)
-                .filter(_MV.version == result.get("version"), _MV.is_active == True)
-                .first()
-            )
-            if just_trained:
-                just_trained.is_active = False
-                db.commit()
+            db.query(_MV).filter(_MV.is_active == True).update({"is_active": False})
+            db.commit()
 
     if result.get("status") == "ok":
         _record_lesson(db, accuracy, result)
