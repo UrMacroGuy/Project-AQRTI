@@ -37,11 +37,12 @@ from strategies.meta_learner import run_meta_learning, compute_meta_state
 
 log = get_logger("evolution_engine")
 
-TOURNAMENT_SIZE    = 5      # tournament selection pool size (larger = more selection pressure)
-MUTATION_RATE      = 0.65   # 65% of offspring are mutations
-CROSSOVER_RATE     = 0.35   # 35% are crossovers
-MIN_PARENT_FITNESS = 15.0   # minimum fitness to be eligible as an evolution parent
-BACKTEST_DAYS      = 1095   # 3-year window gives strategies enough trades to hit 500
+TOURNAMENT_SIZE    = 7      # raised 5→7: higher selection pressure toward the best
+MUTATION_RATE      = 0.70   # slightly raised: more exploration while population is still small
+CROSSOVER_RATE     = 0.30   # crossover: when two good parents exist
+MIN_PARENT_FITNESS = 45.0   # raised 15→45: only breed from the top tier
+MIN_PARENT_SHARPE  = 0.25   # new: parents must show real risk-adjusted edge
+BACKTEST_DAYS      = 1825   # raised 3yr→5yr: more data = more robust signal
 
 
 def _tournament_select(
@@ -107,28 +108,34 @@ def evolve_population(
         except Exception as exc:
             log.warning("Meta-learning failed, proceeding without: %s", exc)
 
-    # Select parent pool — diversified across families for genetic variety
+    # Select parent pool — top tier only, diversified across families
+    # Cap per family at 10 (was 30) so one good family doesn't dominate breeding
     parents = (
         db.query(StrategyV2)
         .filter(
-            StrategyV2.trade_count    >= 500,
+            StrategyV2.trade_count    >= 300,
             StrategyV2.fitness_score  >= MIN_PARENT_FITNESS,
+            StrategyV2.sharpe         >= MIN_PARENT_SHARPE,
             StrategyV2.dsl_json.isnot(None),
             StrategyV2.family.isnot(None),
         )
         .order_by(StrategyV2.fitness_score.desc())
-        .limit(200)
+        .limit(100)   # smaller pool → less chance of accidentally including mediocre parents
         .all()
     )
-    # De-duplicate by family — ensure diverse gene pool (up to 30 per family)
+    # De-duplicate by family — cap at 10 per family so genetic diversity is maintained
     family_counts: dict[str, int] = {}
     diverse_parents = []
     for p in parents:
         fam = p.family or "hybrid"
-        if family_counts.get(fam, 0) < 30:
+        if family_counts.get(fam, 0) < 10:
             diverse_parents.append(p)
             family_counts[fam] = family_counts.get(fam, 0) + 1
     parents = diverse_parents
+    log.info(
+        "Evolution parent pool: %d strategies across %d families (fitness >= %.1f, sharpe >= %.2f)",
+        len(parents), len(family_counts), MIN_PARENT_FITNESS, MIN_PARENT_SHARPE,
+    )
 
     if not parents:
         log.info("No eligible parents found for evolution")

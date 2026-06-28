@@ -159,6 +159,13 @@ def _write_confidence_history(
         ))
 
 
+def _confidence_bucket(score: float) -> str:
+    """Map a confidence score to its calibration bucket label (e.g. '60-70')."""
+    low = int(score // 10) * 10
+    low = max(50, min(low, 90))
+    return f"{low}-{low + 10}"
+
+
 def run_prediction_pipeline(version: int = 1) -> dict:
     """
     Full daily prediction pipeline.
@@ -185,6 +192,19 @@ def run_prediction_pipeline(version: int = 1) -> dict:
         return {"status": "no_models", "predictions_written": 0}
 
     required_cols = _get_required_cols(engine._models)
+
+    # Load confidence scaling table from latest calibration audit
+    scaling_table = None
+    try:
+        from learning.confidence_retrainer import get_latest_scaling_table
+        with get_db() as _sdb:
+            scaling_table = get_latest_scaling_table(_sdb)
+        if scaling_table and scaling_table.get("apply_recommended"):
+            log.info("Confidence scaling active: ECE=%.4f", scaling_table.get("ece", 0))
+        else:
+            scaling_table = None
+    except Exception as _se:
+        log.debug("Could not load confidence scaling table: %s", _se)
 
     # ── Load features ────────────────────────────────────────────
     from ml.confidence.confidence_engine import (
@@ -214,6 +234,19 @@ def run_prediction_pipeline(version: int = 1) -> dict:
                     required_cols   = required_cols,
                     version         = version,
                 )
+
+                # Apply confidence scaling from calibration audit
+                if scaling_table:
+                    raw_conf = confidence.get("confidence_score", 50.0)
+                    bucket   = _confidence_bucket(raw_conf)
+                    entry    = scaling_table.get("scaling_table", {}).get(bucket)
+                    if entry and entry.get("samples", 0) >= 5:
+                        adj = entry.get("adjustment", 0.0)
+                        confidence["confidence_score"] = round(
+                            max(0.0, min(100.0, raw_conf + adj)), 2
+                        )
+                        confidence["scaling_applied"] = True
+                        confidence["scaling_adjustment"] = adj
 
                 # Pattern search (lightweight, no model needed)
                 pattern = run_pattern_search(

@@ -10,7 +10,7 @@ Triggered by:
 Retraining steps:
   1. Build a fresh training dataset (last 365 days)
   2. Walk-forward validation to select hyperparams
-  3. Train final models (LGB + XGB + CatBoost) on full dataset
+  3. Train final models (CatBoost + NGBoost) on full dataset
   4. Register new model versions in model_versions table
   5. Retire the old active model (is_active → False)
   6. Write a LessonLearned record explaining what changed
@@ -142,9 +142,9 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
 
     try:
         from ml.datasets.training_dataset import prepare_training_dataset
-        from ml.models.lightgbm_model import LightGBMModel
-        from ml.models.xgboost_model import XGBoostModel
         from ml.models.catboost_model import CatBoostModel
+        from ml.models.ngboost_model import NGBoostModel
+        from ml.models.aqrtinet_model import AQRTINet
         import pandas as pd, numpy as np
 
         dataset = prepare_training_dataset(label_col="direction_5d", top_features=40, scale=True)
@@ -161,6 +161,15 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         X_test  = latest_split.X_test
         y_test  = latest_split.y_test
 
+        # Build a date series aligned to X_train index (needed by AQRTINet regime routing)
+        # dataset.df has "date" column; X_train index = original df row indices
+        train_dates = None
+        try:
+            train_dates = dataset.df.loc[X_train.index, "date"].astype(str)
+            train_dates.index = X_train.index
+        except Exception as e:
+            log.warning("Could not extract training dates for regime routing: %s", e)
+
         # Compute next version number before training so models can use it
         last_version = (
             db.query(ModelVersion.version)
@@ -172,10 +181,22 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         trained_models = []
         metrics_list   = []
 
-        for ModelClass in [LightGBMModel, XGBoostModel, CatBoostModel]:
+        # Sample weights from failure records (may be None if no failures recorded yet)
+        sample_weights = getattr(latest_split, "sample_weights", None)
+        if sample_weights is not None and len(sample_weights) == len(X_train):
+            n_upweighted = int((sample_weights > 1.0).sum())
+            log.info("Using failure-weighted training: %d rows upweighted", n_upweighted)
+        else:
+            sample_weights = None
+
+        for ModelClass in [CatBoostModel, NGBoostModel, AQRTINet]:
             try:
                 model = ModelClass(task="direction", label_col="direction_5d", version=next_version)
-                model.fit(X_train, y_train, X_val=X_test, y_val=y_test)
+                # Inject training dates for AQRTINet regime routing (ignored by other models)
+                if train_dates is not None:
+                    model._training_dates = train_dates
+                model.fit(X_train, y_train, X_val=X_test, y_val=y_test,
+                          sample_weight=sample_weights)
                 # Compute metrics manually using predict
                 preds = model.predict(X_test)
                 correct = int((preds == y_test.values).sum())
@@ -209,8 +230,8 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         for m in current_active:
             m.is_active = False
 
-        # Save model artifact to disk (version already set on model)
-        save_path = best_model.save()
+        # Save artifact to disk — this must happen before registering in DB
+        artifact_path = best_model.save()
 
         # Register in DB — delete ALL records for this version (any model name) to avoid UNIQUE collision
         db.query(ModelVersion).filter(
@@ -223,6 +244,7 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
             task          = "direction",
             label_col     = "direction_5d",
             version       = next_version,
+            artifact_path = str(artifact_path),
             primary_metric = best_metrics.get("accuracy"),
             metrics_json  = json.dumps(best_metrics),
             importance_json = json.dumps(best_model.feature_importance() if hasattr(best_model, "feature_importance") else {}),
@@ -301,6 +323,20 @@ def _record_lesson(db: Session, accuracy_check: dict, retrain_result: dict) -> N
         applied         = True,
     )
     db.add(lesson)
+
+    # Mark existing model/prediction lessons as applied — the retrain just acted on them
+    cutoff = date.today() - timedelta(days=ACCURACY_EVAL_DAYS * 3)
+    old_lessons = (
+        db.query(LessonLearned)
+        .filter(
+            LessonLearned.category.in_(["model", "prediction", "regime", "feature"]),
+            LessonLearned.lesson_date >= cutoff,
+            LessonLearned.applied.is_(False) | LessonLearned.applied.is_(None),
+        )
+        .all()
+    )
+    for ol in old_lessons:
+        ol.applied = True
 
     # Also write KnowledgeEvent for cross-agent visibility
     event = KnowledgeEvent(
@@ -387,15 +423,21 @@ def check_and_retrain(db: Session, force: bool = False) -> dict:
         if achieved_wr >= WIN_RATE_TARGET:
             log.info("Win rate target achieved (%.1f%% >= %.1f%%) — promoting model", achieved_wr, WIN_RATE_TARGET)
             break
-        else:
+        elif attempt < MAX_RETRAIN_ATTEMPTS:
             log.info(
-                "Win rate %.1f%% below target %.1f%% — retiring model and retraining",
-                achieved_wr, WIN_RATE_TARGET,
+                "Win rate %.1f%% below target %.1f%% — retraining again (attempt %d/%d)",
+                achieved_wr, WIN_RATE_TARGET, attempt, MAX_RETRAIN_ATTEMPTS,
             )
             # Mark the just-trained model inactive so next attempt can promote the new one
             from aqrti.database.models import ModelVersion as _MV
             db.query(_MV).filter(_MV.is_active == True).update({"is_active": False})
             db.commit()
+        else:
+            # Final attempt done — keep whatever we got as active (best available)
+            log.info(
+                "Max attempts reached. Best win rate: %.1f%% — keeping as active model",
+                achieved_wr,
+            )
 
     if result.get("status") == "ok":
         _record_lesson(db, accuracy, result)

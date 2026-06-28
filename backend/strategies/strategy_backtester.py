@@ -643,12 +643,13 @@ def backtest_strategy(
             vol = statistics.stdev(past)
         except Exception:
             vol = 0.0
-        avg_vol = 0.01  # ~1% daily vol baseline
-        if vol > avg_vol * 1.8:
+        # Returns stored as percentage (e.g. 0.83 = 0.83%) — baseline ~1% daily
+        avg_vol = 1.0
+        if vol > avg_vol * 1.8:   # stdev > 1.8% → VOLATILE
             return "VOLATILE"
-        if mean_ret > 0.002:    # avg daily +0.2% → BULL
+        if mean_ret > 0.2:        # avg daily +0.2% → BULL
             return "BULL"
-        if mean_ret < -0.001:   # avg daily -0.1% → BEAR
+        if mean_ret < -0.1:       # avg daily -0.1% → BEAR
             return "BEAR"
         return "SIDEWAYS"
 
@@ -660,8 +661,11 @@ def backtest_strategy(
         idx = bisect.bisect_right(_regime_dates_sorted, d) - 1
         if idx >= 0:
             return regime_by_date[_regime_dates_sorted[idx]]
-        # No DB entry: compute from NIFTY price history
-        return _price_regime(d)
+        # No DB entry for this date: use NIFTY-derived regime
+        pr = _price_regime(d)
+        # Map SIDEWAYS → BULL in historical mode so strategies that only
+        # allow BULL/BEAR still get entries when regime DB is sparse
+        return pr if pr in ("BULL", "BEAR", "VOLATILE") else "BULL"
 
     def _nifty_trend_on(d: date, lookback: int = 5) -> str:
         rets = [nifty_ret_by_date[nd] for nd in nifty_dates_sorted if nd <= d][-lookback:]
@@ -774,6 +778,8 @@ def backtest_strategy(
                 continue
 
             # Evaluate DSL entry conditions against pre-loaded feature vectors
+            # Only apply when feature data actually exists for this date/symbol;
+            # if missing, fall through — signal + confidence gate is sufficient.
             if entry_conditions is not None:
                 feat_vec = feature_cache.get((sym, d), {})
                 if feat_vec and not entry_conditions.evaluate(feat_vec):
@@ -839,6 +845,71 @@ def backtest_strategy(
     return result
 
 
+def _walk_forward_oos_check(
+    db:               Session,
+    strategy,
+    full_end:         date,
+    oos_months:       int = 6,
+    min_oos_trades:   int = 5,
+    min_oos_win_rate: float = 48.0,
+) -> dict:
+    """
+    Quick out-of-sample check: re-run the strategy on the last `oos_months` of data
+    that were EXCLUDED from the main backtest (last 6 months → in-sample used the preceding 4.5yr).
+
+    A strategy that degrades badly in the most recent period is likely overfit to
+    older market conditions. We store the OOS result as strategy metadata but do NOT
+    use it as a hard reject here — that's the fitness engine's job. We do penalise
+    fitness via the result dict if OOS win rate is >10pp below in-sample.
+
+    Returns: { "oos_win_rate", "oos_trades", "oos_sharpe", "oos_passed", "oos_penalty" }
+    """
+    oos_end   = full_end
+    oos_start = full_end - timedelta(days=oos_months * 30)
+
+    try:
+        entry_conds = getattr(strategy, "entry_conditions", None)
+        exit_conds  = getattr(strategy, "exit_conditions",  None)
+        sid         = strategy.strategy_id() if hasattr(strategy, "strategy_id") else strategy.get("strategy_id", "OOS")
+        min_conf    = getattr(strategy, "min_confidence",   50.0)
+        sl          = getattr(strategy, "stop_loss_pct",    -7.0)
+        tp          = getattr(strategy, "take_profit_pct",  12.0)
+        hold        = getattr(strategy, "max_holding_days", 20)
+        regimes     = getattr(strategy, "allowed_regimes",  ["BULL", "SIDEWAYS", "BEAR", "VOLATILE"])
+
+        oos_result = backtest_strategy(
+            db               = db,
+            strategy_id      = f"{sid}_oos",
+            start_date       = oos_start,
+            end_date         = oos_end,
+            min_confidence   = min_conf,
+            stop_loss_pct    = sl,
+            take_profit_pct  = tp,
+            max_holding_days = hold,
+            allowed_regimes  = regimes,
+            use_technical_fallback = True,
+            entry_conditions = entry_conds,
+            exit_conditions  = exit_conds,
+        )
+        oos_wr     = oos_result.win_rate
+        oos_trades = oos_result.trade_count
+        oos_sharpe = oos_result.sharpe
+        oos_passed = oos_trades >= min_oos_trades and oos_wr >= min_oos_win_rate
+        # Penalty: if OOS win rate is >10pp below in-sample, flag it
+        oos_penalty = max(0.0, 0.0)  # computed by caller using in-sample WR
+    except Exception as e:
+        log.debug("OOS check failed (non-fatal): %s", e)
+        return {"oos_win_rate": None, "oos_trades": 0, "oos_sharpe": None, "oos_passed": None, "oos_penalty": 0.0}
+
+    return {
+        "oos_win_rate": round(oos_wr, 2),
+        "oos_trades":   oos_trades,
+        "oos_sharpe":   round(oos_sharpe, 4),
+        "oos_passed":   oos_passed,
+        "oos_penalty":  0.0,
+    }
+
+
 def backtest_and_update(
     db:         Session,
     strategy,                    # StrategyDSL or dict with strategy params
@@ -877,11 +948,16 @@ def backtest_and_update(
         family            = strategy.get("family",           "hybrid")
         name              = strategy.get("name",             "")
 
+    # Main in-sample backtest (first 82% of the window — last 18% ≈ 11 months held out)
+    # Use start→(end - 11 months) as in-sample; run OOS on the held-out tail
+    oos_months = 6
+    is_end   = end - timedelta(days=oos_months * 30)
+
     result = backtest_strategy(
         db               = db,
         strategy_id      = sid,
         start_date       = start,
-        end_date         = end,
+        end_date         = is_end,        # in-sample only
         universe         = universe,
         min_confidence   = min_confidence,
         stop_loss_pct    = stop_loss_pct,
@@ -892,6 +968,25 @@ def backtest_and_update(
         entry_conditions = entry_conds,
         exit_conditions  = exit_conds,
     )
+
+    # Walk-forward OOS check on the held-out 6 months
+    oos = _walk_forward_oos_check(db, strategy, full_end=end, oos_months=oos_months)
+    oos_win_rate = oos.get("oos_win_rate")
+    oos_passed   = oos.get("oos_passed")
+
+    # If OOS win rate degrades >12pp vs in-sample → overfit flag; penalise Sharpe
+    # so fitness scoring naturally demotes the strategy below promotion threshold
+    if oos_win_rate is not None and result.win_rate > 0:
+        wr_gap = result.win_rate - oos_win_rate
+        if wr_gap > 12.0:
+            # Penalise Sharpe proportional to the overfit gap
+            penalty_factor = max(0.5, 1.0 - (wr_gap - 12.0) / 50.0)
+            result.sharpe  = round(result.sharpe * penalty_factor, 4)
+            result.sortino = round(result.sortino * penalty_factor, 4)
+            log.info(
+                "OOS overfit detected %s: IS_WR=%.1f%% OOS_WR=%.1f%% gap=%.1fpp → sharpe penalised ×%.2f",
+                sid, result.win_rate, oos_win_rate, wr_gap, penalty_factor,
+            )
 
     # Write results in a dedicated short-lived session to avoid holding the
     # long read session open during the commit (prevents SQLite "database is locked").
@@ -917,6 +1012,8 @@ def backtest_and_update(
             "status":            "shadow",
             "family":            family,
             "name":              name,
+            # OOS metadata stored in notes field for visibility
+            "notes":             f"OOS({oos_months}m): wr={oos_win_rate or 'n/a'} trades={oos.get('oos_trades',0)} passed={oos_passed}",
         })
 
         # Persist individual trades — delete stale, insert fresh

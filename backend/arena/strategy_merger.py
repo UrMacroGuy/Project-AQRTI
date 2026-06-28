@@ -206,6 +206,9 @@ def merge_strategies(
     elif bad_regimes:
         # Tighten RSI gate by 3 points in bad regimes to filter more aggressively
         child["rsi_entry_below"] = round(cur_rsi - 3.0, 1)
+    else:
+        # No change needed — carry forward current value (or default)
+        child["rsi_entry_below"] = round(cur_rsi, 1)
     child["rsi_entry_below"] = max(child["rsi_entry_below"], 25.0)  # floor: must be oversold
 
     # ── 5. Confidence gate: raise on known bad regimes ─────────────────

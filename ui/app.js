@@ -137,6 +137,19 @@ function activatePage(pageId) {
   if (el('page-breadcrumb')) el('page-breadcrumb').textContent = name;
   if (el('topbar-subtitle')) el('topbar-subtitle').textContent = pageSubtitles[pageId] || '';
 
+  // Sync F-key strip active state
+  document.querySelectorAll('.fkey-btn').forEach(btn => {
+    btn.classList.remove('active-page');
+  });
+  const fkeyMap = {
+    'overview': 'fk-overview', 'market': 'fk-market', 'opportunity': 'fk-opportunity',
+    'live-prices': 'fk-live-prices', 'news': 'fk-news', 'strategy': 'fk-strategy',
+    'paper': 'fk-paper', 'risk': 'fk-risk', 'model': 'fk-model',
+    'learning': 'fk-learning', 'agents': 'fk-agents', 'screener': 'fk-screener',
+  };
+  const fkActive = el(fkeyMap[pageId]);
+  if (fkActive) fkActive.classList.add('active-page');
+
   // Persist current page to session
   _session.save(pageId);
 }
@@ -378,6 +391,91 @@ document.addEventListener('DOMContentLoaded', () => {
       renderCmdResults(e.target.value);
     });
   }
+});
+
+// ── Bloomberg F-key physical keyboard shortcuts ───────────────
+const _fkeyPageMap = {
+  F1:  'overview', F2: 'market',     F3: 'opportunity', F4: 'live-prices',
+  F5:  'news',     F6: 'strategy',   F7: 'paper',       F8: 'risk',
+  F9:  'model',    F10: 'learning',  F11: 'agents',     F12: 'screener',
+};
+document.addEventListener('keydown', (e) => {
+  // Only activate F-keys when not typing in an input
+  const tag = (e.target.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  const page = _fkeyPageMap[e.key];
+  if (page) { e.preventDefault(); activatePage(page); renderPage(page); }
+});
+
+// ── Bloomberg GO> command bar ─────────────────────────────────
+// Behaves like Bloomberg terminal: type a mnemonic and press Enter
+const _bbgCommands = {
+  // Page mnemonics
+  'GO':    'overview',  'OV':    'overview',  'HP':  'overview',
+  'MKT':  'market',    'MRKT':  'market',    'IM':  'market',
+  'SIG':  'opportunity','TRADE':'opportunity','OPP': 'opportunity',
+  'LIVE': 'live-prices','PX':   'live-prices','GPRT':'live-prices',
+  'NI':   'news',       'NEWS': 'news',       'TOP': 'news',
+  'SENT': 'sentiment',  'SENT1':'sentiment',
+  'ANLT': 'analytics',  'AN':   'analytics',
+  'STRAT':'strategy',   'ST':   'strategy',   'EVL': 'strategy',
+  'MDL':  'model',      'ML':   'model',
+  'LRN':  'learning',   'INTEL':'learning',
+  'RSK':  'risk',       'RISK': 'risk',       'VRA': 'risk',
+  'PORT': 'paper',      'PPT':  'paper',      'PA':  'paper',
+  'AGT':  'agents',     'ROP':  'agents',
+  'VLT':  'vault',      'ARCH': 'vault',
+  'SCRN': 'screener',   'EQS':  'screener',
+  'DI':   'data-intelligence', 'DATA': 'data-intelligence',
+  'ARENA':'arena',      'ART':  'arena',
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  const bbgInput = document.getElementById('bbg-cmd-input');
+  if (!bbgInput) return;
+
+  bbgInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const cmd = bbgInput.value.trim().toUpperCase();
+      bbgInput.value = '';
+      if (!cmd) return;
+
+      // Check if it's a page mnemonic
+      const page = _bbgCommands[cmd];
+      if (page) {
+        activatePage(page);
+        renderPage(page);
+        return;
+      }
+
+      // F1-F12 shortcuts: "GO<F1>" style
+      const fMatch = cmd.match(/^(?:GO)?F(\d{1,2})$/);
+      if (fMatch) {
+        const fNum = parseInt(fMatch[1]);
+        const fPage = Object.values(_fkeyPageMap)[fNum - 1];
+        if (fPage) { activatePage(fPage); renderPage(fPage); }
+        return;
+      }
+
+      // Treat as symbol search → go to screener with prefilled symbol
+      // or fall through to command palette
+      openCmdPalette();
+      const palette = document.getElementById('cmd-palette-input');
+      if (palette) { palette.value = cmd; renderCmdResults(cmd); }
+    }
+    if (e.key === 'Escape') { bbgInput.value = ''; bbgInput.blur(); }
+  });
+
+  // Ctrl+L or `/` focuses the command bar (Bloomberg-like)
+  document.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey && ev.key === 'l') || (ev.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA')) {
+      ev.preventDefault();
+      bbgInput.focus();
+      bbgInput.select();
+    }
+  });
 });
 
 // ══════════════════════════════════════════════════════════════
@@ -1286,13 +1384,17 @@ window.addEventListener('DOMContentLoaded', () => {
   // Render initial page (mock data first, then live overwrites)
   renderPage('overview');
 
-  // Set date
+  // Set date — Bloomberg format: 28 JUN 2026
   const dateEl = el('topbar-date');
   if (dateEl) {
-    dateEl.textContent = new Date().toLocaleDateString('en-IN', {
-      day: '2-digit', month: 'short', year: 'numeric',
-    });
+    const now = new Date();
+    const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    dateEl.textContent = `${String(now.getDate()).padStart(2,'0')} ${months[now.getMonth()]} ${now.getFullYear()}`;
   }
+
+  // Topbar live dot — pulse while data is fresh
+  const liveDot = el('topbar-live-dot');
+  if (liveDot) liveDot.classList.remove('off');
 
   // Live backend hydration on startup
   hydrateOverview();
@@ -1310,6 +1412,106 @@ window.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => _sessionToast(prevSession), 500);
   }
 });
+
+// ── TODAY'S TRADES — Top-5 signals with SL/TP/strategy ────────
+async function loadTodaySignals() {
+  const grid    = el('today-signals-grid');
+  const banner  = el('do-not-trade-banner');
+  const pill    = el('model-health-pill');
+  const updated = el('today-signals-updated');
+  if (!grid) return;
+
+  grid.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;grid-column:1/-1">Loading signals…</div>';
+
+  let data;
+  try {
+    data = await apiFetch('/predictions/today');
+  } catch (e) {
+    grid.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;grid-column:1/-1">Could not load signals. Backend may be starting up.</div>';
+    return;
+  }
+
+  // Model health pill
+  const health = data.modelHealth || {};
+  const healthColors = { green: '#22c55e', yellow: '#eab308', red: '#ef4444', no_data: 'var(--text-muted)' };
+  const healthLabels = { green: '✓ Model Healthy', yellow: '⚡ Model Fair', red: '✗ Model Weak', no_data: '? No Model Data' };
+  if (pill) {
+    pill.style.background = healthColors[health.status] ? healthColors[health.status] + '22' : '';
+    pill.style.color = healthColors[health.status] || 'var(--text-muted)';
+    pill.style.border = `1px solid ${healthColors[health.status] || 'var(--border)'}`;
+    pill.textContent = healthLabels[health.status] || '?';
+    if (health.accuracy != null) pill.textContent += ` · ${health.accuracy}%`;
+  }
+
+  // DO NOT TRADE banner
+  if (banner) banner.style.display = data.doNotTrade ? 'flex' : 'none';
+
+  if (updated) updated.textContent = `Updated: ${data.date || '—'}`;
+
+  const signals = data.signals || [];
+  if (!signals.length) {
+    grid.innerHTML = `<div style="color:var(--text-muted);padding:24px;text-align:center;grid-column:1/-1">
+      No signals today — predictions run after 3:30 PM IST.<br>
+      <span style="font-size:0.8rem">Check back after market close.</span>
+    </div>`;
+    return;
+  }
+
+  const gradeClass = { A: 'grade-a', B: 'grade-b', C: 'grade-c' };
+  const gradeLbl   = { A: 'A', B: 'B', C: 'C' };
+
+  grid.innerHTML = signals.map(s => {
+    const gc      = gradeClass[s.signalGrade]  || 'grade-c';
+    const gl      = gradeLbl[s.signalGrade]    || 'C';
+    const glcss   = (s.signalGrade || 'c').toLowerCase();
+    const entry   = s.lastPrice      != null ? `₹${s.lastPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '—';
+    const sl      = s.stopLossPrice  != null ? `₹${s.stopLossPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '—';
+    const tp      = s.targetPrice    != null ? `₹${s.targetPrice.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}` : '—';
+    const slPct   = s.stopLossPct    != null ? `${s.stopLossPct.toFixed(1)}%` : '—';
+    const tpPct   = s.takeProfitPct  != null ? `+${s.takeProfitPct.toFixed(1)}%` : '—';
+    const rr      = s.riskRewardRatio != null ? `1:${s.riskRewardRatio.toFixed(1)}` : '—';
+    const conf    = Math.round(s.confidence || 0);
+    const wr      = s.strategyWinRate != null ? `${s.strategyWinRate.toFixed(1)}%WIN` : '';
+    const tc      = s.strategyTrades  != null ? `${s.strategyTrades.toLocaleString()}T` : '';
+    const stratLine = [s.strategyName, wr, tc].filter(Boolean).join(' · ') || '—';
+    const reasoning = s.reasoning ? s.reasoning.slice(0, 120) + (s.reasoning.length > 120 ? '…' : '') : '';
+
+    return `
+    <div class="bbg-signal-card ${gc}">
+      <div class="bbg-signal-head">
+        <span class="bbg-signal-sym">${s.symbol}</span>
+        <span class="bbg-signal-name">${s.sector || ''}</span>
+        <span class="bbg-signal-grade ${glcss}">GRD ${gl}</span>
+        <div class="bbg-signal-conf-bar" title="${conf}% confidence">
+          <div class="bbg-signal-conf-fill ${glcss}" style="width:${conf}%"></div>
+        </div>
+        <span style="font-family:var(--font-mono);font-size:0.62rem;color:#888;min-width:28px">${conf}%</span>
+      </div>
+      <div class="bbg-signal-levels">
+        <div class="bbg-signal-level">
+          <div class="bbg-level-label">ENTRY · NSE CNC</div>
+          <div class="bbg-level-price entry">${entry}</div>
+          <div class="bbg-level-pct" style="color:#555">Today close</div>
+        </div>
+        <div class="bbg-signal-level">
+          <div class="bbg-level-label">STOP LOSS</div>
+          <div class="bbg-level-price sl">${sl}</div>
+          <div class="bbg-level-pct sl">${slPct}</div>
+        </div>
+        <div class="bbg-signal-level">
+          <div class="bbg-level-label">TARGET</div>
+          <div class="bbg-level-price tp">${tp}</div>
+          <div class="bbg-level-pct tp">${tpPct}</div>
+        </div>
+      </div>
+      <div class="bbg-signal-footer">
+        <span class="bbg-signal-strat" title="${stratLine}">${stratLine}</span>
+        <span class="bbg-signal-rr">R:R ${rr}</span>
+      </div>
+      ${reasoning ? `<div style="padding:4px 10px 6px;font-size:0.62rem;color:#444;border-top:1px solid #111;line-height:1.4">${reasoning}</div>` : ''}
+    </div>`;
+  }).join('');
+}
 
 // ── Opportunity Rankings — live prediction hydration ─────────
 async function hydrateOpportunities() {
@@ -1461,6 +1663,18 @@ if (typeof Api !== 'undefined') {
     Api.predictionSummary = async function() {
       if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/predictions/summary');
+    };
+  }
+  if (!Api.todaySignals) {
+    Api.todaySignals = async function() {
+      if (API_CONFIG.USE_MOCK) return null;
+      return apiFetch('/predictions/today');
+    };
+  }
+  if (!Api.modelHealth) {
+    Api.modelHealth = async function() {
+      if (API_CONFIG.USE_MOCK) return null;
+      return apiFetch('/predictions/model-health');
     };
   }
   if (!Api.models) {
@@ -3419,7 +3633,7 @@ function renderPage(pageId) {
   if (pageId === 'news')        hydrateNews();
   if (pageId === 'sentiment')   hydrateSentiment();
   if (pageId === 'market')      { hydrateMarket(); loadUniverseSummary().catch(()=>{}); }
-  if (pageId === 'opportunity') hydrateOpportunities();
+  if (pageId === 'opportunity') { loadTodaySignals(); hydrateOpportunities(); }
   if (pageId === 'model')       hydrateModelCenter();
   if (pageId === 'paper') { hydratePaperPortfolio(); startPaperPolling(); }
   if (pageId !== 'paper') stopPaperPolling();

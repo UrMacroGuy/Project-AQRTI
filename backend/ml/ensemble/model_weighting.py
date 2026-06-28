@@ -21,7 +21,7 @@ MIN_WEIGHT    = 0.10
 SOFTMAX_TEMP  = 2.0   # temperature: lower = more winner-takes-all
 
 # Fallback equal weights when no performance data exists
-EQUAL_WEIGHTS = {"lightgbm": 1/3, "xgboost": 1/3, "catboost": 1/3}
+EQUAL_WEIGHTS = {"catboost": 1/3, "ngboost": 1/3, "aqrtinet": 1/3}
 
 
 def _softmax(scores: dict[str, float], temperature: float = SOFTMAX_TEMP) -> dict[str, float]:

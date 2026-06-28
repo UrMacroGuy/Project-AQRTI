@@ -49,13 +49,32 @@ def execute_rebalance(
     Returns execution report dict.
     """
     DRIFT_REBALANCE_THRESHOLD = 5.0   # close+reopen if weight drifts > 5 pct points
+    MIN_HOLD_DAYS = 3                 # never close a position held fewer than 3 days on rebalance
 
     portfolio  = get_or_create_portfolio(db)
     current_positions = get_open_positions(db)
     current    = {p["symbol"] for p in current_positions}
     target_set = set(target_weights.keys())
 
-    to_close = current - target_set
+    # Only close positions that are at least MIN_HOLD_DAYS old, to reduce churn
+    from aqrti.database.models import PaperPosition
+    pos_entry_dates = {
+        p["symbol"]: p.get("entryDate") for p in current_positions
+    }
+
+    def _held_long_enough(symbol: str) -> bool:
+        ed = pos_entry_dates.get(symbol)
+        if not ed:
+            return True
+        if isinstance(ed, str):
+            from datetime import datetime as _dt
+            try:
+                ed = _dt.strptime(ed, "%Y-%m-%d").date()
+            except Exception:
+                return True
+        return (date.today() - ed).days >= MIN_HOLD_DAYS
+
+    to_close = {s for s in (current - target_set) if _held_long_enough(s)}
     to_open  = target_set - current
 
     # Also close positions whose weight has drifted far from target (force resize)
@@ -328,9 +347,8 @@ def _refine_strategies_from_losses(db: Session, loss_trades: list[dict]) -> None
                     f"flagged_for_reevolution: loss_rate={loss_rate:.0%} "
                     f"over {total_closed} live trades"
                 )
-                if strat.fitness and avg_loss_pct < -3:
-                    # Reduce fitness score so it gets replaced sooner in next evolution run
-                    strat.fitness = max(0.0, (strat.fitness or 0.5) * 0.7)
+                if strat.fitness_score and avg_loss_pct < -3:
+                    strat.fitness_score = max(0.0, (strat.fitness_score or 0.5) * 0.7)
                 db.commit()
                 log.info(
                     "Strategy %s flagged for re-evolution: loss_rate=%.0f%% trades=%d",

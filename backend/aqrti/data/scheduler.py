@@ -38,6 +38,22 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 1 — Market data failed: %s", exc)
 
+    # Step 1A: Global universe (NSE + BSE + international) — incremental, only new dates
+    try:
+        from aqrti.data.global_universe import seed_global_universe, download_global_universe
+        from aqrti.database.engine import get_db as _get_db
+        with _get_db() as _gdb:
+            seed_global_universe(_gdb)
+        gu = download_global_universe()
+        scheduler_logger.info(
+            "Step 1A — Global Universe: inserted=%d symbols=%d errors=%d",
+            sum(gu.get("inserted", {}).values()),
+            gu.get("symbols_attempted", 0),
+            gu.get("errors", 0),
+        )
+    except Exception as exc:
+        scheduler_logger.error("Step 1A — Global Universe failed: %s", exc)
+
     # Step 1B: Bhavcopy supplement — adds delivery volume from NSE CDN
     try:
         from data_supremacy.bhavcopy_scraper import run_daily_bhavcopy
@@ -105,6 +121,48 @@ def _daily_job():
         )
     except Exception as exc:
         scheduler_logger.error("Step 7 — Learning loop failed: %s", exc)
+
+    # Step 7A: Live strategy validation sweep — demotes strategies underperforming vs backtest
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from strategies.live_validator import run_daily_validation_sweep
+        with _get_db() as _vdb:
+            r7a = run_daily_validation_sweep(_vdb, days_back=90)
+        scheduler_logger.info(
+            "Step 7A — Live Validation: written=%d demoted=%d flagged=%d",
+            r7a.get("rows_written", 0), len(r7a.get("demoted", [])), len(r7a.get("flagged", [])),
+        )
+    except Exception as exc:
+        scheduler_logger.error("Step 7A — Live Validation failed: %s", exc)
+
+    # Step 7A2: Drift-triggered retraining — if drift flagged in 30d window, trigger retrain
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from aqrti.database.models import ModelDriftHistory
+        from datetime import date as _date, timedelta as _td
+        with _get_db() as _ddb:
+            cutoff = _date.today() - _td(days=3)
+            recent_flags = _ddb.query(ModelDriftHistory).filter(
+                ModelDriftHistory.drift_flag   == True,
+                ModelDriftHistory.measured_date >= cutoff,
+                ModelDriftHistory.window_days   == 30,
+            ).count()
+        if recent_flags > 0:
+            scheduler_logger.warning(
+                "Step 7A2 — Drift detected (%d flagged models in 30d window) — triggering retrain",
+                recent_flags,
+            )
+            import threading as _threading
+            from ml.model_retrainer import check_and_retrain
+            def _drift_retrain():
+                from aqrti.database.engine import get_db as _g
+                with _g() as _db:
+                    check_and_retrain(_db, force=True)
+            _threading.Thread(target=_drift_retrain, daemon=True).start()
+        else:
+            scheduler_logger.info("Step 7A2 — No drift flags in last 3 days — skipping retrain")
+    except Exception as exc:
+        scheduler_logger.error("Step 7A2 — Drift-triggered retrain check failed: %s", exc)
 
     # Step 7B: Regime Discovery (K-Means unsupervised)
     try:
@@ -401,6 +459,31 @@ def _arena_job():
         scheduler_logger.error("Arena job failed: %s", exc)
 
 
+def _paper_trading_monitor_job():
+    """
+    Continuous 5-min paper trading monitor.
+    - Checks stop-loss / take-profit / max-hold on all open positions using live prices
+    - Opens new positions when slots are free and high-confidence signals exist
+    - Runs 24/7 (not just during market hours) using latest available prices
+    """
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    try:
+        from paper_trading.continuous_monitor import run_continuous_monitor
+        result = run_continuous_monitor()
+        if result.get("closed") or result.get("opened"):
+            scheduler_logger.info(
+                "Paper monitor: closed=%d opened=%d value=%.0f",
+                len(result.get("closed", [])),
+                len(result.get("opened", [])),
+                result.get("portfolio_value", 0),
+            )
+    except Exception as exc:
+        scheduler_logger.error("Paper trading monitor failed: %s", exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler and _scheduler.running:
@@ -480,6 +563,19 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
+    # Continuous paper trading monitor — every 5 minutes
+    # Checks SL/TP/max-hold on open positions + opens new entries when slots free
+    _scheduler.add_job(
+        _paper_trading_monitor_job,
+        trigger="interval",
+        minutes=5,
+        id="paper_trading_monitor",
+        name="Continuous Paper Trading Monitor",
+        replace_existing=True,
+        misfire_grace_time=120,
+        max_instances=1,
+    )
+
     _scheduler.start()
 
     # Kick off arena immediately on boot (non-blocking)
@@ -489,6 +585,32 @@ def start_scheduler() -> BackgroundScheduler:
         scheduler_logger.info("Arena cycle kicked off on boot")
     except Exception as exc:
         scheduler_logger.warning("Arena boot kick failed (non-fatal): %s", exc)
+
+    # Kick off paper trading monitor immediately on boot
+    try:
+        from paper_trading.continuous_monitor import run_continuous_monitor
+        result = run_continuous_monitor()
+        scheduler_logger.info(
+            "Paper monitor boot run: closed=%d opened=%d value=%.0f",
+            len(result.get("closed", [])),
+            len(result.get("opened", [])),
+            result.get("portfolio_value", 0),
+        )
+    except Exception as exc:
+        scheduler_logger.warning("Paper monitor boot kick failed (non-fatal): %s", exc)
+
+    # Seed global universe (BSE + NSE + international) on boot — fast, no download
+    try:
+        from aqrti.data.global_universe import seed_global_universe
+        from aqrti.database.engine import get_db as _get_db
+        with _get_db() as _gdb:
+            seed_result = seed_global_universe(_gdb)
+        scheduler_logger.info(
+            "Global universe seeded on boot: added=%d updated=%d total=%d",
+            seed_result.get("added", 0), seed_result.get("updated", 0), seed_result.get("total", 0),
+        )
+    except Exception as exc:
+        scheduler_logger.warning("Global universe seed on boot failed (non-fatal): %s", exc)
     scheduler_logger.info(
         "Scheduler started. Daily cron: %s IST | Agents: every 1 hr | Strategy loop: every 5 min",
         settings.ingest_cron,

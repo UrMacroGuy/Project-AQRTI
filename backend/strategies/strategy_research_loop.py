@@ -100,7 +100,20 @@ def _backtest_unscored(db, max_stocks: int = 200) -> dict:
     for row in rows:
         try:
             from strategies.strategy_dsl import StrategyDSL
+            from strategies.strategy_generator import _passes_prescreen
             dsl = StrategyDSL.from_json(row.dsl_json)
+
+            # Fast structural pre-screen before expensive backtest
+            ok, reason = _passes_prescreen(dsl, bad_features=set())
+            if not ok:
+                log.debug("Pre-screen skip %s: %s", row.strategy_id, reason)
+                # Mark it retired immediately — no point backtesting
+                row.status        = "retired"
+                row.status_reason = f"prescreen:{reason}"
+                db.commit()
+                errors += 1
+                continue
+
             backtest_and_update(db, dsl, start_date=start_date, end_date=end_date)
             tested += 1
         except Exception as exc:
@@ -110,9 +123,122 @@ def _backtest_unscored(db, max_stocks: int = 200) -> dict:
     return {"backtested": tested, "errors": errors, "total_queued": len(rows)}
 
 
+def _apply_live_performance_adjustment(db) -> dict:
+    """
+    Read StrategyPerformance (live paper trading results) and adjust fitness scores.
+
+    Logic:
+    - Strategy with ≥5 live closed trades AND live win_rate > backtest win_rate + 5pp
+      → fitness boosted by up to +5 points (strong live evidence)
+    - Strategy with ≥5 live closed trades AND live win_rate < backtest win_rate - 15pp
+      → fitness penalised by up to -10 points (live divergence)
+
+    This feeds real paper trading results back into the genetic algorithm so
+    evolution gravitates toward strategies that actually work, not just backtest well.
+    """
+    from aqrti.database.models import StrategyPerformance
+    from sqlalchemy import func
+
+    boosted = 0
+    penalised = 0
+
+    # Aggregate live trades per strategy
+    perf_rows = (
+        db.query(
+            StrategyPerformance.strategy_id,
+            func.sum(StrategyPerformance.trades_closed).label("total_trades"),
+            func.sum(StrategyPerformance.win_count).label("total_wins"),
+            func.sum(StrategyPerformance.loss_count).label("total_losses"),
+        )
+        .group_by(StrategyPerformance.strategy_id)
+        .all()
+    )
+
+    for row in perf_rows:
+        total = (row.total_trades or 0)
+        if total < 5:
+            continue
+
+        wins = row.total_wins or 0
+        live_wr = wins / total * 100 if total > 0 else 0.0
+
+        strat = db.query(StrategyV2).filter_by(strategy_id=row.strategy_id).first()
+        if not strat or strat.fitness_score is None:
+            continue
+
+        bt_wr = strat.win_rate or 50.0
+        gap   = live_wr - bt_wr
+
+        old_fitness = strat.fitness_score
+        if gap > 5.0:
+            # Live outperforming — boost up to +5 pts proportional to gap
+            boost = min(gap * 0.5, 5.0)
+            strat.fitness_score = min(100.0, old_fitness + boost)
+            boosted += 1
+        elif gap < -15.0:
+            # Live significantly underperforming — penalise up to -10 pts
+            penalty = min(abs(gap) * 0.4, 10.0)
+            strat.fitness_score = max(0.0, old_fitness - penalty)
+            penalised += 1
+
+    db.commit()
+    return {"boosted": boosted, "penalised": penalised, "strategies_evaluated": len(perf_rows)}
+
+
+def _apply_arena_champion_boost(db) -> dict:
+    """
+    Strategies that became arena champions get a fitness boost (+8 pts) so the
+    genetic algorithm preferentially evolves their parameter family.
+
+    Also boosts all strategies that share the same `family` as any champion
+    (sibling boost: +3 pts) — helps the evolution engine rediscover what made
+    the champion DSL work without duplicating it exactly.
+
+    Runs after lifecycle and live-performance sweeps so it can compound with them.
+    """
+    from aqrti.database.models import ArenaRun
+
+    champion_ids = {
+        r.strategy_id
+        for r in db.query(ArenaRun.strategy_id).filter_by(is_champion=True).all()
+    }
+    if not champion_ids:
+        return {"champion_boost": 0, "sibling_boost": 0}
+
+    champion_families = set()
+    direct_boost = 0
+    for sid in champion_ids:
+        strat = db.query(StrategyV2).filter_by(strategy_id=sid).first()
+        if not strat or strat.fitness_score is None:
+            continue
+        strat.fitness_score = min(100.0, strat.fitness_score + 8.0)
+        if strat.family:
+            champion_families.add(strat.family)
+        direct_boost += 1
+
+    # Sibling boost: same family, not a champion itself
+    sibling_boost = 0
+    if champion_families:
+        siblings = db.query(StrategyV2).filter(
+            StrategyV2.family.in_(champion_families),
+            StrategyV2.strategy_id.notin_(champion_ids),
+            StrategyV2.fitness_score.isnot(None),
+        ).all()
+        for s in siblings:
+            s.fitness_score = min(100.0, s.fitness_score + 3.0)
+            sibling_boost += 1
+
+    db.commit()
+    return {
+        "champion_boost":   direct_boost,
+        "sibling_boost":    sibling_boost,
+        "champion_families": list(champion_families),
+    }
+
+
 def run_daily_strategy_research(
-    generate_n:    int = 100,
-    evolve_n:      int = 40,
+    generate_n:    int = 30,    # reduced 100→30: pre-screened quality over random volume
+    evolve_n:      int = 20,    # reduced 40→20: fewer but higher-quality offspring
     skip_generate: bool = False,
     skip_evolve:   bool = False,
 ) -> dict:
@@ -177,6 +303,37 @@ def run_daily_strategy_research(
     except Exception as exc:
         log.error("Step 4 — Lifecycle sweep failed: %s", exc)
         report["steps"]["lifecycle"] = {"error": str(exc)}
+
+    # Step 4B: Apply live performance adjustment to fitness scores
+    # Boosts fitness of strategies performing well live, penalises underperformers
+    try:
+        with get_db_session() as db:
+            lp_result = _apply_live_performance_adjustment(db)
+        report["steps"]["live_perf_adjust"] = lp_result
+        log.info(
+            "Step 4B — Live perf adjust: boosted=%d penalised=%d",
+            lp_result.get("boosted", 0), lp_result.get("penalised", 0),
+        )
+    except Exception as exc:
+        log.error("Step 4B — Live performance adjustment failed: %s", exc)
+        report["steps"]["live_perf_adjust"] = {"error": str(exc)}
+
+    # Step 4C: Arena champion fitness boost
+    # Champions get +8 pts; their family siblings get +3 pts so evolution gravitates
+    # toward parameter families that actually cleared the champion gates.
+    try:
+        with get_db_session() as db:
+            arena_result = _apply_arena_champion_boost(db)
+        report["steps"]["arena_champion_boost"] = arena_result
+        log.info(
+            "Step 4C — Arena champion boost: direct=%d siblings=%d families=%s",
+            arena_result.get("champion_boost", 0),
+            arena_result.get("sibling_boost", 0),
+            arena_result.get("champion_families", []),
+        )
+    except Exception as exc:
+        log.error("Step 4C — Arena champion boost failed: %s", exc)
+        report["steps"]["arena_champion_boost"] = {"error": str(exc)}
 
     # Step 5: Evolve population
     if not skip_evolve:

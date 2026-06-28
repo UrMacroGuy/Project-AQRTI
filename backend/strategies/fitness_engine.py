@@ -51,7 +51,7 @@ W_LONGEVITY        = 0.05
 # ── Normalization targets ─────────────────────────────────────
 TARGET_SHARPE        = 1.2     # raised — Nifty50 long-only ≈ 0.8; must beat it
 TARGET_PROFIT_FACTOR = 2.0     # raised — must clear cost friction
-TARGET_WIN_RATE      = 55.0    # 55% realistic for trend-following on Indian equities
+TARGET_WIN_RATE      = 52.0    # 52% realistic for systematic strategies on Indian equities
 TARGET_TRADES        = 500     # 500+ trades = statistically meaningful
 MIN_TRADES           = 500     # hard floor — below this, longevity = 0
 

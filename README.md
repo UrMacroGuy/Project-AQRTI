@@ -26,16 +26,17 @@ It is **not** a trading bot with real money. It is a research and validation pla
 
 ---
 
-## Current Stats (2026-06-25)
+## Current Stats (2026-06-28)
 
 | Metric | Value |
 |---|---|
-| Strategy population | 4,087 total · 847 promoted · 8 families |
-| Best strategy fitness | 67.3 (volatility_play family) |
+| Strategy population | 7,000+ total · multiple families |
+| Best strategy fitness | 69.8 (regime_adaptive family) |
 | Intelligence Score | 71.5 |
 | Market regime | SIDEWAYS |
 | Agent pipeline | 7 agents · 100% success |
-| Historical regime data | 227 days backfilled (BULL/BEAR/SIDEWAYS/VOLATILE) |
+| Stock universe | 779 global symbols · 309 Indian (137 NSE + 172 BSE) |
+| Strategy Arena | Autonomous self-learning loop — refines losing strategies daily |
 
 ---
 
@@ -45,7 +46,8 @@ It is **not** a trading bot with real money. It is a research and validation pla
 |---|---|
 | **14-page Intelligence Terminal** | Full dashboard: Overview, Market, Opportunities, News, Sentiment, Strategy Lab, Model Center, Learning, Agents, Paper Trading, Risk, Vault, Intelligence Lab, Data Intelligence |
 | **Live Market Data** | NIFTY 50, BANKNIFTY, sector strength, top movers via yfinance |
-| **ML Prediction Engine** | CatBoost + LightGBM + XGBoost ensemble — trained on 148 Indian market features |
+| **Global Universe** | 779 stocks: 309 Indian (137 NSE + 172 BSE), plus US, UK, EU, JP, HK, KR, AU, CA |
+| **ML Prediction Engine** | CatBoost + NGBoost ensemble — trained on 148 features across all active symbols |
 | **Strategy Evolution** | Genetic algorithm: 8 families, 11 mutation ops, 5-dimension fitness scoring, runs every 5 min |
 | **7 Research Agents** | Market, Pattern, Strategy, Model, News, Risk agents + CRO daily brief · all at 100% success |
 | **Paper Trading Engine** | Fully automated open/close positions based on best strategy + confidence threshold |

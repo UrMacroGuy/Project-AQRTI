@@ -233,14 +233,18 @@ def _params_for_regime(dsl: dict, regime: Optional[str]) -> dict:
     Select parameter set from arena_v2.regime_routing based on current regime.
     Falls back to top-level DSL params if no routing block exists.
     """
+    # rsi_entry_below=None means "no RSI gate" (e.g. sentiment strategies don't use RSI)
+    _rsi_raw = dsl.get("rsi_entry_below")
+    _ema_spread_raw = dsl.get("ema_spread_min_pct")
+    _vol_mult_raw   = dsl.get("volume_min_multiplier")
     base = {
         "stop_loss_pct":        float(dsl.get("stop_loss_pct",         5.0)),
         "take_profit_pct":      float(dsl.get("take_profit_pct",       14.0)),
-        "rsi_entry_below":      float(dsl.get("rsi_entry_below",        40.0)),
+        "rsi_entry_below":      float(_rsi_raw) if _rsi_raw is not None else None,
         "min_confidence":       float(dsl.get("min_confidence",         55.0)),
         "max_hold_days":        int(dsl.get("max_hold_days",            20)),
-        "ema_spread_min_pct":   float(dsl.get("ema_spread_min_pct",     0.0)),
-        "volume_min_multiplier":float(dsl.get("volume_min_multiplier",  1.0)),
+        "ema_spread_min_pct":   float(_ema_spread_raw) if _ema_spread_raw is not None else 0.0,
+        "volume_min_multiplier":float(_vol_mult_raw)   if _vol_mult_raw   is not None else 1.0,
     }
     if not regime:
         return base
@@ -251,7 +255,13 @@ def _params_for_regime(dsl: dict, regime: Optional[str]) -> dict:
         for k in base:
             if k in override:
                 try:
-                    base[k] = float(override[k]) if k != "max_hold_days" else int(override[k])
+                    if k == "max_hold_days":
+                        base[k] = int(override[k])
+                    elif k == "rsi_entry_below":
+                        # Preserve None if original had no RSI gate
+                        base[k] = float(override[k]) if base[k] is not None else None
+                    else:
+                        base[k] = float(override[k])
                 except Exception:
                     pass
     return base
@@ -293,10 +303,11 @@ def _score_signals(
         cur = today["close"]
         closes_with_today = closes + [cur]
 
-        # RSI
+        # RSI gate — skipped for strategies that don't use RSI (e.g. sentiment)
         rsi = _wilder_rsi(closes_with_today)
-        if rsi is None or rsi >= rsi_gate:
-            continue
+        if rsi_gate is not None:
+            if rsi is None or rsi >= rsi_gate:
+                continue
 
         # EMA trend
         ema20 = _ema(closes_with_today, 20)
@@ -339,7 +350,10 @@ def _score_signals(
             target = round(cur * (1 + tp_pct / 100), 2)
 
         # Signal quality score (0–100): lower RSI + stronger EMA spread + higher vol = better
-        rsi_score  = max(0, (rsi_gate - rsi) / rsi_gate * 40)
+        if rsi_gate is not None and rsi is not None and rsi_gate > 0:
+            rsi_score = max(0, (rsi_gate - rsi) / rsi_gate * 40)
+        else:
+            rsi_score = 20.0  # no RSI gate → neutral bonus
         ema_score  = min(actual_spread * 5, 30) if ema50 > 0 else 0
         vol_score  = min((vol_ratio - 1) * 10, 20) if avg_vol > 0 and today_vol > 0 else 0
         quality    = round(rsi_score + ema_score + vol_score + 10, 1)  # base 10

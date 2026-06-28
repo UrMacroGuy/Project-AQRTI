@@ -624,6 +624,18 @@ def create_app() -> FastAPI:
             return result
         return await asyncio.to_thread(_run_lc)
 
+    @app.post("/admin/retrain-loop", tags=["Admin"])
+    async def trigger_retrain_loop(force: bool = False):
+        """
+        Check paper trading win rate. If below 70%, auto-retrain ML models,
+        refresh predictions, and re-run strategy research until target is met
+        (up to 5 iterations). Pass ?force=true to retrain regardless of win rate.
+        """
+        import asyncio
+        from paper_trading.retrain_loop import run_retrain_loop
+        api_logger.info("Retrain loop triggered (force=%s).", force)
+        return await asyncio.to_thread(run_retrain_loop, force)
+
     @app.post("/admin/learning", tags=["Admin"])
     async def trigger_learning():
         """Manually trigger the daily learning loop."""

@@ -351,29 +351,36 @@ def compute_meta_state(db: Session) -> dict:
             continue
         death_share = stats["death_share"]
         avg_dead    = stats["avg_dead_fit"]
-        # High death share + low dead fitness = reduce weight
-        if death_share > 0.20 and avg_dead < 20:
-            weights[fam] = max(weights[fam] * 0.5, MIN_FAMILY_WEIGHT)
-            log.info("Meta: downweighting %s (death_share=%.1f%% avg_dead_fit=%.1f)", fam, death_share * 100, avg_dead)
-        elif death_share > 0.30:
-            weights[fam] = max(weights[fam] * 0.7, MIN_FAMILY_WEIGHT)
+        # Graduated suppression: the more a family dies, the harder it gets suppressed
+        if death_share > 0.35 and avg_dead < 15:
+            weights[fam] = max(weights[fam] * 0.25, MIN_FAMILY_WEIGHT)  # almost kill it
+            log.info("Meta: heavily suppressing %s (death_share=%.0f%% avg_dead=%.1f)", fam, death_share * 100, avg_dead)
+        elif death_share > 0.25 and avg_dead < 25:
+            weights[fam] = max(weights[fam] * 0.45, MIN_FAMILY_WEIGHT)
+            log.info("Meta: suppressing %s (death_share=%.0f%%)", fam, death_share * 100)
+        elif death_share > 0.15:
+            weights[fam] = max(weights[fam] * 0.65, MIN_FAMILY_WEIGHT)
 
-    # Boost families with strong live performance
+    # Boost families with strong live performance (real-world edge)
     live_perf = live.get("family_live_performance", {})
     for fam, lp in live_perf.items():
         if fam not in weights:
             continue
         if lp["win_rate"] >= 60 and lp["trades"] >= 5:
-            weights[fam] = min(weights[fam] * 1.3, MAX_FAMILY_WEIGHT)
-            log.info("Meta: boosting %s (live win_rate=%.1f%%)", fam, lp["win_rate"])
+            weights[fam] = min(weights[fam] * 1.5, MAX_FAMILY_WEIGHT)  # strong live signal → big boost
+            log.info("Meta: boosting %s (live win_rate=%.1f%% on %d trades)", fam, lp["win_rate"], lp["trades"])
+        elif lp["win_rate"] >= 55 and lp["trades"] >= 5:
+            weights[fam] = min(weights[fam] * 1.25, MAX_FAMILY_WEIGHT)
         elif lp["win_rate"] < 40 and lp["trades"] >= 5:
-            weights[fam] = max(weights[fam] * 0.6, MIN_FAMILY_WEIGHT)
+            weights[fam] = max(weights[fam] * 0.4, MIN_FAMILY_WEIGHT)  # live failure → suppress hard
 
-    # Boost families where alive top-performers are concentrated
+    # Boost families where alive top-performers cluster — they know something
     for fam, priors in alive["param_priors"].items():
         if fam not in weights:
             continue
-        if priors["avg_fitness"] >= 50 and priors["count"] >= 5:
+        if priors["avg_fitness"] >= 60 and priors["count"] >= 5:
+            weights[fam] = min(weights[fam] * 1.3, MAX_FAMILY_WEIGHT)
+        elif priors["avg_fitness"] >= 50 and priors["count"] >= 5:
             weights[fam] = min(weights[fam] * 1.15, MAX_FAMILY_WEIGHT)
 
     # Renormalise
@@ -388,6 +395,18 @@ def compute_meta_state(db: Session) -> dict:
         good_count = good_feat_raw.get(feat, 0)
         if dead_count >= 10 and good_count < dead_count * 0.3:
             bad_features.append(feat)
+
+    # ── 2b. Build graveyard zones — dead (family, SL) parameter clusters ─
+    # Generator uses these to avoid spawning strategies into known dead zones.
+    graveyard_zones = []
+    for g in db.query(StrategyGraveyard).all():
+        try:
+            dsl = json.loads(g.dsl_json or "{}")
+            sl  = dsl.get("stop_loss_pct")
+            if sl and g.family:
+                graveyard_zones.append({"family": g.family, "stop_loss_pct": sl})
+        except Exception:
+            pass
 
     # ── 3. Rank mutation operations ──────────────────────────────
     ranked_ops = evo.get("ranked_ops", [])
@@ -418,6 +437,7 @@ def compute_meta_state(db: Session) -> dict:
         "current_regime":        regime,
         "family_weights":        weights,
         "bad_features":          bad_features,
+        "graveyard_zones":       graveyard_zones,
         "ranked_mutation_ops":   ranked_ops,
         "mutation_op_stats":     evo.get("op_stats", {}),
         "current_conf_floor":    current_conf_floor,

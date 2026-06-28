@@ -1,6 +1,6 @@
 """
 AQRTI Ensemble Engine
-Combines LightGBM + XGBoost + CatBoost predictions using dynamic weights.
+Combines CatBoost + NGBoost predictions using dynamic weights.
 
 For each symbol, produces:
   - direction_prob:    probability of positive 5d return (0.0–1.0)

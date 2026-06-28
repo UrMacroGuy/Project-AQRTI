@@ -38,17 +38,18 @@ WF_STEP_MONTHS = 2       # slide step per fold
 @dataclass
 class DataSplit:
     """A single chronological train/test split."""
-    fold:         int
-    train_start:  date
-    train_end:    date
-    test_start:   date
-    test_end:     date
-    X_train:      pd.DataFrame = field(repr=False)
-    y_train:      pd.Series    = field(repr=False)
-    X_test:       pd.DataFrame = field(repr=False)
-    y_test:       pd.Series    = field(repr=False)
-    feature_cols: list[str]    = field(repr=False)
-    scaler:       Optional[object] = field(default=None, repr=False)
+    fold:            int
+    train_start:     date
+    train_end:       date
+    test_start:      date
+    test_end:        date
+    X_train:         pd.DataFrame = field(repr=False)
+    y_train:         pd.Series    = field(repr=False)
+    X_test:          pd.DataFrame = field(repr=False)
+    y_test:          pd.Series    = field(repr=False)
+    feature_cols:    list[str]    = field(repr=False)
+    scaler:          Optional[object] = field(default=None, repr=False)
+    sample_weights:  Optional[pd.Series] = field(default=None, repr=False)
 
 
 @dataclass
@@ -115,6 +116,7 @@ def build_walk_forward_folds(
     feature_cols: list[str],
     label_col: str,
     scale: bool = True,
+    sample_weights: Optional[pd.Series] = None,
 ) -> list[DataSplit]:
     """
     Build all walk-forward folds with expanding training windows.
@@ -177,18 +179,24 @@ def build_walk_forward_folds(
                 index=X_test.index,
             )
 
+        # Slice sample weights for this fold's training rows
+        fold_weights = None
+        if sample_weights is not None:
+            fold_weights = sample_weights.loc[train_mask[train_mask].index].reindex(X_train.index)
+
         folds.append(DataSplit(
-            fold        = fold_idx,
-            train_start = data_start,
-            train_end   = train_end,
-            test_start  = test_start,
-            test_end    = test_end,
-            X_train     = X_train,
-            y_train     = y_train,
-            X_test      = X_test,
-            y_test      = y_test,
-            feature_cols = feature_cols,
-            scaler      = scaler,
+            fold           = fold_idx,
+            train_start    = data_start,
+            train_end      = train_end,
+            test_start     = test_start,
+            test_end       = test_end,
+            X_train        = X_train,
+            y_train        = y_train,
+            X_test         = X_test,
+            y_test         = y_test,
+            feature_cols   = feature_cols,
+            scaler         = scaler,
+            sample_weights = fold_weights,
         ))
 
         fold_idx   += 1
@@ -196,6 +204,85 @@ def build_walk_forward_folds(
 
     log.info("Built %d walk-forward folds", len(folds))
     return folds
+
+
+def build_failure_sample_weights(df: pd.DataFrame, lookback_days: int = 90) -> pd.Series:
+    """
+    Query FailureRecord table and upweight training rows that match known failure
+    patterns (symbol + date combinations where the model was wrong).
+
+    Failure rows get weight 2.0 (double emphasis on learning from mistakes).
+    Normal rows get weight 1.0.
+    """
+    weights = pd.Series(1.0, index=df.index)
+    try:
+        import sys, os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+        from aqrti.database.engine import get_db
+        from aqrti.database.models import FailureRecord
+        from datetime import date, timedelta
+
+        cutoff = date.today() - timedelta(days=lookback_days)
+        with get_db() as db:
+            failures = db.query(
+                FailureRecord.symbol,
+                FailureRecord.failure_date,
+                FailureRecord.severity,
+            ).filter(FailureRecord.failure_date >= cutoff).all()
+
+        if not failures:
+            return weights
+
+        # Build lookup: (symbol, date) → severity weight
+        severity_boost = {"critical": 3.0, "high": 2.5, "medium": 2.0, "low": 1.5}
+        failure_map: dict[tuple, float] = {}
+        for f in failures:
+            key = (f.symbol, f.failure_date)
+            boost = severity_boost.get(f.severity or "medium", 2.0)
+            failure_map[key] = max(failure_map.get(key, 1.0), boost)
+
+        # Apply weights where df (symbol, date) matches a failure
+        df_dates = df["date"].dt.date if hasattr(df["date"], "dt") else df["date"]
+        for idx, (sym, dt) in enumerate(zip(df["symbol"], df_dates)):
+            key = (sym, dt)
+            if key in failure_map:
+                weights.iloc[idx] = failure_map[key]
+
+        n_upweighted = (weights > 1.0).sum()
+        log.info("Sample weights: %d rows upweighted from %d failure records", n_upweighted, len(failures))
+    except Exception as e:
+        log.debug("Could not build failure sample weights: %s", e)
+
+    return weights
+
+
+def _get_decayed_features(lookback_days: int = 30) -> set[str]:
+    """
+    Query FeatureDecayHistory and return feature names flagged as 'severe' or
+    'moderate' in the last N days.  These are excluded from training so the
+    model doesn't learn from stale predictors.
+    """
+    try:
+        from datetime import timedelta
+        from aqrti.database.engine import get_db
+        from aqrti.database.models import FeatureDecayHistory
+        cutoff = date.today() - timedelta(days=lookback_days)
+        with get_db() as db:
+            rows = db.query(FeatureDecayHistory.feature_name).filter(
+                FeatureDecayHistory.measured_date >= cutoff,
+                FeatureDecayHistory.decay_severity.in_(["severe", "moderate"]),
+                FeatureDecayHistory.decay_flag.is_(True),
+            ).all()
+        decayed = {r[0] for r in rows}
+        if decayed:
+            log.info("Feature decay: dropping %d decayed features from training: %s",
+                     len(decayed), sorted(decayed)[:10])
+        return decayed
+    except Exception as e:
+        log.debug("Could not load decayed features: %s", e)
+        return set()
 
 
 def prepare_training_dataset(
@@ -242,11 +329,26 @@ def prepare_training_dataset(
     df_for_ic   = df.iloc[:cutoff_idx]
     feature_cols = select_features_by_ic(df_for_ic, raw_features, label_col, top_n=top_features)
 
+    # Drop features that FeatureDecayHistory flagged as severe/moderate — they no longer
+    # predict returns and would add noise to the training set.
+    decayed = _get_decayed_features(lookback_days=30)
+    if decayed:
+        before = len(feature_cols)
+        feature_cols = [f for f in feature_cols if f not in decayed]
+        log.info(
+            "Dropped %d decayed features from training set (%d → %d features)",
+            before - len(feature_cols), before, len(feature_cols),
+        )
+
     # Final dataset uses only selected features + labels
     keep_cols = ["symbol", "date"] + feature_cols + LABEL_COLUMNS
     df = df[[c for c in keep_cols if c in df.columns]].copy()
 
-    folds = build_walk_forward_folds(df, feature_cols, label_col, scale=scale)
+    # Build sample weights from failure records — upweights rows where model was wrong
+    sample_weights = build_failure_sample_weights(df)
+
+    folds = build_walk_forward_folds(df, feature_cols, label_col, scale=scale,
+                                     sample_weights=sample_weights)
 
     dataset = TrainingDataset(
         df           = df,

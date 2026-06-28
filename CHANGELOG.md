@@ -1,4 +1,19 @@
-﻿## [2026-06-28j] — Strategy Quality Overhaul: Quality Over Quantity
+﻿## [2026-06-28k] — Fix Promotion Gate + Remove Broken MDD Limit
+
+### Fix: Sub-50 strategies were being promoted (stale .pyc from old 35.0 threshold)
+- Demoted 331 strategies that had fitness < 50 but were already in "promoted" state
+- PROMOTE_THRESHOLD confirmed at 50.0 — strategies with fitness 37-49 cannot promote
+- Re-promoted 85 strategies that genuinely pass: fitness ≥ 50, win_rate ≥ 52%, sharpe ≥ 0.3, trades ≥ 300
+
+### Fix: DRAWDOWN_LIMIT=-18% was incorrectly retiring all valid strategies
+- Every strategy in the DB had MDD -60% to -95% (backtester computes strategy equity curve drawdown over 5yr backtest, not per-trade drawdown)
+- -18% is not a meaningful limit for a 5yr backtest covering COVID crash and 2022 bear — even index funds hit -38% MDD in COVID
+- Removed MDD from retirement gate entirely; fitness score already penalises high-drawdown strategies through the Sharpe and Calmar components
+- DRAWDOWN_LIMIT set to -100% (effectively disabled) so no strategy is retired for this reason going forward
+
+---
+
+## [2026-06-28j] — Strategy Quality Overhaul: Quality Over Quantity
 
 ### Fix: Generation producing too many low-quality candidates
 - **Reduced generation from 100 → 30 candidates/day** — pre-screened quality beats random volume

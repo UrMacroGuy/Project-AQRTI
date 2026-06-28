@@ -23,9 +23,9 @@ from ml.datasets.training_dataset import (
     prepare_training_dataset,
     get_final_train_test,
 )
-from ml.models.lightgbm_model import LightGBMModel
-from ml.models.xgboost_model import XGBoostModel
 from ml.models.catboost_model import CatBoostModel
+from ml.models.ngboost_model import NGBoostModel
+from ml.models.aqrtinet_model import AQRTINet
 from ml.models.base_model import BaseModel, ModelArtifact, ML_MODELS_DIR
 from ml.validation.metrics import compute_metrics
 from ml.validation.walk_forward import run_walk_forward_validation
@@ -33,9 +33,9 @@ from ml.validation.walk_forward import run_walk_forward_validation
 log = get_logger("backtest_validator")
 
 MODEL_CLASSES = {
-    "lightgbm": LightGBMModel,
-    "xgboost":  XGBoostModel,
     "catboost": CatBoostModel,
+    "ngboost":  NGBoostModel,
+    "aqrtinet": AQRTINet,
 }
 
 # Tasks to train models for

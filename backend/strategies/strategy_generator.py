@@ -399,24 +399,84 @@ _FAMILY_WEIGHTS = {
 }
 
 
+# ── Pre-screening gate ────────────────────────────────────────────────
+# Reject structurally bad strategies before they ever reach the backtester.
+# This saves backtest time and prevents noise from polluting the population.
+
+MIN_RR_RATIO    = 1.5    # take_profit must be at least 1.5× |stop_loss|
+MIN_CONFIDENCE  = 52.0   # below this, the strategy fires on noise
+MAX_HOLDING     = 60     # longer than 60 days → not a swing strategy
+MIN_HOLDING     = 3      # below 3 days → cost drag kills the edge
+
+def _passes_prescreen(strategy: StrategyDSL, bad_features: set) -> tuple[bool, str]:
+    """
+    Structural quality gates applied before backtesting.
+    Returns (passes, reason_if_rejected).
+    """
+    sl  = abs(strategy.stop_loss_pct   or 7.0)
+    tp  = abs(strategy.take_profit_pct or 12.0)
+    rr  = tp / sl if sl > 0 else 0.0
+    if rr < MIN_RR_RATIO:
+        return False, f"R:R {rr:.2f} < {MIN_RR_RATIO}"
+
+    conf = strategy.min_confidence or 50.0
+    if conf < MIN_CONFIDENCE:
+        return False, f"min_confidence {conf} < {MIN_CONFIDENCE}"
+
+    hold = strategy.max_holding_days or 20
+    if hold < MIN_HOLDING:
+        return False, f"max_holding_days {hold} < {MIN_HOLDING}"
+    if hold > MAX_HOLDING:
+        return False, f"max_holding_days {hold} > {MAX_HOLDING}"
+
+    # All entry conditions use bad features → reject
+    if bad_features and strategy.entry_conditions:
+        entry_feats = [
+            c.feature for c in (strategy.entry_conditions.conditions or [])
+            if hasattr(c, "feature")
+        ]
+        if entry_feats and all(f in bad_features for f in entry_feats):
+            return False, f"all entry features in bad_features set: {entry_feats}"
+
+    # Must have at least 2 entry conditions (single condition → curve-fit risk)
+    n_conds = len(getattr(strategy.entry_conditions, "conditions", []) or [])
+    if n_conds < 2:
+        return False, f"only {n_conds} entry condition(s) — too few to be robust"
+
+    return True, ""
+
+
+def _in_dead_zone(strategy: StrategyDSL, graveyard_zones: list[dict]) -> bool:
+    """
+    Check if this strategy's parameter space overlaps with known failed zones.
+    Graveyard zones are (family, approx_params) tuples from meta-learner.
+    Returns True if it's too close to a dead zone → skip generation.
+    """
+    if not graveyard_zones:
+        return False
+    family = strategy.family or ""
+    for zone in graveyard_zones:
+        if zone.get("family") != family:
+            continue
+        # Check SL proximity: within 1pp of a known dead SL value
+        dead_sl = zone.get("stop_loss_pct")
+        if dead_sl and abs(abs(strategy.stop_loss_pct or 7) - abs(dead_sl)) < 1.0:
+            return True
+    return False
+
+
 def generate_candidates(
-    n:            int = 100,
+    n:            int = 30,
     seed:         int | None = None,
     families:     list[str] | None = None,
     meta_state:   dict | None = None,
 ) -> list[StrategyDSL]:
     """
-    Generate N candidate strategies.
+    Generate N candidate strategies, with pre-screening to ensure structural quality.
 
-    Args:
-        n:          number of candidates to generate
-        seed:       random seed for reproducibility
-        families:   restrict generation to specific families
-        meta_state: output of meta_learner.compute_meta_state() — if supplied,
-                    generation weights and bad-feature avoidance are adapted.
-
-    Returns:
-        list of unique StrategyDSL objects (deduplicated by strategy_id)
+    Default reduced from 100 → 30: we want 30 viable candidates over 100 random ones.
+    Pre-screening rejects R:R < 1.5, < 2 entry conditions, min_confidence < 52,
+    bad-feature-only strategies, and strategies in known dead parameter zones.
     """
     rng      = random.Random(seed)
     pool     = families or list(_GENERATORS.keys())
@@ -434,31 +494,35 @@ def generate_candidates(
     total_w = sum(pool_weights)
     pool_weights = [w / total_w for w in pool_weights]
 
-    bad_features = set(meta_state.get("bad_features", [])) if meta_state else set()
-    conf_floor   = (meta_state.get("current_conf_floor") or 55.0) if meta_state else 55.0
+    bad_features    = set(meta_state.get("bad_features", [])) if meta_state else set()
+    conf_floor      = (meta_state.get("current_conf_floor") or 55.0) if meta_state else 55.0
+    graveyard_zones = (meta_state.get("graveyard_zones") or []) if meta_state else []
 
+    rejected = 0
     attempts = 0
-    while len(result) < n and attempts < n * 5:
+    # Higher attempt cap because pre-screening adds rejection overhead
+    while len(result) < n and attempts < n * 15:
         family = rng.choices(pool, weights=pool_weights, k=1)[0]
         gen_fn = _GENERATORS[family]
         try:
             strategy = gen_fn(rng)
 
-            # Apply meta-learned confidence floor
+            # Enforce meta-learned confidence floor
             if strategy.min_confidence is None or strategy.min_confidence < conf_floor:
                 strategy.min_confidence = round(conf_floor + rng.uniform(0, 8.0), 1)
 
-            # If strategy uses a bad feature as its primary condition, regenerate once
-            if bad_features:
-                from strategies.strategy_dsl import ConditionGroup
-                entry_conds = strategy.entry_conditions.conditions if strategy.entry_conditions else []
-                primary_feats = [
-                    c.feature for c in entry_conds
-                    if hasattr(c, "feature") and c.feature in bad_features
-                ]
-                if len(primary_feats) >= len(entry_conds):
-                    # All entry conditions use bad features — try once more with same family
-                    strategy = gen_fn(rng)
+            # Structural pre-screen
+            ok, reason = _passes_prescreen(strategy, bad_features)
+            if not ok:
+                rejected += 1
+                log.debug("Pre-screen rejected %s [%s]: %s", family, strategy.name, reason)
+                continue
+
+            # Dead-zone check
+            if _in_dead_zone(strategy, graveyard_zones):
+                rejected += 1
+                log.debug("Dead-zone rejected %s [%s]", family, strategy.name)
+                continue
 
             sid = strategy.strategy_id()
             if sid not in seen_ids:
@@ -469,8 +533,8 @@ def generate_candidates(
         attempts += 1
 
     log.info(
-        "Generated %d candidates (%d families) in %d attempts (meta=%s bad_feats=%d conf_floor=%.1f)",
-        len(result), len(pool), attempts,
+        "Generated %d/%d candidates in %d attempts — rejected=%d (meta=%s bad_feats=%d conf_floor=%.1f)",
+        len(result), n, attempts, rejected,
         "yes" if meta_state else "no",
         len(bad_features), conf_floor,
     )

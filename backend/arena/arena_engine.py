@@ -249,6 +249,9 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
             db.query(ArenaRun).filter_by(strategy_id=strategy_id).update(
                 {"status": "needs_review", "needs_review": True}
             )
+            # Retire the strategy itself so it stops consuming arena slots
+            strategy.status        = "needs_review"
+            strategy.status_reason = f"arena_max_rounds_{MAX_ROUNDS}_reached"
             db.commit()
             return {"status": "needs_review", "strategy_id": strategy_id}
 

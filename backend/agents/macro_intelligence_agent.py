@@ -72,10 +72,10 @@ class MacroIntelligenceAgent(AgentBase):
                     if len(closes) < 2:
                         continue
 
-                    latest    = float(closes.iloc[-1])
-                    prev_1d   = float(closes.iloc[-2])
-                    prev_5d   = float(closes.iloc[max(-6, -len(closes))])
-                    prev_20d  = float(closes.iloc[max(-21, -len(closes))])
+                    latest    = float(closes.iat[-1])
+                    prev_1d   = float(closes.iat[-2])
+                    prev_5d   = float(closes.iat[max(-6, -len(closes))])
+                    prev_20d  = float(closes.iat[max(-21, -len(closes))])
 
                     ret_5d  = _safe_pct(latest, prev_5d)
                     ret_20d = _safe_pct(latest, prev_20d)

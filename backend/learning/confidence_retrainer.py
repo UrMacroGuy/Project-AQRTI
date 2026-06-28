@@ -24,7 +24,7 @@ if backend_dir not in sys.path:
 
 from sqlalchemy.orm import Session
 
-from aqrti.database.models import KnowledgeEvent
+from aqrti.database.models import KnowledgeEvent, LessonLearned
 from aqrti.utils.logger import get_logger
 from learning.confidence_audit import build_calibration_curve
 
@@ -119,6 +119,27 @@ def record_scaling_recommendation(db: Session, days: int = 30) -> dict:
     db.commit()
     result["event_id"] = event.id
     log.info("Confidence scaling recommendation recorded (event_id=%d)", event.id)
+
+    # Mark calibration/prediction lessons as applied — we just used them to build
+    # the scaling table, so they have been actioned by the system.
+    if result.get("apply_recommended"):
+        from datetime import timedelta
+        cutoff = date.today() - timedelta(days=days)
+        updated = (
+            db.query(LessonLearned)
+            .filter(
+                LessonLearned.category.in_(["calibration", "prediction"]),
+                LessonLearned.lesson_date >= cutoff,
+                LessonLearned.applied.is_(False) | LessonLearned.applied.is_(None),
+            )
+            .all()
+        )
+        for lesson in updated:
+            lesson.applied = True
+        if updated:
+            db.commit()
+            log.info("Marked %d calibration/prediction lessons as applied", len(updated))
+
     return result
 
 

@@ -114,6 +114,25 @@ def run_paper_trading_cycle(version: int = 1, strategy_id: str | None = None) ->
         len(rebalance_result.get("closed", [])),
         mtm["totalValue"],
     )
+
+    # ── Auto-retrain: if live win rate is below 70%, trigger retrain loop ────
+    retrain_triggered = False
+    try:
+        from paper_trading.retrain_loop import run_retrain_loop, _get_live_win_rate, MIN_TRADES_EVAL, WIN_RATE_TARGET
+        with get_db() as db2:
+            live_wr, live_trades = _get_live_win_rate(db2)
+        if live_trades >= MIN_TRADES_EVAL and live_wr < WIN_RATE_TARGET:
+            log.info(
+                "Live win rate %.1f%% < target %.0f%% with %d trades — triggering retrain loop",
+                live_wr, WIN_RATE_TARGET, live_trades,
+            )
+            import threading
+            t = threading.Thread(target=run_retrain_loop, kwargs={"force": False}, daemon=True)
+            t.start()
+            retrain_triggered = True
+    except Exception as rt_exc:
+        log.warning("Auto-retrain check failed: %s", rt_exc)
+
     return {
         "status":           "ok",
         "date":             str(today),
@@ -126,5 +145,6 @@ def run_paper_trading_cycle(version: int = 1, strategy_id: str | None = None) ->
         "openPositions":    mtm["openPositions"],
         "totalReturnPct":   total_return_pct,
         "sharpeRatio":      sharpe_ratio,
+        "retrainTriggered": retrain_triggered,
         "timestamp":        datetime.utcnow().isoformat(),
     }
