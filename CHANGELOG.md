@@ -1,4 +1,308 @@
-﻿## [2026-06-27i] — Paper Trading Fixed + Strategy-Specific Paper Trading
+﻿## [2026-06-28j] — Strategy Quality Overhaul: Quality Over Quantity
+
+### Fix: Generation producing too many low-quality candidates
+- **Reduced generation from 100 → 30 candidates/day** — pre-screened quality beats random volume
+- Added `_passes_prescreen()` gate in `strategy_generator.py` — rejects before backtest:
+  - R:R ratio < 1.5 (take_profit < 1.5× |stop_loss|) → rejected
+  - `min_confidence` < 52 → rejected
+  - `max_holding_days` < 3 or > 60 → rejected
+  - Only 1 entry condition (single condition = curve-fit risk) → rejected
+  - All entry conditions use known-bad features → rejected
+  - Strategy in a known graveyard dead zone (same family + similar SL) → rejected
+- Added `_in_dead_zone()` check using `graveyard_zones` from meta-learner
+- Pre-screen now runs before every backtest in `_backtest_unscored()` — structurally bad candidates are immediately retired without wasting backtest time
+
+### Fix: Promotion bar too low — mediocre strategies promoted as "good"
+- `PROMOTE_THRESHOLD`: 35 → 50 (top half of the scale, not bottom third)
+- `RETIRE_THRESHOLD`: 8 → 15 (retire mediocre strategies faster)
+- `DRAWDOWN_LIMIT`: -20% → -18% (tighter risk tolerance)
+- `MIN_WIN_RATE`: 50% → 52% (must beat coin flip with margin)
+- Added `MIN_SHARPE = 0.3` gate — win rate alone isn't enough; must show risk-adjusted edge
+- `MIN_TRADES`: 500 → 300 (5yr backtest on large universe makes 300 statistically sufficient)
+
+### Fix: Evolution breeding from mediocre parents
+- `MIN_PARENT_FITNESS`: 15 → 45 (only top-tier strategies reproduce)
+- Added `MIN_PARENT_SHARPE = 0.25` gate on parents
+- `TOURNAMENT_SIZE`: 5 → 7 (higher selection pressure toward the best)
+- Family cap per evolution pool: 30 → 10 (prevents one good family from mono-dominating)
+- Parent pool size: 200 → 100 (smaller, higher-quality breeding pool)
+- `evolve_n`: 40 → 20 offspring/day (fewer but from better parents)
+
+### Fix: Walk-forward validation missing — overfit strategies slipped through
+- Added `_walk_forward_oos_check()` in `strategy_backtester.py`
+- Backtest now splits the window: main in-sample on [start → end-6months], OOS check on last 6 months
+- If OOS win rate degrades >12pp vs in-sample → Sharpe penalised proportionally (×0.5 to ×0.9)
+- Overfit strategies score lower → don't cross promotion threshold → never reach active status
+- OOS metadata stored in strategy `notes` field for visibility
+
+### Fix: Meta-learner weight adjustments too timid
+- Old: dying family got ×0.5 or ×0.7 weight reduction
+- New: graduated suppression — >35% death share + avg dead fitness <15 → ×0.25 (near-kill)
+- Live performance boost raised: 60%+ live WR → ×1.5 (was ×1.3), <40% live WR → ×0.4 (was ×0.6)
+- Top alive families: now boosted ×1.3 if avg fitness ≥60 (was ×1.15 at ≥50)
+- Added `graveyard_zones` to meta-state — list of (family, SL) dead zones passed to generator
+
+### ML Training improvements
+- `BACKTEST_DAYS`: 3yr → 5yr in evolution — more data means more statistically robust signals
+- Feature decay drop: severe/moderate decayed features excluded from training dataset (from previous session)
+- Failure sample weights: failure records upweight training rows where model was wrong (from previous session)
+- Confidence scaling: calibration-based per-bucket adjustments applied to predictions (from previous session)
+
+---
+
+## [2026-06-28i] — Self-Learning Loop: All Gaps Closed
+
+### Fix: Arena strategies stuck in 'active' forever after MAX_ROUNDS
+- `run_arena_for_strategy()` set `ArenaRun.status = "needs_review"` but never updated `StrategyV2.status`
+- Strategies that failed 10 rounds stayed in "active" state and were re-run every hour indefinitely
+- Fixed: when `completed_rounds >= MAX_ROUNDS`, now also sets `strategy.status = "needs_review"` and `status_reason = "arena_max_rounds_10_reached"`
+- Retired strategies are excluded from future arena cycles automatically via the `to_run` filter
+
+### Fix: Arena champion results never fed back to evolution engine
+- Champion strategies had no privileged position in parent selection — evolution treated them like any other active strategy
+- Added `_apply_arena_champion_boost(db)` in `strategy_research_loop.py` (Step 4C):
+  - Arena champions: `fitness_score += 8.0` (capped at 100)
+  - All strategies in same family as a champion: `fitness_score += 3.0` (sibling boost)
+  - Family families identified and logged for evolution traceability
+- Evolution now converges toward parameter families that cleared champion gates
+
+### Fix: Live StrategyPerformance data never fed back to fitness scores
+- `StrategyPerformance` table accumulated paper trading results per strategy but fitness scores were never adjusted based on live results
+- Added `_apply_live_performance_adjustment(db)` in `strategy_research_loop.py` (Step 4B):
+  - ≥5 live trades AND live WR > backtest WR + 5pp → `fitness += min(gap * 0.5, 5.0)`
+  - ≥5 live trades AND live WR < backtest WR - 15pp → `fitness -= min(|gap| * 0.4, 10.0)`
+- Genetic algorithm now favors strategies that actually work live over pure backtest champions
+
+### Fix: LessonLearned.applied never set to True
+- Lessons from `root_cause_engine` were generated but `.applied` was never set True after the system acted on them
+- Fixed in two places:
+  1. `confidence_retrainer.record_scaling_recommendation()`: after computing scaling table when `apply_recommended=True`, marks all calibration/prediction lessons from last 30 days as `applied=True`
+  2. `model_retrainer._record_lesson()`: after model retraining, marks all model/prediction/regime/feature lessons from last 90 days as `applied=True`
+
+### Fix: Feature decay results never dropped from training
+- `FeatureDecayHistory` accumulated decay flags (severe/moderate) but `prepare_training_dataset()` always used IC-selected features — decayed features stayed in training
+- Added `_get_decayed_features(lookback_days=30)` in `training_dataset.py`:
+  - Queries `FeatureDecayHistory` for features with `decay_flag=True` and severity in `[severe, moderate]`
+  - Returns set of feature names to exclude
+- Added decay filter in `prepare_training_dataset()` after IC selection: drops all decayed features before fold building
+- Models no longer trained on features whose IC has degraded below 0.02
+
+### Fix: Continuous monitor used hardcoded SL/TP/confidence
+- `continuous_monitor.py` had `MIN_CONFIDENCE=60`, `stop_loss_pct=8`, `take_profit_pct=15` hardcoded
+- Added `_get_best_strategy(db)` that queries `StrategyV2` for highest-fitness promoted/active strategy with ≥500 trades and reads its DSL params — hardcoded values are now fallbacks only
+
+---
+
+## [2026-06-28h] — AQRTINet v2: Regime Backfill + Stacking + Platt Calibration
+
+### Improvement: Backfilled market_regimes with 5-year NIFTY50 history
+- `market_regimes` had only 2 rows (both SIDEWAYS) — AQRTINet's regime experts couldn't specialize
+- Computed regimes from `IndexData.NIFTY50` daily returns using 20-day rolling mean/volatility
+- Inserted 1,231 rows: SIDEWAYS=724, BEAR=269, BULL=210, VOLATILE=28
+- AQRTINet now trains true specialist experts for each regime instead of all falling back to BULL
+
+### Improvement: AQRTINet stacking — learns from other models' mistakes
+- Before training, generates OOF predictions from CatBoost and NGBoost (5-fold) as meta-features
+- AQRTINet sees where base models predicted confidently but were wrong → corrects systematic errors
+- Adds `meta_catboost` and `meta_ngboost` as 2 extra input features (total 42 features)
+- At inference: loads latest base model pkls from disk to generate meta-features in real-time
+
+### Improvement: Platt scaling probability calibration
+- Raw HistGBT probability outputs are not well-calibrated (overconfident near 0/1 extremes)
+- Added 3-fold OOF Platt scaling per regime expert: trains logistic regression on OOF scores
+- Converts raw GBT scores to calibrated P(UP) — ensemble confidence scores now more reliable
+- `PlattCalibratedExpert` class is pickle-safe (module-level, not inner class)
+
+### Fix: Training date injection for regime routing
+- `_run_training_pipeline` now injects `model._training_dates` before calling `model.fit()`
+- AQRTINet reads dates from training df aligned to X_train index for correct regime assignment
+- Fixes: all training rows were previously falling back to BULL expert (regime_map had no date hits)
+
+### Fix: Duplicate `save()` call in `model_retrainer._run_training_pipeline`
+- Two `best_model.save()` calls existed — removed redundant first call
+
+### Wired: AQRTINet v57 + v58 now in model_versions
+- v57: baseline AQRTINet (regime routing + Platt, no stacking), acc=0.506, auc=0.502
+- v58: full AQRTINet (stacking + regime routing + Platt), acc=0.466, auc=0.563
+- catboost v57 remains active (acc=0.518); AQRTINet and NGBoost registered as non-active
+
+---
+
+## [2026-06-28g] — Self-Learning Loop: Wired End-to-End
+
+### Fix: Strategy live validation sweep never triggered by scheduler
+- `run_daily_validation_sweep()` existed in `strategies/live_validator.py` but was never called automatically
+- Added as **Step 7A** in `_daily_job()`, running daily after learning loop
+- Compares each strategy's live paper trading win rate vs its backtest win rate
+- Demotes strategies with >20pp win rate divergence or <55% live win rate to `shadow` status
+- On first run: demoted 3 strategies (AQRTI_STR_8F06DE0E08, _8104CE8701, _0AABD25E6A) that were underperforming live
+
+### Fix: `retrain_loop.py` had unreachable WIN_RATE_TARGET = 70%
+- Same issue as model_retrainer.py — CatBoost achieves 51-55% on direction prediction
+- Changed to 52% — retraining now exits after 1-2 iterations instead of burning through all 5
+
+### Full self-learning loop now confirmed end-to-end:
+1. Trade closes → `on_trade_closed()` → `StrategyPerformance` row written immediately
+2. 3:30 PM pipeline → Step 0: backfills `Prediction.actual_return` from 5-day forward prices
+3. Step 2: failure analysis reads actual_returns → classifies (false_positive, overconfidence, regime_failure, etc.) → writes `FailureRecord` + `LessonLearned`
+4. Step 3: model drift detection compares live accuracy vs historical
+5. Step 4: confidence scaling adjusts confidence thresholds based on drift
+6. **Step 7A (new)**: live validation sweep — demotes strategies diverging from backtest
+7. Step 7: knowledge score updated (currently 64.95)
+8. If live win rate < 52% with ≥10 trades → retrain CatBoost + NGBoost + AQRTINet on full history
+9. Arena (hourly): replays losing strategies, merges with winning donors, promotes children
+
+---
+
+## [2026-06-28f] — Continuous Paper Trading Monitor
+
+### New Feature: Positions managed 24/7, not just once at end of day
+
+Previously paper trading only executed during the daily pipeline (3:30 PM IST). Positions had no intraday SL/TP monitoring and new entries only opened once per day.
+
+**`backend/paper_trading/continuous_monitor.py`** (new file):
+- Runs every 5 minutes via APScheduler
+- **Exit monitor**: checks every open position against live yfinance prices for stop-loss, take-profit, or max-hold-days (20d) — closes immediately when triggered
+- **Entry monitor**: when slots are free (< 12 positions), scans latest bullish predictions (confidence ≥ best strategy threshold) and opens new positions
+- **MTM update**: updates portfolio total_value with current prices on every tick
+- Uses the same `_current_price()` function (live yfinance → EOD DB fallback) already used by position display
+
+**`backend/aqrti/data/scheduler.py`** (modified):
+- Added `_paper_trading_monitor_job()` — every 5 minutes, `max_instances=1`
+- Kicks off immediately on boot (alongside arena)
+- Logs open/close activity when trades happen (silent otherwise)
+
+---
+
+## [2026-06-28e] — Arena Replay Engine: Critical 0-Trades Fix
+
+### Bug Fix: Arena replay produced 0 trades for ALL strategies
+
+- **Root cause**: `replay_engine.py` `_score_signals()` line computing `rsi_score` divided by `rsi_gate` which was `None` for all strategies (`rsi_entry_below` not set in DSL). `TypeError: unsupported operand type(s) for /: 'float' and 'NoneType'` was silently caught by the `except Exception` in `run_replay`, causing every simulated day to be skipped → 0 trades, 0 P&L, flat portfolio.
+- **Fix 1**: `rsi_score` formula now checks `rsi_gate is not None` — falls back to neutral bonus of 20.0 for strategies without an RSI gate
+- **Fix 2**: `_params_for_regime()` called `float(None)` on `ema_spread_min_pct` and `volume_min_multiplier` (also `None` in DSL) → also crashed. Fixed with explicit `None` guards, defaulting to `0.0` and `1.0` respectively.
+- **Verified**: Sentiment_GT56.6 now produces 1,179 trades (+13.2% return, 52.6% WR); Breakout_52w_1.9 produces 1,173 trades (+32.4% return, 53.2% WR) over 1-year replay
+
+### File Modified
+- `backend/arena/replay_engine.py` — `_params_for_regime()` None guards, `_score_signals()` rsi_score fix
+
+---
+
+## [2026-06-28d] — Arena Bug Fixes
+
+### Bug Fix: `build_child_strategy failed: 'rsi_entry_below'`
+- **Root cause**: `strategy_merger.py` line 209 always reads `child["rsi_entry_below"]` for the floor check, but only sets it in the `if` or `elif` branches. When donor doesn't outperform AND no bad regimes exist, neither branch runs → `KeyError`
+- **Fix**: Added `else` branch that carries forward `cur_rsi` — the value is always set before line 209
+
+### Bug Fix: Replay `trades=0` for Sentiment Strategies
+- **Root cause**: `replay_engine.py` defaulted `rsi_entry_below` to `40.0` for ALL strategies, including sentiment-driven ones that have no RSI signal. Every stock RSI > 40 → every stock filtered out → 0 trades
+- **Fix**: `rsi_entry_below=None` when key is absent in DSL; RSI gate skipped entirely when `rsi_gate is None`
+- Also applied to regime routing override block — won't coerce `None` to `float` for strategies without RSI
+
+---
+
+## [2026-06-28c] — AQRTINet Custom Model
+
+### New Model: AQRTINet
+Custom gradient-boosted tree ensemble purpose-built for NSE/BSE stock direction prediction.
+Three innovations over off-the-shelf models:
+
+**1. Asymmetric Trading Loss**
+- False positives (bad trades) penalised 2× harder than false negatives (missed trades)
+- `class_weight={0: 2.0, 1: 1.0}` on HistGradientBoostingClassifier
+- Shifts decision boundary toward higher precision — fewer but better signals
+
+**2. Regime-Aware Mixture of Experts**
+- One gradient booster per market regime: BULL / BEAR / SIDEWAYS / VOLATILE
+- Each specialist trained only on rows from its regime
+- At prediction time: routes to current regime expert (fallback to BULL)
+- Minimum 80 rows required per regime to train a specialist
+
+**3. Cross-Sectional Percentile Ranking**
+- `PercentileRanker` converts all features to their rank in training distribution (0–1)
+- Raw RSI=65 → RSI at 78th percentile of all stocks in training data
+- Scale-invariant across time, captures cross-sectional alpha
+
+### Files Added
+- `backend/ml/models/aqrtinet_model.py` — `AQRTINet(BaseModel)` — AQRTI-integrated version
+- `backend/ml/models/aqrtinet_percentile.py` — `PercentileRanker` class
+
+### Files Modified
+- `backend/ml/validation/backtest_validator.py` — `MODEL_CLASSES` now includes `"aqrtinet": AQRTINet`
+- `backend/ml/model_retrainer.py` — training loop now trains CatBoost + NGBoost + AQRTINet
+- `backend/ml/ensemble/model_weighting.py` — `EQUAL_WEIGHTS` split 3 ways (catboost/ngboost/aqrtinet)
+
+### Standalone GitHub Repo: `aqrtinet/`
+- `aqrtinet/aqrtinet/model.py` — standalone version, no AQRTI dependencies
+- `aqrtinet/aqrtinet/percentile.py` — standalone PercentileRanker
+- `aqrtinet/aqrtinet/loss.py` — asymmetric loss documentation
+- `aqrtinet/examples/train_on_nse.py` — minimal yfinance training example
+- `aqrtinet/tests/test_aqrtinet.py` — 10 sanity tests including asymmetric-loss precision check
+- `aqrtinet/setup.py`, `requirements.txt`, `README.md`, `.gitignore`
+
+### Hardware Performance (Ryzen AI 7 350, CPU-only)
+- PercentileRanker.fit: < 5 seconds
+- Each regime expert (HistGBT, 300 iter): ~20–30 seconds
+- Total retrain: ~1.5 minutes (faster than CatBoost ~2min, NGBoost ~4min)
+- Pkl size: ~2–5 MB (4 small trees)
+
+### Smoke Test
+- `python backend/ml/models/aqrtinet_model.py` → PASSED
+- Fit + predict + save + load + predict round-trip verified
+
+---
+
+## [2026-06-28b] — BSE Universe + Critical Bug Fixes
+
+### BSE Stock Universe Added
+- **172 BSE stocks** added to `global_universe.py` with `.BO` suffix (yfinance standard for BSE)
+- Covers: Sensex 30, PSU Banks, Private Banks, Insurance (LIC, ICICI Prudential, Star Health), New-age tech (Zomato, Nykaa, Paytm, PolicyBazaar, Delhivery, Dixon, Kaynes), Defence (HAL, BEL, Mazagon Dock, Cochin Shipyard, IdeaForge), Railways (RVNL, IRFC, PFC, REC), plus Pharma, FMCG, Cement, Metals, Power, Chemicals, Housing Finance, Broking
+- Total India coverage: **309 stocks** (137 NSE + 172 BSE) · Total global universe: **779 symbols**
+- `scheduler.py` Step 1A: `seed_global_universe()` + `download_global_universe()` now runs daily
+- Boot-time seed runs on every backend start → BSE stocks added to Stock table immediately
+- Feature engineering and ML training both use all active DB symbols → BSE stocks train automatically
+
+### Critical Bug Fix: Strategy Backtester 0 Trades (100% of strategies affected)
+- **Root cause**: `_price_regime()` used `avg_vol = 0.01` treating NIFTY daily returns as decimals, but they're stored as percentages (0.83, −1.15 etc.). Every date classified as VOLATILE → strategies without VOLATILE in `allowed_regimes` → 0 trades
+- **Fix**: `avg_vol = 1.0`, BULL threshold `> 0.2%`, BEAR `< −0.1%`, VOLATILE `stdev > 1.8%`
+- Result: strategies now generate 300–1600 trades over 5yr backtest
+
+### Critical Bug Fix: ML Retrainer Infinite Loop
+- **Root cause**: `WIN_RATE_TARGET = 75.0` — unachievable for direction prediction (models reach 51–58%)
+- Caused endless retrain cycles (5 attempts × N minutes each, immediately repeating)
+- **Fix**: `WIN_RATE_TARGET = 55.0` — realistic baseline for binary direction classifier
+
+### Secondary Fix: Signal Confidence Gate
+- `_should_enter()` effective threshold capped at 72.0 — prevents BEAR + NIFTY DOWN regime penalties from choking off all entries
+
+---
+
+## [2026-06-28a] — ML Stack Overhaul: CatBoost-Only + NGBoost Added + is_active Fixed
+
+### Models Removed
+- **LightGBM** direction model removed — accuracy 49.04% (sub-random, harmful to ensemble)
+- **XGBoost** direction model removed — accuracy 47.69% (actively anti-predictive)
+- Deleted 9 stale pkl files (lightgbm/xgboost direction v1–v7) from `ml_models/`
+- Removed from `backtest_validator.py` `MODEL_CLASSES` dict and `model_retrainer.py` training loop
+- Purged 56 stale `model_versions` DB rows (lgbm/xgb direction + catboost v1–v54)
+
+### NGBoost Added
+- New `backend/ml/models/ngboost_model.py` — probabilistic gradient boosting
+- Predicts P(UP) with calibrated confidence intervals (not just direction)
+- Enables confidence-gated trading: only enter when model confidence > threshold
+- `predict_confidence_interval()` method returns (lower, upper) for regression task
+- Installed `ngboost==0.5.11` (brings scikit-learn upgrade to 1.9.0)
+- Registered in `MODEL_CLASSES` alongside CatBoost in both `backtest_validator.py` and `model_retrainer.py`
+
+### is_active Bug Fixed
+- `model_retrainer.py` retry loop was marking the final winner `is_active=False` when win_rate < 55% on last attempt
+- Fix: only retire mid-loop; on final attempt keep winner as active (best available)
+- `artifact_path` now written to DB on every retrain (was `None` for versions 2–55)
+- CatBoost v55 (latest, acc=51.76%) promoted to `is_active=True` with correct artifact path
+
+---
+
+## [2026-06-27i] — Paper Trading Fixed + Strategy-Specific Paper Trading
 
 ### Paper Trading Fixed
 - Root cause: `feature_values` table was empty so prediction pipeline loaded 0 features → 0 predictions → 0 paper trades

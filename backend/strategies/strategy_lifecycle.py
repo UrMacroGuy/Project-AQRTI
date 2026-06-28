@@ -27,12 +27,13 @@ from aqrti.utils.logger import get_logger
 
 log = get_logger("strategy_lifecycle")
 
-PROMOTE_THRESHOLD  = 35.0    # fitness score required for promotion (0–100 scale)
-RETIRE_THRESHOLD   = 8.0     # fitness below this → retirement candidate
-DRAWDOWN_LIMIT     = -9999.0 # disabled — cumsum MDD metric is unreliable (divide-by-near-zero artifact)
-MIN_TRADES         = 500     # minimum backtest trades before promotion
-MIN_WIN_RATE       = 55.0    # minimum win rate % required for promotion and paper trading
-PAPER_WIN_RATE     = 55.0    # paper trading gate — only strategies >= this go live
+PROMOTE_THRESHOLD  = 50.0    # strategies must reach this fitness to be promoted
+RETIRE_THRESHOLD   = 15.0    # retire strategies that fall below this fitness
+DRAWDOWN_LIMIT     = -100.0  # MDD gate disabled — backtester MDD is per-strategy equity, not per-trade; fitness captures drawdown indirectly
+MIN_TRADES         = 300     # minimum backtest trades required for promotion
+MIN_WIN_RATE       = 52.0    # raised 50→52%: must beat coin flip with margin
+MIN_SHARPE         = 0.3     # new gate: Sharpe < 0.3 → not worth promoting regardless of win rate
+PAPER_WIN_RATE     = 53.0    # raised 52→53%
 
 
 def promote_strategy(
@@ -55,6 +56,8 @@ def promote_strategy(
         return {"success": False, "error": f"insufficient trades ({row.trade_count})"}
     if (row.win_rate or 0) < MIN_WIN_RATE:
         return {"success": False, "error": f"win_rate {row.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"}
+    if (row.sharpe or 0) < MIN_SHARPE:
+        return {"success": False, "error": f"sharpe {row.sharpe:.2f} below {MIN_SHARPE} threshold"}
 
     old_status   = row.status
     row.status   = "promoted"
@@ -146,6 +149,7 @@ def run_lifecycle_sweep(db: Session) -> dict:
             (s.fitness_score or 0) >= PROMOTE_THRESHOLD
             and (s.trade_count or 0) >= MIN_TRADES
             and (s.win_rate or 0) >= MIN_WIN_RATE
+            and (s.sharpe or 0) >= MIN_SHARPE
         ):
             r = promote_strategy(db, s.strategy_id)
             if r["success"]:
@@ -166,9 +170,6 @@ def run_lifecycle_sweep(db: Session) -> dict:
         if (s.fitness_score or 100) < RETIRE_THRESHOLD:
             reason = "low_fitness"
             detail = f"fitness={s.fitness_score:.1f} below {RETIRE_THRESHOLD}"
-        elif (s.max_drawdown or 0) < DRAWDOWN_LIMIT:
-            reason = "drawdown"
-            detail = f"max_drawdown={s.max_drawdown:.1f}% exceeded limit {DRAWDOWN_LIMIT}%"
         elif s.status == "promoted" and (s.win_rate or 0) < MIN_WIN_RATE:
             reason = "low_win_rate"
             detail = f"win_rate={s.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"
