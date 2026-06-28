@@ -488,29 +488,33 @@ function renderModel() {
 
 // ── LEARNING CENTER ───────────────────────────────────────────
 async function renderLearning() {
-  // Try live data first; fall back to mock
-  let liveData = await Api.learningOverview(30).catch(() => null);
+  // Show loading state while data fetches
+  const setEl = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+  setEl('lc-kpi-score', 'Loading…');
+  setEl('lc-kpi-failures', '…');
+  setEl('lc-kpi-lessons', '…');
+
+  // Fire all API calls in parallel — sequential awaits were causing 10s+ load time
+  const [liveData, calibration, drift, featIntel, lessonsData] = await Promise.all([
+    Api.learningOverview(30).catch(() => null),
+    Api.calibrationCurve(30).catch(() => null),
+    Api.driftSummary(90).catch(() => null),
+    Api.featureRanking(30).catch(() => null),
+    Api.lessons({ days: 30 }).catch(() => null),
+  ]);
+
   let scoreHistory   = [];
   let failures       = [];
   let lessons        = [];
-  let calibration    = null;
-  let drift          = null;
-  let featIntel      = null;
 
   if (liveData) {
     scoreHistory  = liveData.scoreHistory || [];
     failures      = liveData.recentFailures || [];
-    lessons       = [];
-    calibration   = await Api.calibrationCurve(30).catch(() => null);
-    drift         = await Api.driftSummary(90).catch(() => null);
-    featIntel     = await Api.featureRanking(30).catch(() => null);
-    const lessonsData = await Api.lessons({ days: 30 }).catch(() => null);
-    if (lessonsData) lessons = lessonsData.lessons || [];
+    lessons       = lessonsData?.lessons || [];
 
     // KPI updates
     const score = liveData.intelligenceScore || 0;
     const delta = liveData.scoreDelta || 0;
-    const setEl = (id, v) => { const e = el(id); if (e) e.textContent = v; };
     setEl('lc-kpi-score', `${score.toFixed(1)} / 100`);
     setEl('lc-kpi-delta', `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} vs yesterday`);
     setEl('lc-kpi-failures', liveData.totalFailures ?? '—');
@@ -526,7 +530,10 @@ async function renderLearning() {
       setEl('lc-kpi-features-healthy', `${healthy} / ${featIntel.features.length}`);
     }
   } else {
-    // Mock fallback — KPIs stay as static HTML defaults
+    // Backend returned null — show error state
+    setEl('lc-kpi-score', 'No data');
+    setEl('lc-kpi-failures', '—');
+    setEl('lc-kpi-lessons', '—');
     scoreHistory = [];
   }
 
@@ -1496,6 +1503,83 @@ function renderPaperPortfolio() {
   if (tbody) tbody.innerHTML = '<tr><td colspan="13" style="color:var(--text-muted);text-align:center;padding:16px">Loading trades…</td></tr>';
 }
 
+function _downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
+async function exportTradingViewPine() {
+  const btn = document.querySelector('[onclick="exportTradingViewPine()"]');
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = '⟳ Generating…'; btn.disabled = true; }
+  try {
+    const res = await fetch(`${API_CONFIG.BASE}/paper-portfolio/export/tradingview`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cd   = res.headers.get('Content-Disposition') || '';
+    const name = cd.match(/filename="?([^"]+)"?/)?.[1] || 'aqrti_portfolio.pine';
+    const blob = await res.blob();
+    _downloadBlob(blob, name);
+    if (btn) { btn.textContent = '✓ Downloaded!'; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000); }
+  } catch(e) {
+    alert('Export failed: ' + e.message);
+    if (btn) { btn.textContent = orig; btn.disabled = false; }
+  }
+}
+
+async function exportPositionsCSV() {
+  const btn = document.querySelector('[onclick="exportPositionsCSV()"]');
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; }
+  try {
+    const res = await fetch(`${API_CONFIG.BASE}/paper-portfolio/export/csv`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cd   = res.headers.get('Content-Disposition') || '';
+    const name = cd.match(/filename="?([^"]+)"?/)?.[1] || 'aqrti_positions.csv';
+    const blob = await res.blob();
+    _downloadBlob(blob, name);
+    if (btn) { btn.disabled = false; }
+  } catch(e) {
+    alert('CSV export failed: ' + e.message);
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+async function triggerBacktest() {
+  const statusEl = document.getElementById('pp-backtest-status');
+  const btn = document.querySelector('[onclick="triggerBacktest()"]');
+  if (statusEl) { statusEl.textContent = '⟳ Starting backtest…'; statusEl.style.color = 'var(--accent)'; }
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Starting…'; }
+  try {
+    const res = await Api.runBacktest(null, 2);
+    if (res.status === 'started') {
+      if (statusEl) {
+        statusEl.textContent = `✓ Running: ${res.strategy_name} — results in Strategy Arena tab`;
+        statusEl.style.color = 'rgba(139,92,246,0.9)';
+      }
+      // Poll status after 30s
+      setTimeout(async () => {
+        try {
+          const st = await Api.backtestStatus();
+          if (st.available && statusEl) {
+            statusEl.textContent = `Last: ${st.strategy_name} — ${(st.total_return_pct||0).toFixed(1)}% return, ${st.total_trades||0} trades`;
+          }
+        } catch(e) {}
+      }, 30000);
+    } else if (res.status === 'no_strategy') {
+      if (statusEl) { statusEl.textContent = '⚠ No active strategies yet — promote one first'; statusEl.style.color = '#ff9900'; }
+    }
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '✗ Error: ' + e.message; statusEl.style.color = '#ff4444'; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '▶ Run Backtest'; }
+  }
+}
+
 async function triggerPaperCycle() {
   const statusEl = document.getElementById('pp-cycle-status');
   const btn = document.querySelector('[onclick="triggerPaperCycle()"]');
@@ -1567,13 +1651,23 @@ async function hydratePaperPortfolio() {
     Api.backfillEquity().then(() => sessionStorage.setItem('aqrti_eq_backfilled', '1'));
   }
 
-  const [pp, perf, curve, alloc, trades] = await Promise.all([
+  const [pp, perf, curve, alloc, trades, btStatus] = await Promise.all([
     Api.paperPortfolio(),
     Api.performance(),
     Api.equityCurve(90),
     Api.paperAllocation(),
     Api.paperTrades(100),
+    Api.backtestStatus().catch(() => null),
   ]);
+
+  // Show last backtest result
+  const btEl = document.getElementById('pp-backtest-status');
+  if (btEl && btStatus && btStatus.available) {
+    const ret = (btStatus.total_return_pct || 0).toFixed(1);
+    const wr  = (btStatus.win_rate || 0).toFixed(0);
+    const cls = parseFloat(ret) >= 0 ? 'color:#00cc66' : 'color:#ef4444';
+    btEl.innerHTML = `Last: <b>${btStatus.strategy_name}</b> — <span style="${cls}">${ret}%</span> return · ${wr}% win rate · ${btStatus.total_trades||0} trades · ${btStatus.status||''}`;
+  }
 
   const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
   const fmt  = (v, dec = 2) => (v != null && !isNaN(v)) ? Number(v).toFixed(dec) : '—';
@@ -3349,6 +3443,7 @@ function renderPage(pageId) {
   if (pageId === 'live-prices')      hydrateLivePrices();
   if (pageId === 'screener')         hydrateScreener();
   if (pageId === 'analytics')        hydrateAnalytics();
+  if (pageId === 'arena')            hydrateArena();
 }
 
 // ── Nav Badges — live counts from backend ────────────────────
@@ -4532,6 +4627,12 @@ async function hydrateModelCenter() {
     if (e) e.className = e.className.replace(/\bpositive\b|\bnegative\b|\baccent\b/g, '').trim() + ' ' + cls;
   };
 
+  // Show loading state
+  s('model-ensemble-acc', 'Loading…');
+  s('model-best-name', '…');
+  const tbody0 = document.getElementById('model-registry-body');
+  if (tbody0) tbody0.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted);text-align:center;padding:16px">Loading model registry…</td></tr>';
+
   try {
     const [stats, models, metrics, folds] = await Promise.all([
       Api.modelStats().catch(() => null),
@@ -5311,8 +5412,8 @@ async function loadEarningsCalendar() {
     return `<tr style="${!isPast ? 'background:rgba(255,140,0,0.04)' : ''}">
       <td>${e.date || e.earnings_date || '—'}</td>
       <td><strong>${e.symbol || '—'}</strong></td>
-      <td style="color:#666">${e.sector || e.company || '—'}</td>
-      <td>${e.quarter || e.event_type || 'Q Results'}</td>
+      <td style="color:#666">${e.company_name || e.sector || e.company || '—'}</td>
+      <td>${e.quarter || 'Q Results'}</td>
       <td>${e.estimated_eps != null ? e.estimated_eps.toFixed(2) : '—'}</td>
       <td>${e.actual_eps != null ? e.actual_eps.toFixed(2) : '—'}</td>
       <td class="${sc}">${ss}</td>
@@ -5346,7 +5447,9 @@ async function loadOptionsChain() {
   const chain = data?.chain || [];
   if (!tbody) return;
   if (!chain.length) {
-    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#444;padding:16px">No options data — market may be closed or data unavailable</td></tr>';
+    const msg = data?.message || 'No options data — NSE options are only available during market hours (Mon-Fri 9:15am–3:30pm IST)';
+    const spotInfo = data?.spot_price ? ` | Spot: ₹${data.spot_price.toLocaleString('en-IN')}` : '';
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#888;padding:24px">${msg}${spotInfo}</td></tr>`;
   } else {
     const atmStrike = data.atm_strike;
     const _fmtOI = v => !v ? '—' : v >= 1e5 ? `${(v / 1e5).toFixed(1)}L` : `${(v / 1000).toFixed(1)}K`;
@@ -5760,4 +5863,237 @@ async function seedAndDownloadUniverse(region = 'all') {
       alert.textContent = `Download failed: ${e.message || e}`;
     }
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// STRATEGY ARENA — autonomous self-learning loop
+// ══════════════════════════════════════════════════════════════════════════
+
+let _arenaRunsCache = [];  // full run list, re-used by filter
+let _arenaEquityChart = null;
+
+async function hydrateArena() {
+  const s = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+
+  s('arena-status-label', 'Loading…');
+  s('arena-total', '—');
+
+  try {
+    const [status, champions, runs, review] = await Promise.all([
+      Api.arenaStatus().catch(() => null),
+      Api.arenaChampions().catch(() => ({ champions: [], count: 0 })),
+      Api.arenaRuns(200, 'all').catch(() => ({ runs: [] })),
+      Api.arenaNeedsReview().catch(() => ({ strategies: [], count: 0 })),
+    ]);
+
+    // ── Status strip ──────────────────────────────────────────────
+    if (status) {
+      const isRunning = status.is_running;
+      s('arena-status-label', isRunning ? '⚡ RUNNING' : '● IDLE');
+      const statusEl = document.getElementById('arena-status-label');
+      if (statusEl) statusEl.style.color = isRunning ? 'var(--accent)' : 'var(--text-secondary)';
+      s('arena-total',           status.total_runs ?? '—');
+      s('arena-running',         isRunning ? '1' : '0');
+      s('arena-champions-count', status.champions ?? '0');
+      s('arena-refining',        status.refining ?? '0');
+      s('arena-needs-review',    status.needs_review ?? '0');
+      s('arena-last-cycle',      status.last_cycle ? new Date(status.last_cycle).toLocaleString() : 'Auto-runs hourly');
+
+      const badge = document.getElementById('badge-arena');
+      if (badge) {
+        const champs = status.champions ?? 0;
+        badge.textContent = champs > 0 ? `${champs} CHAMP` : 'AUTO';
+        badge.className = 'nav-badge ' + (champs > 0 ? 'accent' : 'accent');
+      }
+    } else {
+      s('arena-status-label', '— offline');
+    }
+
+    // ── Champions table ───────────────────────────────────────────
+    const champBody = document.getElementById('arena-champions-body');
+    const champBadge = document.getElementById('arena-champ-badge');
+    if (champBadge) champBadge.textContent = champions.count ?? 0;
+    if (champBody) {
+      if (!champions.champions || champions.champions.length === 0) {
+        champBody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:20px">No champions yet — arena is still training.</td></tr>';
+      } else {
+        champBody.innerHTML = champions.champions.map(c => `
+          <tr style="cursor:pointer" onclick="loadArenaEquity('${c.strategy_id}','${escHtml(c.strategy_name)}')">
+            <td><span style="color:var(--accent)">★</span> ${escHtml(c.strategy_name)}</td>
+            <td style="text-align:center">Gen ${c.generation ?? 0}</td>
+            <td class="${(c.total_return_pct ?? 0) >= 120 ? 'positive' : ''}" style="text-align:right">${fmt1(c.total_return_pct)}%</td>
+            <td class="${(c.max_drawdown_pct ?? 0) >= -25 ? 'positive' : 'negative'}" style="text-align:right">${fmt1(c.max_drawdown_pct)}%</td>
+            <td style="text-align:right">${fmt1(c.win_rate)}%</td>
+            <td style="text-align:right">${c.total_trades ?? 0}</td>
+            <td style="text-align:center">${c.round_reached ?? 1}</td>
+            <td style="text-align:right">${fmt1(c.fitness_score)}</td>
+            <td style="font-size:0.72rem;color:var(--text-secondary)">${c.completed_at ? new Date(c.completed_at).toLocaleDateString() : '—'}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    // ── Run history ───────────────────────────────────────────────
+    _arenaRunsCache = runs.runs || [];
+    renderArenaRunsTable(_arenaRunsCache);
+
+    // ── Needs review ──────────────────────────────────────────────
+    const reviewTable = document.getElementById('arena-review-table');
+    const reviewEmpty = document.getElementById('arena-review-empty');
+    const reviewBody  = document.getElementById('arena-review-body');
+    if (review.count > 0 && reviewBody) {
+      if (reviewTable) reviewTable.style.display = '';
+      if (reviewEmpty) reviewEmpty.style.display = 'none';
+      reviewBody.innerHTML = review.strategies.map(r => `
+        <tr>
+          <td>${escHtml(r.strategy_name)}</td>
+          <td class="${(r.best_return_pct ?? 0) >= 0 ? 'positive' : 'negative'}" style="text-align:right">${fmt1(r.best_return_pct)}%</td>
+          <td style="text-align:right">${fmt1(r.win_rate)}%</td>
+          <td style="text-align:right">${r.losing_days ?? 0}</td>
+          <td style="text-align:center">${r.rounds_completed ?? 0} / 10</td>
+        </tr>
+      `).join('');
+    } else {
+      if (reviewTable) reviewTable.style.display = 'none';
+      if (reviewEmpty) reviewEmpty.style.display = '';
+    }
+
+  } catch (e) {
+    console.error('hydrateArena:', e);
+    const s2 = (id, v) => { const e2 = document.getElementById(id); if (e2) e2.textContent = v; };
+    s2('arena-status-label', 'Error loading');
+  }
+}
+
+function renderArenaRunsTable(rows) {
+  const tbody = document.getElementById('arena-runs-body');
+  if (!tbody) return;
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--text-secondary);padding:20px">No runs yet — trigger the arena or wait for the hourly cycle.</td></tr>';
+    return;
+  }
+
+  const statusColor = {
+    champion:    'var(--positive)',
+    refining:    'var(--accent)',
+    needs_review:'var(--alert)',
+    running:     'var(--accent)',
+    error:       'var(--alert)',
+    pending:     'var(--text-secondary)',
+  };
+
+  tbody.innerHTML = rows.map(r => {
+    const clrRet = (r.total_return_pct ?? 0) >= 120 ? 'positive' : ((r.total_return_pct ?? 0) >= 0 ? '' : 'negative');
+    const clrDd  = (r.max_drawdown_pct ?? 0) >= -25 ? 'positive' : 'negative';
+    const color  = statusColor[r.status] || 'var(--text-secondary)';
+    const passIcons = [r.passes_return, r.passes_drawdown, r.passes_winrate].map(p => p ? '✓' : '✗').join(' ');
+    return `
+      <tr style="cursor:pointer" onclick="loadArenaEquity('${r.strategy_id}','${escHtml(r.strategy_name)}')">
+        <td>${escHtml(r.strategy_name)}</td>
+        <td style="text-align:center">${r.generation ?? 0}</td>
+        <td style="text-align:center">${r.round ?? 1}</td>
+        <td style="color:${color};font-weight:600">${r.status ?? '—'}</td>
+        <td class="${clrRet}" style="text-align:right">${r.total_return_pct != null ? fmt1(r.total_return_pct)+'%' : '—'}</td>
+        <td class="${clrDd}"  style="text-align:right">${r.max_drawdown_pct != null ? fmt1(r.max_drawdown_pct)+'%' : '—'}</td>
+        <td style="text-align:right">${r.win_rate != null ? fmt1(r.win_rate)+'%' : '—'}</td>
+        <td style="text-align:right">${r.total_trades ?? '—'}</td>
+        <td style="text-align:right;color:var(--positive)">${r.winning_days ?? '—'}</td>
+        <td style="text-align:right;color:var(--alert)">${r.losing_days ?? '—'}</td>
+        <td style="font-size:0.72rem;color:var(--text-secondary)">${r.donor_name ? escHtml(r.donor_name) : '—'}</td>
+        <td style="text-align:right">${r.donor_coverage != null ? fmt1(r.donor_coverage)+'%' : '—'}</td>
+        <td style="font-size:0.72rem;color:var(--text-secondary)">${r.completed_at ? new Date(r.completed_at).toLocaleDateString() : '—'}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function filterArenaRuns() {
+  const sel = document.getElementById('arena-filter-status');
+  const status = sel ? sel.value : 'all';
+  const filtered = status === 'all' ? _arenaRunsCache : _arenaRunsCache.filter(r => r.status === status);
+  renderArenaRunsTable(filtered);
+}
+
+async function loadArenaEquity(strategyId, strategyName) {
+  const card  = document.getElementById('arena-equity-card');
+  const title = document.getElementById('arena-equity-title');
+  const canvas = document.getElementById('arena-equity-chart');
+  if (!card || !canvas) return;
+
+  if (title) title.textContent = `Equity Curve — ${strategyName}`;
+  card.style.display = '';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    const data = await Api.arenaEquity(strategyId);
+    if (!data.labels || data.labels.length === 0) {
+      if (title) title.textContent = `${strategyName} — no equity data yet`;
+      return;
+    }
+
+    if (_arenaEquityChart) { _arenaEquityChart.destroy(); _arenaEquityChart = null; }
+
+    const ctx = canvas.getContext('2d');
+    _arenaEquityChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.labels,
+        datasets: [{
+          label: 'Portfolio Value (₹)',
+          data: data.values,
+          borderColor: 'rgba(139,92,246,0.85)',
+          backgroundColor: 'rgba(139,92,246,0.08)',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.3,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx2 => `₹${ctx2.parsed.y.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { maxTicksLimit: 12, color: 'rgba(255,255,255,0.4)', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: 'rgba(255,255,255,0.4)', font: { size: 10 }, callback: v => '₹' + (v/1000).toFixed(0) + 'K' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+
+    if (title) title.textContent = `Equity Curve — ${strategyName} (${fmt1(data.total_return_pct)}% return)`;
+  } catch (e) {
+    console.error('loadArenaEquity:', e);
+  }
+}
+
+async function triggerArenaRun() {
+  const btn = document.querySelector('#page-arena .btn-primary');
+  if (btn) { btn.textContent = '⏳ Starting…'; btn.disabled = true; }
+  try {
+    const res = await Api.triggerArena();
+    if (btn) { btn.textContent = res.already_running ? '⚡ Already Running' : '✓ Cycle Started'; }
+    setTimeout(() => {
+      if (btn) { btn.textContent = '▶ Run Cycle'; btn.disabled = false; }
+      hydrateArena();
+    }, 3000);
+  } catch (e) {
+    if (btn) { btn.textContent = '✕ Error'; btn.disabled = false; }
+    console.error('triggerArenaRun:', e);
+  }
+}
+
+function fmt1(v) {
+  if (v == null || isNaN(v)) return '—';
+  return Number(v).toFixed(1);
+}
+
+function escHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

@@ -42,7 +42,7 @@ def get_strategies(
     status:   str | None = Query(default=None),
     family:   str | None = Query(default=None),
     limit:    int        = Query(default=50, ge=1, le=200),
-    order_by: str        = Query(default="fitness_score"),
+    order_by: str        = Query(default="fitness"),
     db: Session = Depends(get_db_dependency),
 ):
     rows = list_strategies(db, status=status, family=family, limit=limit, order_by=order_by)

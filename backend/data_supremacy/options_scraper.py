@@ -36,30 +36,47 @@ TOP_EQUITY_SYMBOLS = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK"]
 
 
 def _nse_session() -> requests.Session:
-    """Create a requests session with NSE cookies by visiting the homepage first."""
+    """Create a requests session with deep NSE cookie seeding."""
     import requests as req
-    headers = {
+    s = req.Session()
+    s.headers.update({
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0.0.0 Safari/537.36"
         ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-IN,en;q=0.9",
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "max-age=0",
-    }
-    s = req.Session()
-    s.headers.update(headers)
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+    })
     try:
-        s.get("https://www.nseindia.com", timeout=15)
-        time.sleep(1.5)
-        s.get("https://www.nseindia.com/option-chain", timeout=15)
+        # Step 1: homepage — seeds AKA_A2, nsit, bm_sz cookies
+        s.get("https://www.nseindia.com/", timeout=15)
+        time.sleep(2.0)
+        # Step 2: equity market page — seeds nse_pref, bm_mi cookies
+        s.get("https://www.nseindia.com/market-data/live-equity-market", timeout=15)
         time.sleep(1.0)
-    except Exception:
-        pass
+        # Step 3: FO page — seeds cookies needed for option-chain-indices
+        s.get("https://www.nseindia.com/market-data/live-derivatives-market", timeout=15)
+        time.sleep(1.0)
+        # Switch to API mode headers
+        s.headers.update({
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.nseindia.com/option-chain",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+        })
+    except Exception as exc:
+        logger.warning("NSE session seeding error: %s", exc)
     return s
 
 

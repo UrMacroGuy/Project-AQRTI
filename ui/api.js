@@ -312,6 +312,32 @@ const Api = {
   async stressTestPresets()              { return apiFetch('/stress-test/presets'); },
   async optionsChain(sym = 'NIFTY', expiryOffset = 0) { return apiFetch('/options-intelligence/chain', { symbol: sym, expiry_offset: expiryOffset }); },
 
+  // ── Historical Backtest ────────────────────────────────────────
+  async runBacktest(strategyId = null, years = 2) {
+    const params = years !== 2 ? `?years=${years}` : '';
+    const path   = strategyId
+      ? `/paper-portfolio/backtest?strategy_id=${strategyId}${years !== 2 ? `&years=${years}` : ''}`
+      : `/paper-portfolio/backtest${params}`;
+    return apiPost(path);
+  },
+  async backtestStatus(strategyId = null) {
+    const path = strategyId
+      ? `/paper-portfolio/backtest/status?strategy_id=${strategyId}`
+      : '/paper-portfolio/backtest/status';
+    return apiFetch(path);
+  },
+
+  // ── Arena ──────────────────────────────────────────────────────
+  async arenaStatus()          { return apiFetch('/arena'); },
+  async arenaChampions()       { return apiFetch('/arena/champions'); },
+  async arenaRuns(limit = 100, status = 'all') {
+    return apiFetch('/arena/runs', { limit, status });
+  },
+  async arenaEquity(strategyId) { return apiFetch(`/arena/equity/${strategyId}`); },
+  async triggerArena()         { return apiPost('/arena/run'); },
+  async arenaPromote()         { return apiPost('/arena/promote'); },
+  async arenaNeedsReview()     { return apiFetch('/arena/needs-review'); },
+
   async checkBackend() {
     try {
       const res = await fetch('http://localhost:8000/health', { signal: AbortSignal.timeout(2000) });

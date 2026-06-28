@@ -304,3 +304,108 @@ def _to_dict(r: EarningsEvent) -> dict:
         "price_reaction_5d": r.price_reaction_5d,
         "result_status":     r.result_status,
     }
+
+
+def scrape_board_meetings(db: Session, days_ahead: int = 60) -> dict:
+    """
+    Scrape upcoming board meetings / results dates from NSE home-board-meetings API.
+    Seeds the earnings_events table with scheduled dates so the calendar shows data.
+    """
+    import requests as _req
+    today = date.today()
+
+    # This endpoint works without cookie seeding
+    session = _req.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Referer": "https://www.nseindia.com/",
+    })
+
+    try:
+        resp = session.get(
+            "https://www.nseindia.com/api/home-board-meetings",
+            params={"index": "equities"},
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Board meetings fetch failed: %s", exc)
+        return {"status": "error", "stored": 0, "error": str(exc)}
+    try:
+        data = resp.json()
+    except Exception:
+        return {"status": "error", "stored": 0, "error": "Invalid JSON from NSE board meetings"}
+
+    if not data:
+        return {"status": "error", "stored": 0, "error": "NSE board meetings API unavailable"}
+
+    rows = data if isinstance(data, list) else data.get("data", [])
+
+    RESULT_KEYWORDS = [
+        "financial result", "quarterly result", "annual result",
+        "q1", "q2", "q3", "q4", "results", "unaudited", "audited",
+        "half year", "financial statement", "consider and approve",
+    ]
+
+    stored = 0
+    skipped = 0
+    for item in rows:
+        purpose = (item.get("bm_purpose") or "").lower()
+        desc    = (item.get("bm_desc") or "").lower()
+        combined = purpose + " " + desc
+
+        if not any(kw in combined for kw in RESULT_KEYWORDS):
+            skipped += 1
+            continue
+
+        symbol = (item.get("bm_symbol") or "").upper().strip()
+        if not symbol:
+            continue
+
+        # Parse board meeting date
+        raw_date = item.get("bm_date") or ""
+        try:
+            earn_date = datetime.strptime(raw_date, "%d-%b-%Y").date()
+        except Exception:
+            continue
+
+        # Skip past dates beyond 7 days
+        if earn_date < today - timedelta(days=7):
+            continue
+
+        # Skip duplicates
+        existing = db.query(EarningsEvent).filter(
+            EarningsEvent.symbol        == symbol,
+            EarningsEvent.earnings_date == earn_date,
+        ).first()
+        if existing:
+            skipped += 1
+            continue
+
+        # Detect quarter from description
+        quarter = _infer_quarter(earn_date)
+        company = item.get("sm_name", "")[:120]
+
+        ev = EarningsEvent(
+            symbol        = symbol,
+            company_name  = company,
+            earnings_date = earn_date,
+            period        = "Quarterly",
+            quarter       = quarter,
+            result_status = "scheduled" if earn_date >= today else "declared",
+        )
+        db.add(ev)
+        stored += 1
+
+    try:
+        db.commit()
+        record_source_health(db, "earnings_board_meetings", "ok", records=stored)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Board meetings commit failed: %s", exc)
+
+    logger.info("Board meetings scraped: stored=%d skipped=%d", stored, skipped)
+    return {"status": "ok", "stored": stored, "skipped": skipped, "total_rows": len(rows)}

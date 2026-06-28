@@ -2230,3 +2230,60 @@ class P9ModeratorDecision(Base):
     reasoning             = Column(Text, nullable=True)
     decision_date         = Column(Date, nullable=False)
     created_at            = Column(DateTime, default=datetime.utcnow)
+
+
+# ══════════════════════════════════════════════════════════════
+# STRATEGY ARENA — Self-Learning Refinement Engine
+# ══════════════════════════════════════════════════════════════
+
+class ArenaRun(Base):
+    """
+    One row per strategy per arena refinement round.
+    Tracks the full self-learning loop: replay → grade → merge → repeat.
+    """
+    __tablename__ = "arena_runs"
+    __table_args__ = (
+        Index("ix_ar_strategy_id", "strategy_id"),
+        Index("ix_ar_status",      "status"),
+        Index("ix_ar_started_at",  "started_at"),
+    )
+
+    id                   = Column(Integer,    primary_key=True, autoincrement=True)
+    strategy_id          = Column(String(80), nullable=False)
+    strategy_name        = Column(String(120),nullable=True)
+    parent_strategy_id   = Column(String(80), nullable=True)   # original strategy this descends from
+    generation           = Column(Integer,    nullable=False, default=0)
+    round_number         = Column(Integer,    nullable=False, default=1)
+
+    # Replay results
+    total_return_pct     = Column(Float,      nullable=True)
+    max_drawdown_pct     = Column(Float,      nullable=True)
+    final_value          = Column(Float,      nullable=True)
+    total_trades         = Column(Integer,    nullable=True)
+    win_rate             = Column(Float,      nullable=True)
+    winning_days_count   = Column(Integer,    nullable=True)
+    losing_days_count    = Column(Integer,    nullable=True)
+
+    # Grading
+    passes_return_gate   = Column(Boolean,    nullable=True)   # return >= 120%
+    passes_drawdown_gate = Column(Boolean,    nullable=True)   # drawdown >= -25%
+    passes_winrate_gate  = Column(Boolean,    nullable=True)   # win_rate >= 52%
+    is_champion          = Column(Boolean,    default=False)   # passed all gates
+    needs_review         = Column(Boolean,    default=False)   # failed after max rounds
+
+    # Merge info
+    donor_strategy_id    = Column(String(80), nullable=True)
+    donor_strategy_name  = Column(String(120),nullable=True)
+    donor_coverage_pct   = Column(Float,      nullable=True)  # % of losing days donor covered
+
+    # Progress
+    status               = Column(String(20), nullable=False, default="pending")
+    # pending | running | champion | refining | needs_review | error
+    status_detail        = Column(Text,       nullable=True)
+    daily_results_json   = Column(Text,       nullable=True)  # JSON — sampled for UI
+    winning_days_json    = Column(Text,       nullable=True)
+    losing_days_json     = Column(Text,       nullable=True)
+
+    started_at           = Column(DateTime,   nullable=True)
+    completed_at         = Column(DateTime,   nullable=True)
+    created_at           = Column(DateTime,   default=datetime.utcnow)

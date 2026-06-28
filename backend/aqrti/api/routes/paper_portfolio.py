@@ -1,8 +1,10 @@
 """
 Paper Portfolio API
-GET /api/v1/paper-portfolio          — portfolio summary + open positions
-GET /api/v1/paper-portfolio/positions — open positions with live P&L
-GET /api/v1/paper-portfolio/allocation — current allocation view
+GET /api/v1/paper-portfolio                         — portfolio summary + open positions
+GET /api/v1/paper-portfolio/positions               — open positions with live P&L
+GET /api/v1/paper-portfolio/allocation              — current allocation view
+GET /api/v1/paper-portfolio/export/tradingview      — Pine Script for TradingView paper trading
+GET /api/v1/paper-portfolio/export/csv              — CSV of all open positions with SL/TP
 """
 
 from __future__ import annotations
@@ -132,6 +134,110 @@ def get_equity_curve_endpoint(
     }
 
 
+@router.post("/backtest")
+def run_historical_backtest(
+    strategy_id: str | None = None,
+    years: int = 2,
+    db: Session = Depends(get_db_dependency),
+):
+    """
+    Run a 2-year historical backtest for a strategy using the Arena replay engine.
+    If strategy_id is omitted, uses the highest-fitness active strategy.
+    Runs in a background thread — returns immediately with thread name.
+    """
+    import threading
+    _ensure_path()
+    from aqrti.database.models import StrategyV2
+
+    if strategy_id:
+        strat = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
+    else:
+        strat = db.query(StrategyV2).filter(
+            StrategyV2.status.in_(["active", "champion"]),
+            StrategyV2.fitness_score.isnot(None),
+            StrategyV2.dsl_json.isnot(None),
+        ).order_by(StrategyV2.fitness_score.desc()).first()
+
+    if not strat:
+        return {"status": "no_strategy", "message": "No active strategy found to backtest"}
+
+    sid   = strat.strategy_id
+    sname = strat.name
+
+    def _worker():
+        from aqrti.database.engine import get_db as _get_db
+        from arena.replay_engine import run_replay
+        import sys, os
+        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+        try:
+            with _get_db() as _db:
+                s = _db.query(StrategyV2).filter_by(strategy_id=sid).first()
+                if s:
+                    result = run_replay(_db, s, years=years, fresh=True)
+                    log.info("Backtest done: %s return=%.1f%% trades=%d",
+                             sname, result.get("total_return_pct", 0), result.get("total_trades", 0))
+        except Exception as exc:
+            log.error("Backtest failed for %s: %s", sname, exc)
+
+    t = threading.Thread(target=_worker, daemon=True, name=f"backtest-{sid[:8]}")
+    t.start()
+
+    return {
+        "status":      "started",
+        "strategy_id": sid,
+        "strategy_name": sname,
+        "years":       years,
+        "portfolio":   f"arena_{sid}",
+        "message":     f"Backtest running in background — results appear in arena_{sid} portfolio",
+        "thread":      t.name,
+    }
+
+
+@router.get("/backtest/status")
+def backtest_status(strategy_id: str | None = None, db: Session = Depends(get_db_dependency)):
+    """
+    Return backtest results for a strategy (from ArenaRun table).
+    If strategy_id omitted, returns top champion or latest run.
+    """
+    try:
+        from aqrti.database.models import ArenaRun, StrategyV2, PaperPortfolio, EquityCurvePoint
+
+        if strategy_id:
+            run = db.query(ArenaRun).filter_by(strategy_id=strategy_id).order_by(
+                ArenaRun.round_number.desc()).first()
+        else:
+            run = db.query(ArenaRun).filter(
+                ArenaRun.total_return_pct.isnot(None)
+            ).order_by(ArenaRun.total_return_pct.desc()).first()
+
+        if not run:
+            return {"available": False, "message": "No backtest results yet — trigger one first"}
+
+        portfolio_name = f"arena_{run.strategy_id}"
+        portfolio = db.query(PaperPortfolio).filter_by(portfolio_name=portfolio_name).first()
+        ec_count  = db.query(EquityCurvePoint).filter_by(portfolio_name=portfolio_name).count()
+
+        return {
+            "available":        True,
+            "strategy_id":      run.strategy_id,
+            "strategy_name":    run.strategy_name,
+            "total_return_pct": run.total_return_pct,
+            "max_drawdown_pct": run.max_drawdown_pct,
+            "win_rate":         run.win_rate,
+            "total_trades":     run.total_trades,
+            "is_champion":      run.is_champion,
+            "status":           run.status,
+            "round":            run.round_number,
+            "equity_days":      ec_count,
+            "completed_at":     str(run.completed_at) if run.completed_at else None,
+            "portfolio_value":  portfolio.total_value if portfolio else None,
+        }
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+
+
 @router.post("/backfill-equity")
 def backfill_equity_curve(db: Session = Depends(get_db_dependency)):
     """
@@ -220,3 +326,132 @@ def get_allocation(
     _ensure_path()
     from portfolio.portfolio_builder import get_allocation_view
     return get_allocation_view(db, method=method)
+
+
+@router.get("/export/tradingview")
+def export_tradingview(db: Session = Depends(get_db_dependency)):
+    """
+    Generate a TradingView Pine Script v5 that replicates all open paper positions.
+    Each position becomes a strategy.entry() + strategy.exit() with SL and TP.
+    Returns the .pine file as a downloadable attachment.
+    """
+    from fastapi.responses import Response
+    from datetime import date as _date
+    _ensure_path()
+    from paper_trading.paper_trade import get_open_positions
+
+    positions = get_open_positions(db)
+
+    lines = [
+        '//@version=5',
+        f'// AQRTI Paper Portfolio Export — {_date.today()}',
+        f'// {len(positions)} open position(s)',
+        '// Paste this into TradingView Pine Editor → Add to chart → use Paper Trading mode',
+        '',
+        'strategy("AQRTI Paper Portfolio", overlay=true, default_qty_type=strategy.fixed,',
+        '         initial_capital=1000000, commission_type=strategy.commission.percent,',
+        '         commission_value=0.05, slippage=2)',
+        '',
+        '// ── Position entries (date-triggered, one candle window) ──',
+    ]
+
+    for i, p in enumerate(positions):
+        sym    = p["symbol"]
+        entry  = p["entryPrice"]
+        sl     = p["stopLoss"]
+        tp     = p["target"]
+        shares = p["shares"]
+        edate  = p["entryDate"]          # "YYYY-MM-DD"
+        strat  = (p.get("strategyName") or p.get("strategyId") or f"pos{i+1}").replace('"', '')
+        conf   = p.get("confidence", 0)
+        dirc   = p.get("direction", "Bullish")
+
+        # Convert entry date to timestamp check
+        try:
+            y, mo, d = edate.split("-")
+            date_check = f'year == {y} and month == {mo} and dayofmonth == {d}'
+        except Exception:
+            date_check = f'bar_index == {i}'
+
+        sl_pct  = round(abs(entry - sl) / entry * 100, 2) if entry else 8.0
+        tp_pct  = round(abs(tp - entry) / entry * 100, 2) if entry else 15.0
+
+        lines += [
+            '',
+            f'// ── {sym} | {strat} | conf={conf}% | {dirc} ──',
+            f'// Entry: ₹{entry}  |  SL: ₹{sl} (-{sl_pct}%)  |  TP: ₹{tp} (+{tp_pct}%)',
+            f'if ({date_check})',
+            f'    strategy.entry("NSE:{sym}_{i+1}", strategy.long, qty={int(max(shares, 1))},',
+            f'                   limit={entry}, comment="{strat[:40]}")',
+            f'    strategy.exit("NSE:{sym}_{i+1}_exit", from_entry="NSE:{sym}_{i+1}",',
+            f'                  stop={sl}, limit={tp})',
+        ]
+
+    pine_script = "\n".join(lines)
+
+    return Response(
+        content=pine_script,
+        media_type="text/plain",
+        headers={
+            "Content-Disposition": f'attachment; filename="aqrti_paper_portfolio_{_date.today()}.pine"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+@router.get("/export/csv")
+def export_csv(
+    include_closed: bool = Query(default=True),
+    days: int = Query(default=90, ge=1, le=365),
+    db: Session = Depends(get_db_dependency),
+):
+    """
+    Export trades in TradingView paper trading import format.
+    Columns: Symbol, Side, Qty, Fill Price, Commission, Closing Time
+    Open positions  → Buy row only (no Closing Time)
+    Closed trades   → Buy row + Sell row
+    Symbol format   → NSE:TICKER
+    """
+    from fastapi.responses import Response
+    from datetime import date as _date, timedelta
+    import csv, io
+    _ensure_path()
+    from paper_trading.paper_trade import get_open_positions, get_trade_history
+    from aqrti.database.models import PaperPosition, PaperTrade
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Symbol", "Side", "Qty", "Fill Price", "Commission", "Closing Time"])
+
+    # ── Open positions → Buy rows (no closing time = still open) ──
+    positions = get_open_positions(db)
+    for p in positions:
+        sym  = f"NSE:{p['symbol']}"
+        qty  = max(1, int(round(p["shares"])))
+        writer.writerow([sym, "Buy", qty, p["entryPrice"], "", p["entryDate"] + " 9:15:00"])
+
+    # ── Closed trades → Buy + Sell row pairs ──
+    if include_closed:
+        cutoff = _date.today() - timedelta(days=days)
+        trades = get_trade_history(db, limit=500)
+        for t in trades:
+            try:
+                if t.get("entryDate") and _date.fromisoformat(t["entryDate"]) < cutoff:
+                    continue
+            except Exception:
+                pass
+            sym  = f"NSE:{t['symbol']}"
+            qty  = max(1, int(round(t["shares"])))
+            entry_time = (t.get("entryDate") or str(_date.today())) + " 9:15:00"
+            exit_time  = (t.get("exitDate")  or str(_date.today())) + " 15:30:00"
+            writer.writerow([sym, "Buy",  qty, t["entryPrice"],            "", entry_time])
+            writer.writerow([sym, "Sell", qty, t.get("exitPrice") or t["entryPrice"], "", exit_time])
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="aqrti_tradingview_{_date.today()}.csv"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )

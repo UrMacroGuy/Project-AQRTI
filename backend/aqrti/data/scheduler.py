@@ -388,13 +388,23 @@ def _alert_check_job():
         scheduler_logger.error("Alert check failed: %s", exc)
 
 
+def _arena_job():
+    """Hourly arena cycle — auto-promote + self-learning refinement."""
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    try:
+        from arena.arena_engine import run_arena_cycle
+        run_arena_cycle()
+    except Exception as exc:
+        scheduler_logger.error("Arena job failed: %s", exc)
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler and _scheduler.running:
         return _scheduler
-
-    import os
-    lite_mode = os.environ.get("AQRTI_LITE_MODE", "0").strip() not in ("0", "false", "False", "")
 
     settings = get_settings()
     parts = settings.ingest_cron.split()
@@ -405,7 +415,7 @@ def start_scheduler() -> BackgroundScheduler:
 
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
-    # Daily full pipeline — runs once after NSE close (always enabled)
+    # Daily full pipeline — runs once after NSE close
     _scheduler.add_job(
         _daily_job,
         trigger=CronTrigger(
@@ -422,32 +432,31 @@ def start_scheduler() -> BackgroundScheduler:
         misfire_grace_time=3600,
     )
 
-    if not lite_mode:
-        # Hourly agent pipeline — disabled in lite mode to save RAM
-        _scheduler.add_job(
-            _hourly_agent_job,
-            trigger="interval",
-            hours=1,
-            id="hourly_agents",
-            name="Hourly Agent Pipeline",
-            replace_existing=True,
-            misfire_grace_time=600,
-            max_instances=1,
-        )
+    # Hourly agent pipeline
+    _scheduler.add_job(
+        _hourly_agent_job,
+        trigger="interval",
+        hours=1,
+        id="hourly_agents",
+        name="Hourly Agent Pipeline",
+        replace_existing=True,
+        misfire_grace_time=600,
+        max_instances=1,
+    )
 
-        # Continuous strategy loop — disabled in lite mode (biggest RAM user)
-        _scheduler.add_job(
-            _strategy_loop_job,
-            trigger="interval",
-            minutes=5,
-            id="strategy_loop",
-            name="Strategy Research Loop",
-            replace_existing=True,
-            misfire_grace_time=300,
-            max_instances=1,
-        )
+    # Continuous strategy loop — every 5 minutes
+    _scheduler.add_job(
+        _strategy_loop_job,
+        trigger="interval",
+        minutes=5,
+        id="strategy_loop",
+        name="Strategy Research Loop",
+        replace_existing=True,
+        misfire_grace_time=300,
+        max_instances=1,
+    )
 
-    # Fast alert check — always enabled, very lightweight
+    # Fast alert check — every 5 minutes, very lightweight
     _scheduler.add_job(
         _alert_check_job,
         trigger="interval",
@@ -459,14 +468,30 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
+    # Arena self-learning — runs every hour, non-blocking (spawns daemon thread)
+    _scheduler.add_job(
+        _arena_job,
+        trigger="interval",
+        hours=1,
+        id="arena_cycle",
+        name="Strategy Arena Self-Learning",
+        replace_existing=True,
+        misfire_grace_time=1800,
+        max_instances=1,
+    )
+
     _scheduler.start()
-    mode_label = "LITE (agents/strategy-loop disabled)" if lite_mode else "FULL"
+
+    # Kick off arena immediately on boot (non-blocking)
+    try:
+        from arena.arena_engine import run_arena_cycle
+        run_arena_cycle()
+        scheduler_logger.info("Arena cycle kicked off on boot")
+    except Exception as exc:
+        scheduler_logger.warning("Arena boot kick failed (non-fatal): %s", exc)
     scheduler_logger.info(
-        "Scheduler started [%s]. Daily cron: %s IST | Agents: %s | Strategy loop: %s",
-        mode_label,
+        "Scheduler started. Daily cron: %s IST | Agents: every 1 hr | Strategy loop: every 5 min",
         settings.ingest_cron,
-        "disabled" if lite_mode else "every 1 hr",
-        "disabled" if lite_mode else "every 5 min",
     )
     return _scheduler
 

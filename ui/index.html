@@ -158,6 +158,15 @@
         </li>
       </ul>
 
+      <div class="nav-group-label">ARENA</div>
+      <ul>
+        <li class="nav-item" data-page="arena">
+          <span class="nav-icon">⚔</span>
+          <span class="nav-label">Strategy Arena</span>
+          <span class="nav-badge accent" id="badge-arena">AUTO</span>
+        </li>
+      </ul>
+
       <div class="nav-group-label">CONTROL</div>
       <ul>
         <li class="nav-item" data-page="paper">
@@ -1314,6 +1323,10 @@
     ──────────────────────────────────────────────── -->
     <section class="page" id="page-model">
 
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 12px" onclick="hydrateModelCenter()">⟳ Refresh</button>
+      </div>
+
       <div class="kpi-row">
         <div class="kpi-card">
           <div class="kpi-label">Ensemble Accuracy (30d)</div>
@@ -1396,6 +1409,10 @@
          PAGE: LEARNING CENTER
     ──────────────────────────────────────────────── -->
     <section class="page" id="page-learning">
+
+      <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 12px" onclick="hydrateLearnCenter()">⟳ Refresh</button>
+      </div>
 
       <!-- KPI Row -->
       <div class="kpi-row">
@@ -1701,11 +1718,19 @@
         <span id="pp-strategy-badge" style="font-size:0.68rem;padding:4px 10px;background:rgba(255,140,0,0.1);border:1px solid rgba(255,140,0,0.3);border-radius:4px;color:var(--accent)">Loading strategy…</span>
       </div>
       <!-- Strategy-specific paper trading -->
-      <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center;flex-wrap:wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:9px 14px">
+      <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:9px 14px">
         <span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">Trade on specific strategy:</span>
         <input id="pp-strategy-id-input" type="text" placeholder="AQRTI_STR_XXXXXXXX" style="flex:1;min-width:220px;max-width:380px;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:5px 10px;color:var(--text);font-size:0.8rem;font-family:monospace" oninput="this.value=this.value.toUpperCase()" />
         <button class="panel-action-btn" style="padding:6px 14px;font-size:0.78rem" onclick="triggerPaperCycleForStrategy()">▶ Run for Strategy</button>
         <span id="pp-strategy-cycle-status" style="font-size:0.72rem;color:var(--text-muted)"></span>
+      </div>
+
+      <!-- Historical backtest bar -->
+      <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap;background:rgba(139,92,246,0.07);border:1px solid rgba(139,92,246,0.25);border-radius:6px;padding:9px 14px">
+        <span style="font-size:0.72rem;color:rgba(139,92,246,0.9);white-space:nowrap;font-weight:600">⚡ HISTORICAL BACKTEST</span>
+        <span style="font-size:0.72rem;color:var(--text-muted)">Run 2 years of history on best strategy — completes in the background, results appear in Strategy Arena tab</span>
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 14px;margin-left:auto" onclick="triggerBacktest()">▶ Run Backtest</button>
+        <div id="pp-backtest-status" style="font-size:0.72rem;color:var(--text-muted);min-width:200px"></div>
       </div>
 
       <!-- KPI Row -->
@@ -1774,6 +1799,16 @@
         <div class="panel-header">
           <span class="panel-title">Open Positions</span>
           <span class="panel-tag live-dot" id="pp-open-count">0 positions</span>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <button onclick="exportTradingViewPine()" title="Download Pine Script for TradingView Paper Trading" style="background:#1a73e8;color:#fff;border:none;border-radius:5px;padding:5px 13px;font-size:0.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              TradingView .pine
+            </button>
+            <button onclick="exportPositionsCSV()" title="Download positions as CSV with SL/TP" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:5px 13px;font-size:0.72rem;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+              Export CSV
+            </button>
+          </div>
         </div>
         <div class="panel-body" style="padding:0;overflow-x:auto">
           <table class="data-table compact" style="min-width:900px">
@@ -2709,6 +2744,174 @@
           </table>
         </div>
         <div id="di-pipeline-result" style="margin-top:10px;font-size:0.74rem;color:var(--text-secondary)"></div>
+      </div>
+
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- STRATEGY ARENA — autonomous self-learning refinement loop       -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <section class="page" id="page-arena">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Strategy Arena</div>
+          <div class="page-subtitle">Autonomous self-learning refinement loop — strategies replay 2 years of history, merge with donors, evolve toward champion</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-secondary" style="font-size:11px;padding:4px 12px" onclick="hydrateArena()">⟳ Refresh</button>
+          <button class="btn btn-primary"   style="font-size:11px;padding:4px 12px" onclick="triggerArenaRun()">▶ Run Cycle</button>
+        </div>
+      </div>
+
+      <!-- Status strip -->
+      <div class="kpi-strip" style="margin-bottom:20px">
+        <div class="kpi-card">
+          <div class="kpi-label">STATUS</div>
+          <div class="kpi-value" id="arena-status-label" style="font-size:1rem">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">STRATEGIES IN ARENA</div>
+          <div class="kpi-value" id="arena-total">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">RUNNING NOW</div>
+          <div class="kpi-value" id="arena-running">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">CHAMPIONS</div>
+          <div class="kpi-value accent" id="arena-champions-count">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">REFINING</div>
+          <div class="kpi-value" id="arena-refining">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">NEEDS REVIEW</div>
+          <div class="kpi-value alert" id="arena-needs-review">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">LAST CYCLE</div>
+          <div class="kpi-value" id="arena-last-cycle" style="font-size:0.78rem">—</div>
+        </div>
+      </div>
+
+      <!-- Champions table -->
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Champion Strategies</span>
+          <span class="badge accent" id="arena-champ-badge">0</span>
+        </div>
+        <div id="arena-champions-wrap">
+          <table class="data-table" id="arena-champions-table">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Generation</th>
+                <th>Return</th>
+                <th>Max DD</th>
+                <th>Win Rate</th>
+                <th>Trades</th>
+                <th>Round</th>
+                <th>Fitness</th>
+                <th>Achieved</th>
+              </tr>
+            </thead>
+            <tbody id="arena-champions-body">
+              <tr><td colspan="9" style="text-align:center;color:var(--text-secondary);padding:20px">Loading champions…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Arena run history -->
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Run History</span>
+          <select id="arena-filter-status" onchange="filterArenaRuns()" style="background:var(--bg-surface);border:1px solid var(--border);color:var(--text-primary);padding:3px 8px;border-radius:4px;font-size:0.75rem">
+            <option value="all">All</option>
+            <option value="champion">Champion</option>
+            <option value="refining">Refining</option>
+            <option value="needs_review">Needs Review</option>
+            <option value="running">Running</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="arena-runs-table">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Gen</th>
+                <th>Round</th>
+                <th>Status</th>
+                <th>Return</th>
+                <th>DD</th>
+                <th>Win%</th>
+                <th>Trades</th>
+                <th>Won Days</th>
+                <th>Lost Days</th>
+                <th>Donor</th>
+                <th>Coverage</th>
+                <th>Completed</th>
+              </tr>
+            </thead>
+            <tbody id="arena-runs-body">
+              <tr><td colspan="13" style="text-align:center;color:var(--text-secondary);padding:20px">Loading run history…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Needs-review strategies -->
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-header">Needs Human Review (exhausted 10 rounds)</div>
+        <div id="arena-review-wrap">
+          <p style="color:var(--text-secondary);font-size:0.8rem;padding:12px 0" id="arena-review-empty">None — all strategies still converging.</p>
+          <table class="data-table" id="arena-review-table" style="display:none">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Best Return</th>
+                <th>Win Rate</th>
+                <th>Losing Days Left</th>
+                <th>Rounds Done</th>
+              </tr>
+            </thead>
+            <tbody id="arena-review-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Equity curve for selected champion -->
+      <div class="card" id="arena-equity-card" style="display:none">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+          <span id="arena-equity-title">Equity Curve</span>
+          <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px" onclick="document.getElementById('arena-equity-card').style.display='none'">✕ Close</button>
+        </div>
+        <canvas id="arena-equity-chart" height="90"></canvas>
+      </div>
+
+      <!-- How it works -->
+      <div class="card" style="margin-top:18px;font-size:0.78rem;color:var(--text-secondary);line-height:1.7">
+        <div class="card-header">How the Arena Works</div>
+        <div style="padding:12px 0;display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">AUTO-PROMOTION GATE</div>
+            Promoted strategies with fitness ≥ 60 and win rate ≥ 55% are automatically activated and given ₹1,00,000 in an isolated arena portfolio.
+          </div>
+          <div>
+            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">2-YEAR REPLAY</div>
+            Each strategy is replayed over 2 years of real historical price data, trading with RSI + EMA signals, position sizing 10% per trade, max 8 open at once.
+          </div>
+          <div>
+            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">CHAMPION GATE</div>
+            To become a Champion: ≥ 120% total return, max drawdown ≥ −25%, win rate ≥ 52%. All three gates must pass.
+          </div>
+          <div>
+            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">SELF-LEARNING MERGE</div>
+            Failing strategies find a donor (strategy that profits on current's losing days). DSLs are merged — child must fix ≥ 50% of old losing days while retaining ≥ 70% of winning days. Repeats for 10 rounds.
+          </div>
+        </div>
       </div>
 
     </section>

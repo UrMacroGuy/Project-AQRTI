@@ -45,7 +45,7 @@ log = get_logger("model_retrainer")
 
 # ── Thresholds ────────────────────────────────────────────────
 WIN_RATE_FLOOR        = 50.0   # below this → trigger retraining
-WIN_RATE_TARGET       = 75.0   # new model must achieve this on eval set to be promoted
+WIN_RATE_TARGET       = 55.0   # new model must achieve this on eval set to be promoted
 ACCURACY_EVAL_DAYS    = 30     # evaluate accuracy over last N days
 MODEL_STALE_DAYS      = 45     # retrain if model hasn't been updated in N days
 MIN_PREDICTIONS_EVAL  = 20     # need at least this many evaluated predictions

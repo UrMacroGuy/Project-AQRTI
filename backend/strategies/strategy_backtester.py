@@ -505,16 +505,19 @@ def _should_enter(
 
     # Raise the bar in cautious regimes — but never block outright
     if regime == "SIDEWAYS":
-        effective_threshold += 3
+        effective_threshold += 2
     elif regime == "BEAR":
-        effective_threshold += 6
-    elif regime == "VOLATILE":
         effective_threshold += 4
+    elif regime == "VOLATILE":
+        effective_threshold += 3
 
     # Soft NIFTY-trend penalty: raises bar instead of hard block
-    # (hard block was cutting 48%+ of trading days in sideways markets)
     if nifty_trend == "DOWN":
-        effective_threshold += 5
+        effective_threshold += 3
+
+    # Hard cap: technical signals score 62–90; prevent threshold from
+    # choking off all entries when min_confidence is already high
+    effective_threshold = min(effective_threshold, 72.0)
 
     if signal["confidence"] < effective_threshold:
         return False
@@ -627,15 +630,38 @@ def backtest_strategy(
     nifty_ret_by_date: dict[date, float] = {r[0]: r[1] for r in nifty_rows if r[1] is not None}
     nifty_dates_sorted = sorted(nifty_ret_by_date.keys())
 
+    # Build a price-based regime map for all trading dates not in the DB
+    # Uses NIFTY returns: 20d trend + 20d volatility → BULL/BEAR/SIDEWAYS/VOLATILE
+    _all_nifty_dates = nifty_dates_sorted
+    def _price_regime(d: date) -> str:
+        past = [nifty_ret_by_date[nd] for nd in _all_nifty_dates if nd <= d][-20:]
+        if len(past) < 5:
+            return "BULL"
+        import statistics
+        mean_ret = sum(past) / len(past)
+        try:
+            vol = statistics.stdev(past)
+        except Exception:
+            vol = 0.0
+        avg_vol = 0.01  # ~1% daily vol baseline
+        if vol > avg_vol * 1.8:
+            return "VOLATILE"
+        if mean_ret > 0.002:    # avg daily +0.2% → BULL
+            return "BULL"
+        if mean_ret < -0.001:   # avg daily -0.1% → BEAR
+            return "BEAR"
+        return "SIDEWAYS"
+
     _regime_dates_sorted = sorted(regime_by_date.keys())
 
     def _regime_on(d: date) -> str:
-        """Regime on or before date d using bisect."""
+        """Regime on or before date d — DB first, price-based fallback."""
         import bisect
         idx = bisect.bisect_right(_regime_dates_sorted, d) - 1
         if idx >= 0:
             return regime_by_date[_regime_dates_sorted[idx]]
-        return "BULL"
+        # No DB entry: compute from NIFTY price history
+        return _price_regime(d)
 
     def _nifty_trend_on(d: date, lookback: int = 5) -> str:
         rets = [nifty_ret_by_date[nd] for nd in nifty_dates_sorted if nd <= d][-lookback:]

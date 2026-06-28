@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time as _time
 import sys, os
 backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if backend_dir not in sys.path:
@@ -13,6 +14,9 @@ from sqlalchemy.orm import Session
 from aqrti.database.engine import get_db_dependency
 
 router = APIRouter()
+
+_CACHE: dict = {}
+_CACHE_TTL = 120  # seconds — ranking scan is expensive, cache for 2 minutes
 
 
 @router.get("")
@@ -45,6 +49,11 @@ def get_ranking(
     task:       str = Query(default=None),
     db: Session = Depends(get_db_dependency),
 ):
+    cache_key = f"ranking_{days}_{model_name}_{task}"
+    cached = _CACHE.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
+
     from learning.feature_ranker import rank_features
     features = rank_features(db, model_name=model_name, task=task, days=days)
 
@@ -76,7 +85,9 @@ def get_ranking(
             for r in stats
         ]
 
-    return {"features": features, "days": days}
+    result = {"features": features, "days": days}
+    _CACHE[cache_key] = {"ts": _time.time(), "data": result}
+    return result
 
 
 @router.get("/decay")

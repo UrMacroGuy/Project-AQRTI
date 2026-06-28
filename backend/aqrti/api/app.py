@@ -124,66 +124,61 @@ def _run_boot_sequence():
         _boot_step("sentiment", "error", str(e))
         api_logger.error("Boot step 4 — Sentiment failed: %s", e)
 
-    # Step 5 — Predictions
+    # Step 5 — Predictions (skip if today's predictions already exist)
     _boot_step("predictions", "running")
     try:
-        from ml.prediction_pipeline import run_prediction_pipeline
-        r = run_prediction_pipeline()
-        _boot_step("predictions", "done", f"written={r.get('predictions_written',0)}")
-        api_logger.info("Boot step 5 — Predictions: written=%d", r.get("predictions_written", 0))
+        from datetime import date as _date
+        from aqrti.database.engine import get_db as _get_db
+        from aqrti.database.models import Prediction as _Pred
+        with _get_db() as _db:
+            _today_count = _db.query(_Pred).filter(_Pred.date == _date.today()).count()
+        if _today_count >= 10:
+            _boot_step("predictions", "done", f"cached={_today_count} (skipped re-run)")
+            api_logger.info("Boot step 5 — Predictions: %d already exist for today, skipping", _today_count)
+        else:
+            from ml.prediction_pipeline import run_prediction_pipeline
+            r = run_prediction_pipeline()
+            _boot_step("predictions", "done", f"written={r.get('predictions_written',0)}")
+            api_logger.info("Boot step 5 — Predictions: written=%d", r.get("predictions_written", 0))
     except Exception as e:
         _boot_step("predictions", "error", str(e))
         api_logger.error("Boot step 5 — Predictions failed: %s", e)
 
-    # Step 6 — Paper Trading
+    # Step 6 — Paper Trading (skip if already ran today)
     _boot_step("paper_trading", "running")
     try:
-        from paper_trading.paper_engine import run_paper_trading_cycle
-        r = run_paper_trading_cycle()
-        _boot_step("paper_trading", "done",
-                   f"opened={len(r.get('opened',[]))} value={r.get('portfolioValue',0):.0f}")
-        api_logger.info("Boot step 6 — Paper trading: opened=%d value=%.2f",
-                        len(r.get("opened", [])), r.get("portfolioValue", 0))
+        from datetime import date as _date2
+        from aqrti.database.engine import get_db as _get_db2
+        from aqrti.database.models import PaperTrade as _PT
+        with _get_db2() as _db2:
+            _pt_today = _db2.query(_PT).filter(_PT.entry_date == _date2.today()).count()
+        if _pt_today > 0:
+            _boot_step("paper_trading", "done", f"already ran today ({_pt_today} trades)")
+            api_logger.info("Boot step 6 — Paper trading: skipped, already ran today")
+        else:
+            from paper_trading.paper_engine import run_paper_trading_cycle
+            r = run_paper_trading_cycle()
+            _boot_step("paper_trading", "done",
+                       f"opened={len(r.get('opened',[]))} value={r.get('portfolioValue',0):.0f}")
+            api_logger.info("Boot step 6 — Paper trading: opened=%d value=%.2f",
+                            len(r.get("opened", [])), r.get("portfolioValue", 0))
     except Exception as e:
         _boot_step("paper_trading", "error", str(e))
         api_logger.error("Boot step 6 — Paper trading failed: %s", e)
 
-    # Step 7 — Agent Pipeline
-    _boot_step("agents", "running")
-    try:
-        from aqrti.database.engine import get_session_factory
-        from agents.agent_scheduler import run_daily_pipeline
-        _db = get_session_factory()()
-        try:
-            r = run_daily_pipeline(_db)
-            _db.commit()
-            _boot_step("agents", "done", f"follow_ups={r.get('follow_ups_run',0)}")
-            api_logger.info("Boot step 7 — Agents complete.")
-        finally:
-            _db.close()
-    except Exception as e:
-        _boot_step("agents", "error", str(e))
-        api_logger.error("Boot step 7 — Agents failed: %s", e)
+    # Step 7 — Agent Pipeline (skip on boot — scheduler runs this every hour)
+    _boot_step("agents", "done", "deferred to hourly scheduler")
+    api_logger.info("Boot step 7 — Agents: deferred to hourly scheduler")
 
-    # Step 8 — Strategy Research
-    _boot_step("strategy_research", "running")
-    try:
-        from strategies.strategy_research_loop import run_daily_strategy_research
-        r = run_daily_strategy_research(generate_n=50, evolve_n=20)
-        snap = r.get("steps", {}).get("snapshot", {})
-        _boot_step("strategy_research", "done",
-                   f"total={snap.get('total',0)} active={snap.get('active_count',0)}")
-        api_logger.info("Boot step 8 — Strategy research: population=%d active=%d",
-                        snap.get("total", 0), snap.get("active_count", 0))
-    except Exception as e:
-        _boot_step("strategy_research", "error", str(e))
-        api_logger.error("Boot step 8 — Strategy research failed: %s", e)
+    # Step 8 — Strategy Research (skip on boot — scheduler runs this every 5 min)
+    _boot_step("strategy_research", "done", "deferred to 5-min scheduler")
+    api_logger.info("Boot step 8 — Strategy research: deferred to 5-min scheduler")
 
-    # Step 9 — Learning Loop (runs with backfilled actual_return now available)
+    # Step 9 — Learning Loop (lightweight — just scoring, not full retrain)
     _boot_step("learning", "running")
     try:
         from learning.learning_loop import run_daily_learning
-        r = run_daily_learning(days=30)   # 30-day window so backfilled outcomes are used
+        r = run_daily_learning(days=7)
         score = r.get("steps", {}).get("knowledge_score", {}).get("overall_score", 0)
         filled = r.get("steps", {}).get("prediction_backfill", {}).get("filled", 0)
         _boot_step("learning", "done", f"score={score:.1f} backfilled={filled}")
@@ -334,6 +329,7 @@ def create_app() -> FastAPI:
     from aqrti.api.routes import champion_challenger as champion_challenger_router
     from aqrti.api.routes import uncertainty as uncertainty_router
     from aqrti.api.routes import multi_agent as multi_agent_router
+    from aqrti.api.routes import arena as arena_router
     # ── Routes ───────────────────────────────────────────────────
     PREFIX = "/api/v1"
 
@@ -400,6 +396,9 @@ def create_app() -> FastAPI:
     app.include_router(champion_challenger_router.router, prefix=f"{PREFIX}/champion-challenger", tags=["Champion Challenger"])
     app.include_router(uncertainty_router.router,         prefix=f"{PREFIX}/uncertainty",         tags=["Uncertainty"])
     app.include_router(multi_agent_router.router,         prefix=f"{PREFIX}/multi-agent",         tags=["Multi Agent"])
+
+    # ── Phase 10: Strategy Arena — autonomous self-learning loop ──
+    app.include_router(arena_router.router,               prefix=f"{PREFIX}/arena",               tags=["Arena"])
 
     # ── System Status (boot progress) ────────────────────────────
     @app.get("/api/v1/system/status", tags=["System"])

@@ -30,7 +30,7 @@ log = get_logger("strategy_lifecycle")
 PROMOTE_THRESHOLD  = 35.0    # fitness score required for promotion (0–100 scale)
 RETIRE_THRESHOLD   = 8.0     # fitness below this → retirement candidate
 DRAWDOWN_LIMIT     = -9999.0 # disabled — cumsum MDD metric is unreliable (divide-by-near-zero artifact)
-MIN_TRADES         = 30      # minimum backtest trades before promotion
+MIN_TRADES         = 500     # minimum backtest trades before promotion
 MIN_WIN_RATE       = 55.0    # minimum win rate % required for promotion and paper trading
 PAPER_WIN_RATE     = 55.0    # paper trading gate — only strategies >= this go live
 
@@ -158,6 +158,9 @@ def run_lifecycle_sweep(db: Session) -> dict:
         .all()
     )
     for s in at_risk:
+        # Don't retire a strategy that hasn't completed a full backtest yet
+        if (s.trade_count or 0) < MIN_TRADES:
+            continue
         reason = None
         detail = ""
         if (s.fitness_score or 100) < RETIRE_THRESHOLD:

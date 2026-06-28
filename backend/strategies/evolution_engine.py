@@ -40,8 +40,8 @@ log = get_logger("evolution_engine")
 TOURNAMENT_SIZE    = 5      # tournament selection pool size (larger = more selection pressure)
 MUTATION_RATE      = 0.65   # 65% of offspring are mutations
 CROSSOVER_RATE     = 0.35   # 35% are crossovers
-MIN_PARENT_FITNESS = 15.0   # lowered to match realistic fitness range
-BACKTEST_DAYS      = 1095   # 3 year backtest window → ~756 trading days for 500+ trades
+MIN_PARENT_FITNESS = 15.0   # minimum fitness to be eligible as an evolution parent
+BACKTEST_DAYS      = 1095   # 3-year window gives strategies enough trades to hit 500
 
 
 def _tournament_select(
@@ -111,7 +111,7 @@ def evolve_population(
     parents = (
         db.query(StrategyV2)
         .filter(
-            StrategyV2.trade_count    >= 3,
+            StrategyV2.trade_count    >= 500,
             StrategyV2.fitness_score  >= MIN_PARENT_FITNESS,
             StrategyV2.dsl_json.isnot(None),
             StrategyV2.family.isnot(None),

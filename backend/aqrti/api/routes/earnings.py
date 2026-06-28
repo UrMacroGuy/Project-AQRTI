@@ -16,12 +16,32 @@ from aqrti.database.engine import get_db_dependency
 router = APIRouter()
 
 
+def _auto_scrape_if_empty(db: Session, days_ahead: int = 30) -> None:
+    """If earnings_events table is empty, scrape NSE board meetings automatically."""
+    from aqrti.database.models import EarningsEvent
+    from datetime import date, timedelta
+    count = db.query(EarningsEvent).count()
+    if count == 0:
+        try:
+            from data_supremacy.earnings_scraper import scrape_earnings, scrape_board_meetings
+            from_date = date.today() - timedelta(days=30)
+            to_date   = date.today() + timedelta(days=days_ahead)
+            try:
+                scrape_board_meetings(db, days_ahead=days_ahead)
+            except Exception:
+                pass
+            scrape_earnings(db, from_date=from_date, to_date=to_date)
+        except Exception:
+            pass
+
+
 @router.get("/calendar")
 def earnings_calendar(
-    days_ahead: int = Query(default=14, ge=1, le=60),
+    days_ahead: int = Query(default=30, ge=1, le=90),
     db: Session = Depends(get_db_dependency),
 ):
     from data_supremacy.earnings_scraper import get_earnings_calendar
+    _auto_scrape_if_empty(db, days_ahead=days_ahead)
     return {"calendar": get_earnings_calendar(db, days_ahead=days_ahead)}
 
 
@@ -50,8 +70,15 @@ def trigger_scrape(
     days: int = Query(default=30, ge=1, le=90),
     db: Session = Depends(get_db_dependency),
 ):
-    from data_supremacy.earnings_scraper import scrape_earnings
+    from data_supremacy.earnings_scraper import scrape_earnings, scrape_board_meetings
     from datetime import date, timedelta
-    to_date   = date.today()
-    from_date = to_date - timedelta(days=days)
-    return scrape_earnings(db, from_date=from_date, to_date=to_date)
+    to_date   = date.today() + timedelta(days=days)
+    from_date = date.today() - timedelta(days=30)
+    bm = {}
+    try:
+        bm = scrape_board_meetings(db, days_ahead=days)
+    except Exception:
+        pass
+    result = scrape_earnings(db, from_date=from_date, to_date=to_date)
+    result["board_meetings"] = bm
+    return result

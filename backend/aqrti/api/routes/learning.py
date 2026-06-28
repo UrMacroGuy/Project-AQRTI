@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import sys
+import time as _time
+
+_CACHE: dict = {}
+_CACHE_TTL   = 60  # seconds
 import os
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -28,6 +32,11 @@ def get_learning(
     db: Session = Depends(get_db_dependency),
 ):
     """Main learning overview: intelligence score + failure summary + events."""
+    cache_key = f"learning_{days}"
+    cached = _CACHE.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
+
     try:
         from learning.knowledge_score import get_latest_score, get_score_history
         latest  = get_latest_score(db) or {}
@@ -67,7 +76,7 @@ def get_learning(
         for f in sorted(failures, key=lambda x: x.failure_date, reverse=True)[:20]
     ]
 
-    return {
+    result = {
         "intelligenceScore":    latest.get("overall_score", 0.0),
         "scoreDelta":           latest.get("score_delta", 0.0),
         "scoreHistory":         history,
@@ -98,6 +107,8 @@ def get_learning(
         ],
         "days":                 days,
     }
+    _CACHE[cache_key] = {"ts": _time.time(), "data": result}
+    return result
 
 
 @router.post("/run")

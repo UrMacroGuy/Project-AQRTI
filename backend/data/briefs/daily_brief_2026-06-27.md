@@ -1,0 +1,65 @@
+# AQRTI Daily Intelligence Brief — 2026-06-27
+**Regime:** SIDEWAYS  |  **Knowledge Score:** 64.95
+
+## Market Summary
+Regime: SIDEWAYS. Market: SIDEWAYS (conf=55%). 5 findings. News research: 8 findings. 73 articles today. [!] High-impact events detected. [!] Regime change detected: Best for SIDEWAYS: QualMom_return_2_7.23 (regime Sharpe=0.00)
+
+## Top Opportunities
+- news_research: Sector Themes: Banking leading, Banking under pressure
+- market_research: Sector Rotation: Pharma leading (+3.3%), Metal lagging (-5.1%)
+- news_research: Sector Themes: Banking leading, Banking under pressure
+- market_research: Sector Rotation: Pharma leading (+3.3%), Metal lagging (-5.1%)
+- news_research: Sector Themes: Banking leading, Banking under pressure
+
+## Major Risks
+- [HIGH] news_research: Top Market News (85 stories today)
+- [HIGH] news_research: ALERT [Market]: [PFOCUS] Acquisition
+- [HIGH] news_research: ALERT [NESTLEIND]: Q1 earnings preview: Here’s what Nomura expects from Nestle, Titan, other consumer majors’ June quar
+- [HIGH] news_research: ALERT [RELIANCE]: Sebi rejects Anil Ambani's Reliance Infra settlement application
+- [HIGH] news_research: ALERT [Market]: Fidelity Investments buys 2 pc stake in Lodha Developers for Rs 1,864 crore
+- [HIGH] market_research: Elevated Market Volatility: 1292.7% annualised
+- [HIGH] news_research: Top Market News (82 stories today)
+- [HIGH] news_research: ALERT [Market]: [PFOCUS] Acquisition
+
+## Model Insights
+- Low Win Rate in Performance Snapshot: 0.0% — Overall win rate from performance snapshot is 0.0% (target ≥55%).
+- Auto-Retrain Triggered: new model v15 accuracy=0.518 — Model retrained automatically. Trigger: no_active_model. New model: catboost v15 accuracy=0.518. Elapsed: 197.7s.
+- Best Active Model: catboost/direction — 52.2% (Poor) — Highest-performing active model is catboost (task=direction), primary metric=52.2%.
+- Low Win Rate in Performance Snapshot: 0.0% — Overall win rate from performance snapshot is 0.0% (target ≥55%).
+- Best Active Model: catboost/direction — 52.2% (Poor) — Highest-performing active model is catboost (task=direction), primary metric=52.2%.
+
+## Strategy Insights
+- Decay Alert: 32 strategies fitness 20–35: Momentum_momentum_10d_1.5(24), Sentiment_GT57.3(25), Sentiment_GT68.3(27) — 32 strategies in the danger zone (fitness 20–35). Top culprits: Momentum_momentum_10d_1.5(24), Sentiment_GT57.3(25), Sen
+- Evolution (30d): 1 ops, 0% positive, avg delta=-5.0 — 30-day evolution stats: 0 mutations, 0 crossovers, 0 retirements. 0 improved (0%), 1 worsened. Best operation: 'mutation
+- Decay Alert: 30 strategies fitness 20–35: Momentum_momentum_10d_1.5(24), Sentiment_GT57.3(25), Sentiment_GT68.3(27) — 30 strategies in the danger zone (fitness 20–35). Top culprits: Momentum_momentum_10d_1.5(24), Sentiment_GT57.3(25), Sen
+- Evolution (30d): 1 ops, 0% positive, avg delta=-5.0 — 30-day evolution stats: 0 mutations, 0 crossovers, 0 retirements. 0 improved (0%), 1 worsened. Best operation: 'mutation
+- Decay Alert: 30 strategies fitness 20–35: Momentum_momentum_10d_1.5(24), Sentiment_GT57.3(25), Sentiment_GT68.3(27) — 30 strategies in the danger zone (fitness 20–35). Top culprits: Momentum_momentum_10d_1.5(24), Sentiment_GT57.3(25), Sen
+
+## Research Findings
+- news_research: Top Market News (85 stories today)
+- news_research: ALERT [Market]: [PFOCUS] Acquisition
+- news_research: ALERT [NESTLEIND]: Q1 earnings preview: Here’s what Nomura expects from Nestle, Titan, other consumer majors’ June quar
+- news_research: ALERT [RELIANCE]: Sebi rejects Anil Ambani's Reliance Infra settlement application
+- news_research: ALERT [Market]: Fidelity Investments buys 2 pc stake in Lodha Developers for Rs 1,864 crore
+- market_research: Elevated Market Volatility: 1292.7% annualised
+- news_research: Top Market News (82 stories today)
+- news_research: ALERT [Market]: [PFOCUS] Acquisition
+- news_research: ALERT [NESTLEIND]: Q1 earnings preview: Here’s what Nomura expects from Nestle, Titan, other consumer majors’ June quar
+- news_research: ALERT [RELIANCE]: Sebi rejects Anil Ambani's Reliance Infra settlement application
+
+## Lessons Learned
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
+- [model] Model retrained (win_rate=N/A) in SIDEWAYS regime
+
+## Action Items (Human Review Required)
+- [REVIEW]: Top Market News (85 stories today)
+- [REVIEW]: ALERT [Market]: [PFOCUS] Acquisition
+- [REVIEW]: ALERT [NESTLEIND]: Q1 earnings preview: Here’s what Nomura expects from Nestle, Titan, other consumer majors’ June quar
+- [REVIEW]: ALERT [RELIANCE]: Sebi rejects Anil Ambani's Reliance Infra settlement application
+- [REVIEW]: ALERT [Market]: Fidelity Investments buys 2 pc stake in Lodha Developers for Rs 1,864 crore
+- [REVIEW]: Elevated Market Volatility: 1292.7% annualised
+
+---
+_Generated by AQRTI CRO Agent at 2026-06-27T14:05:42.870822_
