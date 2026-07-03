@@ -43,9 +43,6 @@ def _compute_ic_for_feature(
     """
     from scipy.stats import spearmanr
 
-    cutoff = date.today().__class__.today().__class__.fromisoformat(
-        str(date.today())
-    )
     from datetime import timedelta
     cutoff = date.today() - timedelta(days=days)
 

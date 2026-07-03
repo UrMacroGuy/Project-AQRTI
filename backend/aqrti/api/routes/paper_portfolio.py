@@ -152,11 +152,22 @@ def run_historical_backtest(
     if strategy_id:
         strat = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
     else:
+        # Prefer an arena champion among human-approved active strategies;
+        # "champion" now lives in arena_status, not status (status="champion"
+        # was removed 2026-07-03 to stop the arena silently colliding with
+        # strategy_lifecycle.py's state machine — see arena/arena_engine.py).
         strat = db.query(StrategyV2).filter(
-            StrategyV2.status.in_(["active", "champion"]),
+            StrategyV2.status == "active",
+            StrategyV2.arena_status == "champion",
             StrategyV2.fitness_score.isnot(None),
             StrategyV2.dsl_json.isnot(None),
         ).order_by(StrategyV2.fitness_score.desc()).first()
+        if not strat:
+            strat = db.query(StrategyV2).filter(
+                StrategyV2.status == "active",
+                StrategyV2.fitness_score.isnot(None),
+                StrategyV2.dsl_json.isnot(None),
+            ).order_by(StrategyV2.fitness_score.desc()).first()
 
     if not strat:
         return {"status": "no_strategy", "message": "No active strategy found to backtest"}

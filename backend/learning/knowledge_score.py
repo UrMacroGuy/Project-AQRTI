@@ -105,9 +105,8 @@ def record_daily_score(db: Session, days: int = 30) -> KnowledgeScore:
     scores = compute_intelligence_score(db, days)
 
     # Delta vs yesterday
-    yesterday = today - timedelta(days=1)
-    prev      = db.query(KnowledgeScore).filter(KnowledgeScore.date >= yesterday - timedelta(days=3)).order_by(KnowledgeScore.date.desc()).first()
-    delta     = round(scores["overall"] - prev.overall_score, 2) if prev else 0.0
+    prev  = db.query(KnowledgeScore).filter(KnowledgeScore.date < today).order_by(KnowledgeScore.date.desc()).first()
+    delta = round(scores["overall"] - prev.overall_score, 2) if prev else 0.0
 
     # Event counts
     cutoff       = today - timedelta(days=days)

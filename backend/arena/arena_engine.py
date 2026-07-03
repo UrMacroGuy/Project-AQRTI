@@ -4,14 +4,34 @@ Strategy Arena Engine
 The main self-learning loop. Runs every time the backend starts and every hour.
 
 Full loop per strategy:
-  1. Auto-promote strategies: promoted + fitness>60 → active
-  2. Create isolated portfolio (arena_{strategy_id}) with ₹1,00,000
-  3. Replay 2 years of historical data
-  4. Grade: 120% return + <25% drawdown + >52% win rate → CHAMPION
-  5. If not champion: find donor (best strategy on losing days)
-  6. Merge current + donor → child strategy
-  7. Replay child — must fix old losing days AND keep old winning days (Option B)
-  8. Repeat up to MAX_ROUNDS (10). If still not champion → "needs_review"
+  1. Read strategies eligible for arena entry (promoted/active — no status
+     mutation happens here; human approval remains the only path to "active",
+     see auto_promote_strategies below).
+  2. Create isolated portfolio (arena_{strategy_id}) with ₹1,00,000.
+  3. Replay TRAIN_YEARS of historical data (in-sample) + hold out the most
+     recent OOS_MONTHS as an out-of-sample window the strategy never trains
+     against.
+  4. Grade IN-SAMPLE: 120% return + <25% drawdown + >52% win rate, AND
+     >= MIN_CHAMPION_TRADES trades, AND regime-stratified robustness
+     (no single regime bucket can be net-negative if it has enough trades
+     to be meaningful) -> passes in-sample gate.
+  5. Grade OUT-OF-SAMPLE on the held-out window with looser but still
+     required thresholds (OOS_MIN_WIN_RATE, OOS_MIN_RETURN_PCT) -> only
+     strategies proving themselves on unseen data become CHAMPION.
+  6. If not champion: find donor (best strategy on losing days).
+  7. Merge current + donor -> child strategy.
+  8. Replay child — must fix old losing days AND keep old winning days
+     (Option B), and pass the same in-sample + OOS double gate.
+  9. Repeat up to MAX_ROUNDS (10). If still not champion -> "needs_review".
+
+Arena state (champion/refining/needs_review) is tracked in the dedicated
+StrategyV2.arena_status / arena_rounds columns — NEVER in StrategyV2.status,
+which is owned exclusively by strategy_lifecycle.py's state machine
+(candidate -> shadow -> promoted -> active -> retired). A prior version of
+this module wrote "champion"/"needs_review" directly into .status and had
+auto_promote_strategies() silently move promoted -> active without human
+approval or the paper-trading quarantine; both were safety bugs, fixed
+2026-07-03.
 
 Runs in background thread — non-blocking, progress tracked in ArenaRun table.
 """
@@ -22,7 +42,7 @@ import json
 import threading
 import sys
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,10 +58,24 @@ log = get_logger("arena_engine")
 # ── Constants ──────────────────────────────────────────────────
 MAX_ROUNDS          = 10
 MIN_FITNESS_TO_ENTER = 60.0   # promoted strategy must have fitness >= 60
-MIN_WIN_RATE        = 55.0    # % — backtest win rate gate for auto-promote
-TARGET_RETURN_PCT   = 120.0   # % — champion gate
+MIN_WIN_RATE        = 55.0    # % — backtest win rate gate for arena eligibility
+TARGET_RETURN_PCT   = 120.0   # % — champion gate (in-sample)
 MAX_DRAWDOWN_GATE   = -25.0   # % — champion gate (must be better than -25%)
-MIN_WIN_RATE_GATE   = 52.0    # % — champion gate on replay
+MIN_WIN_RATE_GATE   = 52.0    # % — champion gate on in-sample replay
+MIN_CHAMPION_TRADES = 30      # floor — a handful of lucky trades must not crown a champion
+
+# ── Out-of-sample validation (the arena previously had none at all) ────
+REPLAY_YEARS   = 2      # total historical window replayed
+OOS_MONTHS     = 6      # trailing slice held out as the OOS test
+OOS_MIN_TRADES = 8      # minimum trades in the OOS window to grade it at all
+OOS_MIN_WIN_RATE   = 48.0   # % — looser than in-sample (small-sample OOS window)
+OOS_MIN_RETURN_PCT = 0.0    # OOS must at least be net non-negative
+
+# ── Regime-stratified robustness (previously grading was regime-blind) ──
+MIN_TRADES_PER_REGIME_TO_JUDGE = 5   # only judge a regime bucket with enough trades
+MAX_NEGATIVE_REGIME_BUCKETS    = 0   # champion must not be net-negative in ANY
+                                     # sufficiently-sampled regime (0 = zero tolerance)
+
 _arena_lock         = threading.Lock()
 _running            = False
 
@@ -52,9 +86,22 @@ _running            = False
 
 def auto_promote_strategies(db) -> list[str]:
     """
-    Promote strategies from 'promoted' → 'active' automatically.
-    Gates: fitness >= MIN_FITNESS_TO_ENTER AND win_rate >= MIN_WIN_RATE.
-    Returns list of strategy_ids that were activated.
+    Flag strategies eligible for arena entry — DOES NOT change status.
+
+    Previously this moved 'promoted' -> 'active' automatically, which
+    silently bypassed the human-approval gate that strategy_lifecycle.py
+    explicitly documents as required before a strategy reaches 'active'
+    ("AQRTI can only reach 'promoted'" — strategy_lifecycle.py class
+    docstring) and before the paper-trading quarantine
+    (promotion_config.QUARANTINE_*, enforced in
+    aqrti/api/routes/strategies.py's /activate endpoint) is satisfied. A
+    strategy that never ran a single day of forward-tested paper trading
+    could reach 'active' purely by clearing two in-sample backtest numbers.
+
+    The arena now only READS 'promoted' + already-human-approved 'active'
+    strategies to decide who is eligible to enter arena rounds; it never
+    performs the status transition itself. Returns the eligible strategy_ids
+    (for logging/visibility), no DB write.
     """
     promoted = db.query(StrategyV2).filter(
         StrategyV2.status == "promoted",
@@ -62,45 +109,98 @@ def auto_promote_strategies(db) -> list[str]:
         StrategyV2.dsl_json.isnot(None),
     ).all()
 
-    activated = []
-    for s in promoted:
-        if (s.win_rate or 0) < MIN_WIN_RATE:
-            continue
-        s.status        = "active"
-        s.status_reason = "auto_promoted_by_arena"
-        s.promoted_at   = datetime.utcnow()
-        activated.append(s.strategy_id)
-        log.info("Auto-promoted: %s (fitness=%.1f win=%.0f%%)",
-                 s.name, s.fitness_score or 0, s.win_rate or 0)
-
-    if activated:
-        db.commit()
-    return activated
+    eligible = [s.strategy_id for s in promoted if (s.win_rate or 0) >= MIN_WIN_RATE]
+    if eligible:
+        log.info("Arena-eligible (still awaiting human /activate approval): %d strategies", len(eligible))
+    return eligible
 
 
 # ══════════════════════════════════════════════════════════════
 # GRADING
 # ══════════════════════════════════════════════════════════════
 
+def _grade_regime_robustness(regime_buckets: dict) -> dict:
+    """
+    A strategy that makes all its money in one regime and bleeds in every
+    other well-sampled regime is not robust — it's a lucky fit to whichever
+    regime dominated the replay window. Only judge buckets with enough days
+    to be meaningful (MIN_TRADES_PER_REGIME_TO_JUDGE, reusing the same floor
+    concept as trade-count elsewhere); a regime that barely occurred in the
+    window doesn't get to veto a champion.
+    """
+    negative_regimes = [
+        reg for reg, b in regime_buckets.items()
+        if b["days"] >= MIN_TRADES_PER_REGIME_TO_JUDGE and b["net_pnl"] < 0
+    ]
+    judged_regimes = [
+        reg for reg, b in regime_buckets.items()
+        if b["days"] >= MIN_TRADES_PER_REGIME_TO_JUDGE
+    ]
+    passes = len(negative_regimes) <= MAX_NEGATIVE_REGIME_BUCKETS
+    return {
+        "passes_robustness_gate": passes,
+        "judged_regimes":         judged_regimes,
+        "negative_regimes":       negative_regimes,
+    }
+
+
 def _grade_replay(replay_result: dict) -> dict:
-    """Check if a replay result passes the champion gates."""
+    """
+    Check if a replay result passes the champion gates.
+
+    Grading is now IN-SAMPLE + OUT-OF-SAMPLE + regime-robustness, not just a
+    single in-sample number. A strategy that clears the in-sample return/
+    drawdown/win-rate bar on lucky/overfit trades will fail either the OOS
+    check (unseen recent data) or the regime-robustness check (concentrated
+    in one regime) — both were previously entirely absent from this gate.
+    """
     ret   = replay_result.get("total_return_pct", 0.0)
     dd    = replay_result.get("max_drawdown_pct", -100.0)
     wr    = replay_result.get("win_rate", 0.0)
+    total_trades = replay_result.get("total_trades", 0)
 
     passes_return   = ret  >= TARGET_RETURN_PCT
     passes_drawdown = dd   >= MAX_DRAWDOWN_GATE
     passes_winrate  = wr   >= MIN_WIN_RATE_GATE
-    is_champion     = passes_return and passes_drawdown and passes_winrate
+    passes_min_trades = total_trades >= MIN_CHAMPION_TRADES
+
+    # Out-of-sample gate — the strategy must also work on data it wasn't
+    # refined against. Only meaningful if enough OOS trades occurred;
+    # otherwise we can't tell signal from noise, so we don't hard-fail on it
+    # but we also don't let it silently pass — treat as "not yet provable".
+    oos = replay_result.get("oos_stats", {"trades": 0, "win_rate": 0.0, "total_return_pct": 0.0})
+    oos_gradeable = oos.get("trades", 0) >= OOS_MIN_TRADES
+    passes_oos = (
+        oos_gradeable
+        and oos.get("win_rate", 0.0) >= OOS_MIN_WIN_RATE
+        and oos.get("total_return_pct", 0.0) >= OOS_MIN_RETURN_PCT
+    )
+
+    robustness = _grade_regime_robustness(replay_result.get("regime_buckets", {}))
+
+    is_champion = (
+        passes_return and passes_drawdown and passes_winrate
+        and passes_min_trades and passes_oos
+        and robustness["passes_robustness_gate"]
+    )
 
     return {
-        "passes_return_gate":   passes_return,
-        "passes_drawdown_gate": passes_drawdown,
-        "passes_winrate_gate":  passes_winrate,
-        "is_champion":          is_champion,
-        "return_pct":           ret,
-        "drawdown_pct":         dd,
-        "win_rate":             wr,
+        "passes_return_gate":    passes_return,
+        "passes_drawdown_gate":  passes_drawdown,
+        "passes_winrate_gate":   passes_winrate,
+        "passes_min_trades_gate": passes_min_trades,
+        "passes_oos_gate":       passes_oos,
+        "oos_gradeable":         oos_gradeable,
+        "oos_trades":            oos.get("trades", 0),
+        "oos_win_rate":          oos.get("win_rate", 0.0),
+        "oos_return_pct":        oos.get("total_return_pct", 0.0),
+        "passes_robustness_gate": robustness["passes_robustness_gate"],
+        "negative_regimes":      robustness["negative_regimes"],
+        "is_champion":           is_champion,
+        "return_pct":            ret,
+        "drawdown_pct":          dd,
+        "win_rate":              wr,
+        "total_trades":          total_trades,
     }
 
 
@@ -249,19 +349,24 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
             db.query(ArenaRun).filter_by(strategy_id=strategy_id).update(
                 {"status": "needs_review", "needs_review": True}
             )
-            # Retire the strategy itself so it stops consuming arena slots
-            strategy.status        = "needs_review"
-            strategy.status_reason = f"arena_max_rounds_{MAX_ROUNDS}_reached"
+            # Mark arena-exhausted WITHOUT touching the lifecycle status —
+            # a strategy that fails to become an arena champion has NOT
+            # necessarily failed its honest backtest/OOS/promotion gates;
+            # it just didn't clear the arena's much harder bar. Leave
+            # StrategyV2.status alone so strategy_lifecycle.py's own
+            # promote/retire logic is unaffected by arena outcomes.
+            strategy.arena_status = "needs_review"
+            strategy.arena_rounds = completed_rounds
             db.commit()
             return {"status": "needs_review", "strategy_id": strategy_id}
 
         round_num = completed_rounds + 1
         log.info("Running round %d for %s", round_num, strategy.name)
 
-    # ── Round 1+: Replay current strategy ────────────────────
+    # ── Round 1+: Replay current strategy (with OOS holdout) ─
     with get_db() as db:
         strategy = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
-        replay = run_replay(db, strategy, years=2, fresh=True)
+        replay = run_replay(db, strategy, years=REPLAY_YEARS, fresh=True, oos_months=OOS_MONTHS)
 
     grade = _grade_replay(replay)
 
@@ -269,13 +374,16 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
         strategy = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
 
         if grade["is_champion"]:
-            strategy.status        = "champion"
+            strategy.arena_status = "champion"
+            strategy.arena_rounds = round_num
             strategy.status_reason = f"arena_champion_round{round_num}"
             db.commit()
             _save_arena_run(db, strategy, replay, grade, round_num, status="champion")
-            log.info("CHAMPION: %s — return=%.1f%% dd=%.1f%% wr=%.0f%%",
-                     strategy.name, grade["return_pct"],
-                     grade["drawdown_pct"], grade["win_rate"])
+            log.info(
+                "CHAMPION: %s — return=%.1f%% dd=%.1f%% wr=%.0f%% trades=%d oos_trades=%d oos_wr=%.0f%%",
+                strategy.name, grade["return_pct"], grade["drawdown_pct"], grade["win_rate"],
+                grade["total_trades"], grade["oos_trades"], grade["oos_win_rate"],
+            )
             return {
                 "status":      "champion",
                 "strategy_id": strategy_id,
@@ -284,11 +392,17 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
             }
 
         # Not champion — save progress and find donor
+        strategy.arena_status = "refining"
+        strategy.arena_rounds = round_num
+        db.commit()
         _save_arena_run(db, strategy, replay, grade, round_num, status="refining")
 
     log.info(
-        "Round %d: NOT champion (ret=%.1f%% dd=%.1f%% wr=%.0f%%) — finding donor",
+        "Round %d: NOT champion (ret=%.1f%% dd=%.1f%% wr=%.0f%% trades=%d "
+        "min_trades=%s oos=%s robust=%s) — finding donor",
         round_num, grade["return_pct"], grade["drawdown_pct"], grade["win_rate"],
+        grade["total_trades"], grade["passes_min_trades_gate"],
+        grade["passes_oos_gate"], grade["passes_robustness_gate"],
     )
 
     # ── Find top donors from all existing arena results ───────────
@@ -407,13 +521,13 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
         })
         db.commit()
 
-    # ── Replay child ──────────────────────────────────────────
+    # ── Replay child (with OOS holdout, same as parent) ────────
     log.info("Replaying child: %s", child.strategy_id)
     with get_db() as db:
         child_strategy = db.query(StrategyV2).filter_by(
             strategy_id=child.strategy_id
         ).first()
-        child_replay = run_replay(db, child_strategy, years=2, fresh=True)
+        child_replay = run_replay(db, child_strategy, years=REPLAY_YEARS, fresh=True, oos_months=OOS_MONTHS)
 
     child_grade = _grade_replay(child_replay)
 
@@ -426,7 +540,13 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
             child_strategy = db.query(StrategyV2).filter_by(
                 strategy_id=child.strategy_id
             ).first()
-            child_strategy.status        = "champion"
+            # arena_status="champion" marks it as an arena success — this
+            # does NOT touch StrategyV2.status (still "candidate" until it
+            # separately earns promotion through strategy_lifecycle.py's
+            # honest backtest/OOS/benchmark/duplicate gates + human
+            # /activate approval + paper-trading quarantine).
+            child_strategy.arena_status = "champion"
+            child_strategy.arena_rounds = round_num
             child_strategy.status_reason = f"arena_champion_round{round_num}_child"
             db.commit()
             _save_arena_run(db, child_strategy, child_replay, child_grade,
@@ -439,12 +559,16 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
             "round":       round_num,
         }
 
-    # Child improves but not champion yet — it becomes the new candidate for next round
+    # Child improves but not champion yet — it becomes the new candidate for
+    # next round WITHIN THE ARENA (arena_status only); lifecycle status is
+    # untouched, still "candidate", so it still has to earn promotion the
+    # normal way in parallel with further arena refinement.
     with get_db() as db:
         child_strategy = db.query(StrategyV2).filter_by(
             strategy_id=child.strategy_id
         ).first()
-        child_strategy.status        = "active"
+        child_strategy.arena_status = "refining"
+        child_strategy.arena_rounds = round_num + 1
         child_strategy.status_reason = f"arena_refinement_gen{(strategy.generation or 0) + 1}"
         db.commit()
         _save_arena_run(db, child_strategy, child_replay, child_grade,
@@ -475,8 +599,11 @@ def run_arena_for_strategy(strategy_id: str) -> dict:
 def run_arena_cycle() -> dict:
     """
     Full arena cycle — called on boot and every hour.
-    1. Auto-promote eligible strategies
-    2. Run arena loop for all active strategies that aren't champions yet
+    1. Log arena-eligible strategies (no status mutation — see
+       auto_promote_strategies)
+    2. Run arena loop for eligible strategies that aren't champions yet:
+       either human-approved promoted/active strategies, or arena-bred
+       children still mid-refinement (arena_status == "refining").
     Non-blocking: runs in a background thread.
     """
     global _running
@@ -504,14 +631,18 @@ def _run_arena_cycle_sync():
     """Synchronous arena cycle — called inside background thread."""
     log.info("=== ARENA CYCLE START ===")
 
-    # Step 1: Auto-promote
+    # Step 1: Log eligibility (no auto-promotion — see auto_promote_strategies)
     with get_db() as db:
-        activated = auto_promote_strategies(db)
-        if activated:
-            log.info("Auto-promoted %d strategies", len(activated))
+        eligible = auto_promote_strategies(db)
+        if eligible:
+            log.info("%d strategies eligible for arena (awaiting human approval)", len(eligible))
 
-    # Step 2: Get all active strategies that aren't champions yet
+    # Step 2: Get strategies to run arena rounds on — either lifecycle-
+    # approved promoted/active strategies, or arena-bred children still
+    # mid-refinement (tracked via arena_status, independent of their
+    # lifecycle status which is usually still "candidate").
     with get_db() as db:
+        from sqlalchemy import or_
         champion_ids = {
             r.strategy_id for r in
             db.query(ArenaRun.strategy_id).filter_by(is_champion=True).all()
@@ -521,7 +652,11 @@ def _run_arena_cycle_sync():
             db.query(ArenaRun.strategy_id).filter_by(needs_review=True).all()
         }
         active_strategies = db.query(StrategyV2).filter(
-            StrategyV2.status.in_(["active", "champion"]),
+            or_(
+                StrategyV2.status.in_(["promoted", "active"]),
+                StrategyV2.arena_status == "refining",
+            ),
+            StrategyV2.arena_status != "champion",
             StrategyV2.dsl_json.isnot(None),
         ).order_by(StrategyV2.fitness_score.desc()).all()
 

@@ -225,13 +225,14 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
             key=lambda x: x[1].get("accuracy", 0),
         )
 
+        # Save artifact first — only retire old models after this succeeds to avoid
+        # leaving the system with no active model if the save fails
+        artifact_path = best_model.save()
+
         # Retire current active models
         current_active = db.query(ModelVersion).filter(ModelVersion.is_active == True).all()
         for m in current_active:
             m.is_active = False
-
-        # Save artifact to disk — this must happen before registering in DB
-        artifact_path = best_model.save()
 
         # Register in DB — delete ALL records for this version (any model name) to avoid UNIQUE collision
         db.query(ModelVersion).filter(

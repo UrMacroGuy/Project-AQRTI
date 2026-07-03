@@ -60,7 +60,7 @@ def train_final_model(
     is_classif = task in ("direction_5d", "outperform_binary")
     ml_task    = "direction" if is_classif else "expected_return"
 
-    X_train, y_train, X_test, y_test, scaler = get_final_train_test(dataset, scale=True)
+    X_train, y_train, X_test, y_test, scaler, train_weights = get_final_train_test(dataset, scale=True)
 
     if len(X_train) < 50:
         log.warning("Insufficient training rows for %s — skipping", model_name)
@@ -72,10 +72,11 @@ def train_final_model(
     y_tr = y_train.iloc[:val_split]
     X_vl = X_train.iloc[val_split:]
     y_vl = y_train.iloc[val_split:]
+    w_tr = train_weights.iloc[:val_split] if train_weights is not None else None
 
     model = ModelClass(task=ml_task, label_col=task, version=version)
     try:
-        model.fit(X_tr, y_tr, X_vl, y_vl)
+        model.fit(X_tr, y_tr, X_vl, y_vl, sample_weight=w_tr)
     except Exception as exc:
         log.error("Final training failed for %s/%s: %s", model_name, task, exc)
         return None

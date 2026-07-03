@@ -426,13 +426,32 @@ def build_child_strategy(
                 donor_strategy.strategy_id,
             ]),
             dsl_json           = json.dumps(child_dsl),
-            status             = "active",   # enters arena immediately
+            # A freshly-merged child has never been through the honest
+            # backtest/OOS/promotion pipeline that strategy_lifecycle.py
+            # enforces — it inherits nothing but its parents' DSL genes.
+            # Previously this was set to "active" immediately, which let an
+            # arena-bred strategy skip candidate->shadow->promoted->active
+            # and the human-approval + paper-trading quarantine gate
+            # entirely. It now enters as "candidate" like every other
+            # generated strategy; the arena tracks ITS OWN refinement
+            # progress separately via arena_status/arena_rounds (set by
+            # arena_engine.py after each replay), so arena rounds can
+            # continue to run on it via arena_status regardless of where it
+            # sits in the lifecycle state machine — but it cannot become
+            # "active" for real trading/paper-trading purposes without
+            # separately earning that through strategy_lifecycle.py.
+            status             = "candidate",
             status_reason      = f"arena_child_gen{generation}",
             feature_categories = current_strategy.feature_categories,
             allowed_regimes    = current_strategy.allowed_regimes,
-            fitness_score      = round(baseline_fitness * 0.9, 2),  # starts slightly below parent
-            win_rate           = current_strategy.win_rate,
+            # Do NOT inherit fitness/win_rate from parents — those numbers
+            # describe the PARENTS' trades, not this child's untested DSL.
+            # Leaving them null makes the honest backtest fill them in.
+            fitness_score      = None,
+            win_rate            = None,
             trade_count        = 0,
+            arena_status       = "refining",
+            arena_rounds       = 0,
         )
         db.add(child)
         db.commit()

@@ -90,9 +90,14 @@ def _daily_job():
     try:
         from ml.prediction_pipeline import run_prediction_pipeline
         preport = run_prediction_pipeline()
-        scheduler_logger.info(
-            "Step 5 — Predictions: written=%d", preport.get("predictions_written", 0)
-        )
+        n_written = preport.get("predictions_written", 0)
+        if n_written == 0:
+            scheduler_logger.warning(
+                "Step 5 — Predictions: written=0 — no active models or empty feature store. "
+                "Run /admin/train to produce models."
+            )
+        else:
+            scheduler_logger.info("Step 5 — Predictions: written=%d", n_written)
     except Exception as exc:
         scheduler_logger.error("Step 5 — Predictions failed: %s", exc)
 
@@ -108,6 +113,20 @@ def _daily_job():
         )
     except Exception as exc:
         scheduler_logger.error("Step 6 — Paper Trading failed: %s", exc)
+
+    # Step 6B: Strategy shadow paper trading — forward-tests each promoted/
+    # active strategy's OWN DSL rules daily. This is the quarantine evidence
+    # required before a strategy can be human-approved to 'active'.
+    try:
+        from paper_trading.strategy_shadow_runner import run_shadow_paper_cycle
+        sreport = run_shadow_paper_cycle()
+        scheduler_logger.info(
+            "Step 6B — Shadow Paper: strategies=%d opened=%d closed=%d",
+            sreport.get("strategies", 0), sreport.get("opened", 0),
+            sreport.get("closed", 0),
+        )
+    except Exception as exc:
+        scheduler_logger.error("Step 6B — Shadow Paper failed: %s", exc)
 
     # Step 7: Daily learning loop
     try:
@@ -459,6 +478,24 @@ def _arena_job():
         scheduler_logger.error("Arena job failed: %s", exc)
 
 
+def _integrity_sweep_job():
+    """Weekly price integrity sweep — detect + heal split-adjustment drift."""
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    try:
+        from aqrti.data.integrity_check import run_integrity_sweep
+        result = run_integrity_sweep()
+        scheduler_logger.info(
+            "Integrity sweep: checked=%d drifted=%d healed=%d",
+            result.get("checked", 0), len(result.get("drifted", [])),
+            len(result.get("healed", [])),
+        )
+    except Exception as exc:
+        scheduler_logger.error("Integrity sweep failed: %s", exc)
+
+
 def _paper_trading_monitor_job():
     """
     Continuous 5-min paper trading monitor.
@@ -573,6 +610,19 @@ def start_scheduler() -> BackgroundScheduler:
         name="Continuous Paper Trading Monitor",
         replace_existing=True,
         misfire_grace_time=120,
+        max_instances=1,
+    )
+
+    # Weekly price integrity sweep — Saturday 10:00 IST (off-market, avoids
+    # colliding with daily ingestion). Detects and heals split-adjustment
+    # drift caused by incremental fetch + auto_adjust.
+    _scheduler.add_job(
+        _integrity_sweep_job,
+        trigger=CronTrigger(day_of_week="sat", hour=10, minute=0, timezone="Asia/Kolkata"),
+        id="integrity_sweep",
+        name="Weekly Price Integrity Sweep",
+        replace_existing=True,
+        misfire_grace_time=7200,
         max_instances=1,
     )
 

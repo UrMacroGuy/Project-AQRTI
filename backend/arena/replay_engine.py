@@ -549,16 +549,69 @@ def _simulate_day(
 
 # ── Main replay function ───────────────────────────────────────────────────
 
+def _bucket_trades_by_date(closed_trades, boundary: Optional[date]):
+    """Split closed trades into (in_sample, out_of_sample) by exit_date vs boundary.
+    If boundary is None, everything is in-sample."""
+    if boundary is None:
+        return list(closed_trades), []
+    is_trades  = [t for t in closed_trades if (t.exit_date or t.entry_date) < boundary]
+    oos_trades = [t for t in closed_trades if (t.exit_date or t.entry_date) >= boundary]
+    return is_trades, oos_trades
+
+
+def _grade_trade_set(trades) -> dict:
+    if not trades:
+        return {"trades": 0, "win_rate": 0.0, "total_return_pct": 0.0}
+    wins = [t for t in trades if (t.gross_pnl or 0) > 0]
+    total_pnl_pct = sum((t.gross_pnl_pct or 0.0) for t in trades)
+    return {
+        "trades":           len(trades),
+        "win_rate":         round(len(wins) / len(trades) * 100, 1),
+        "total_return_pct": round(total_pnl_pct, 2),
+    }
+
+
+def _regime_buckets(daily_results: list[dict]) -> dict[str, dict]:
+    """
+    Aggregate day-level PnL per regime bucket — used for robustness grading
+    (a champion must not be net-negative in any well-sampled regime).
+    Regime is tagged per-day already (see _get_regime call in run_replay).
+    """
+    buckets: dict[str, dict] = {}
+    for d in daily_results:
+        reg = d.get("regime") or "UNKNOWN"
+        b = buckets.setdefault(reg, {"days": 0, "net_pnl": 0.0, "winning_days": 0})
+        b["days"] += 1
+        b["net_pnl"] += d.get("day_pnl", 0.0)
+        if d.get("day_pnl", 0.0) > 0:
+            b["winning_days"] += 1
+    for reg, b in buckets.items():
+        b["net_pnl"] = round(b["net_pnl"], 2)
+        b["win_day_rate"] = round(b["winning_days"] / b["days"] * 100, 1) if b["days"] else 0.0
+    return buckets
+
+
 def run_replay(
     db: Session,
     strategy: StrategyV2,
     years: int = REPLAY_YEARS,
     fresh: bool = True,
+    oos_months: int = 0,
 ) -> dict:
     """
-    Run full 2-year historical replay for a strategy.
-    Returns comprehensive stats including winning_days and losing_days
-    for the merger to use.
+    Run full historical replay for a strategy over `years` of data.
+
+    oos_months > 0 additionally splits the SAME single simulation into an
+    in-sample segment (everything before the trailing oos_months) and an
+    out-of-sample segment (the trailing oos_months) — trades and daily
+    results are bucketed by exit date relative to that boundary. This does
+    NOT re-run the simulation twice; the strategy trades continuously across
+    the full window exactly as before, we just grade the tail separately so
+    a strategy can be judged on data its own merge/refinement history never
+    "saw the result of" before being graded. Returns include `is_stats` and
+    `oos_stats` sub-dicts, plus `regime_buckets` (per-regime day-level PnL,
+    for robustness grading) in addition to all pre-existing top-level keys
+    (kept unchanged for backward compatibility with existing callers).
     """
     portfolio_name = f"arena_{strategy.strategy_id}"
     log.info("Replay START — %s  portfolio=%s", strategy.name, portfolio_name)
@@ -592,6 +645,8 @@ def run_replay(
     winning_days  = []
     losing_days   = []
     prev_value    = INITIAL_CAPITAL
+
+    oos_boundary = (date.today() - timedelta(days=oos_months * 30)) if oos_months > 0 else None
 
     for sim_date in trade_dates:
         # Batch price fetch for all symbols on this date
@@ -638,14 +693,18 @@ def run_replay(
     winning_trades = [t for t in closed_trades if (t.gross_pnl or 0) > 0]
     win_rate = len(winning_trades) / len(closed_trades) * 100 if closed_trades else 0.0
 
+    is_trades, oos_trades = _bucket_trades_by_date(closed_trades, oos_boundary)
+    is_stats  = _grade_trade_set(is_trades)
+    oos_stats = _grade_trade_set(oos_trades)
+    regime_buckets = _regime_buckets(daily_results)
+
     log.info(
-        "Replay DONE — %s | return=%.1f%% | DD=%.1f%% | trades=%d | wr=%.0f%% | days=%d",
-        strategy.name,
-        portfolio.total_return_pct or 0,
-        portfolio.max_drawdown_pct or 0,
-        len(closed_trades),
-        win_rate,
-        len(daily_results),
+        "Replay DONE — %s | return=%.1f%% | DD=%.1f%% | trades=%d | wr=%.0f%% | days=%d"
+        + (" | IS: %d trades %.0f%%wr | OOS: %d trades %.0f%%wr" if oos_months > 0 else ""),
+        *((strategy.name, portfolio.total_return_pct or 0, portfolio.max_drawdown_pct or 0,
+           len(closed_trades), win_rate, len(daily_results))
+          + ((is_stats["trades"], is_stats["win_rate"], oos_stats["trades"], oos_stats["win_rate"])
+             if oos_months > 0 else ())),
     )
 
     return {
@@ -662,4 +721,7 @@ def run_replay(
         "daily_results":          daily_results,
         "winning_days":           winning_days,
         "losing_days":            losing_days,
+        "is_stats":               is_stats,
+        "oos_stats":              oos_stats,
+        "regime_buckets":         regime_buckets,
     }

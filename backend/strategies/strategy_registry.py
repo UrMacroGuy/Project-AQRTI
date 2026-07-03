@@ -158,6 +158,8 @@ def get_leaderboard(db: Session, top_n: int = 20, status: str | None = None) -> 
             "max_drawdown":  r.max_drawdown,
             "generation":    r.generation,
             "trade_count":   real_tc,
+            "oos_passed":    r.oos_passed,
+            "oos_sharpe":    r.oos_sharpe,
         })
     return result
 

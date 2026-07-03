@@ -211,13 +211,11 @@ GLOBAL_UNIVERSE: dict[str, dict] = {
     "SBIN.NS":        {"name": "State Bank of India",          "sector": "Banking",          "industry": "PSU Bank",               "exchange": "NSE", "currency": "INR", "region": "IN"},
     "KOTAKBANK.NS":   {"name": "Kotak Mahindra Bank",          "sector": "Banking",          "industry": "Private Bank",           "exchange": "NSE", "currency": "INR", "region": "IN"},
     "HCLTECH.NS":     {"name": "HCL Technologies",             "sector": "Technology",       "industry": "IT Services",            "exchange": "NSE", "currency": "INR", "region": "IN"},
-    "LTM.NS":        {"name": "LTM Limited",                  "sector": "Technology",       "industry": "IT Services",            "exchange": "NSE", "currency": "INR", "region": "IN"},
     "TECHM.NS":       {"name": "Tech Mahindra",                "sector": "Technology",       "industry": "IT Services",            "exchange": "NSE", "currency": "INR", "region": "IN"},
     "MPHASIS.NS":     {"name": "Mphasis",                      "sector": "Technology",       "industry": "IT Services",            "exchange": "NSE", "currency": "INR", "region": "IN"},
     "PERSISTENT.NS":  {"name": "Persistent Systems",           "sector": "Technology",       "industry": "IT Services",            "exchange": "NSE", "currency": "INR", "region": "IN"},
     "COFORGE.NS":     {"name": "Coforge",                      "sector": "Technology",       "industry": "IT Services",            "exchange": "NSE", "currency": "INR", "region": "IN"},
     "MARUTI.NS":      {"name": "Maruti Suzuki India",          "sector": "Auto",             "industry": "Automobiles",            "exchange": "NSE", "currency": "INR", "region": "IN"},
-    "TMPV.NS":       {"name": "Tata Motors Passenger Vehicles", "sector": "Auto",          "industry": "Automobiles",            "exchange": "NSE", "currency": "INR", "region": "IN"},
     "M&M.NS":         {"name": "Mahindra & Mahindra",          "sector": "Auto",             "industry": "Automobiles",            "exchange": "NSE", "currency": "INR", "region": "IN"},
     "BAJAJ-AUTO.NS":  {"name": "Bajaj Auto",                   "sector": "Auto",             "industry": "Two Wheelers",           "exchange": "NSE", "currency": "INR", "region": "IN"},
     "HEROMOTOCO.NS":  {"name": "Hero MotoCorp",                "sector": "Auto",             "industry": "Two Wheelers",           "exchange": "NSE", "currency": "INR", "region": "IN"},
@@ -1035,9 +1033,14 @@ def ticker_to_symbol(ticker: str) -> str:
     """
     Convert a yfinance ticker to a unique DB symbol key.
     US tickers have no suffix → keep as-is.
-    Non-US tickers keep their exchange suffix to avoid collisions
+    Indian tickers (.NS/.BO) are canonicalized to the suffix-less form used
+    by market_data.py (e.g. RELIANCE.NS → RELIANCE) so the same company is
+    never stored under two different keys.
+    Other non-US tickers keep their exchange suffix to avoid collisions
     (e.g. BA vs BA.L, SAN.PA vs SAN.MC).
     """
+    if ticker.endswith(".NS") or ticker.endswith(".BO"):
+        return ticker.rsplit(".", 1)[0]
     return ticker
 
 

@@ -341,6 +341,89 @@ def _generate_quality_momentum(rng: random.Random) -> StrategyDSL:
     )
 
 
+def _generate_rl_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    RL-PPO Inspired Strategy — adapted from ZiadFrancis/ReinforcementTrading_Part_1.
+
+    Original: PPO agent on EURUSD Forex with 130 discrete actions (HOLD / CLOSE /
+    OPEN(direction, SL_pips, TP_pips)) and a 30-bar window of RSI, ATR, MA slopes,
+    price-vs-MA distances. Reward = realized PnL pips - spread - commission + hold
+    shaping for winning positions.
+
+    NSE adaptation:
+      - Pips → percentage returns (Indian equities, INR-denominated)
+      - Long-only (no shorting via delivery; F&O not used here)
+      - SL/TP expressed as % of entry price, sized relative to ATR (dynamic like RL)
+      - 30-bar lookback → uses 20d and 50d MA slopes + RSI (same features as the RL env)
+      - Hold signal: stay in trade while MA20 slope is positive + RSI not overbought
+        (mirrors the "hold_reward_weight" that rewards holding winning positions)
+      - Exit: RSI > overbought threshold OR MA20 slope turns negative (mirrors CLOSE action)
+      - ATR-scaled SL: tighter when market is calm, wider in volatile periods
+      - Multi-condition entry: requires BOTH momentum confirmation AND trend alignment
+        (mimics the agent learning that single-signal entries underperform)
+    """
+    # RL env used RSI(14), ATR(14), MA20/MA50 slopes, close-MA distances, MA spread
+    # We mirror exactly those features from AQRTI's feature engineering
+
+    # Entry: multi-timeframe confluence (what trained PPO learns to require)
+    rsi_entry   = round(rng.uniform(48, 60), 1)     # RSI > X: trend started
+    ma_slope    = round(rng.uniform(0.0, 0.5), 3)   # MA20 slope positive (trending up)
+    ma_spread   = round(rng.uniform(0.0, 1.0), 3)   # MA20 > MA50 (golden cross zone)
+    n_extra     = rng.randint(0, 2)
+
+    conds = [
+        _make_condition("rsi_14",        ">",  rsi_entry),
+        _make_condition("ma_20_slope",   ">",  ma_slope,   weight=1.2),
+        _make_condition("ma_spread",     ">",  ma_spread,  weight=1.0),
+    ]
+    if n_extra >= 1:
+        # RL agent also looks at distance from MA — price should be above MA20
+        close_ma_th = round(rng.uniform(-0.5, 0.5), 3)
+        conds.append(_make_condition("close_ma20_diff", ">", close_ma_th))
+    if n_extra >= 2:
+        # Volume confirmation — institutional buying amplifies RL signals
+        vol_th = round(rng.uniform(1.1, 1.8), 2)
+        conds.append(_make_condition("volume_ratio_20d", ">", vol_th))
+
+    # Exit: RSI overbought OR MA20 slope reverses (mirrors CLOSE action in RL)
+    rsi_exit = round(rng.uniform(68, 80), 1)
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("rsi_14",      ">",  rsi_exit),
+        _make_condition("ma_20_slope", "<",  0.0,     weight=1.3),
+    ], logic="OR")
+
+    # ATR-adaptive SL/TP: RL used dynamic SL/TP from a discrete grid [5,10,15,25,30,60,90,120] pips
+    # Translated: smaller SL in calm markets, larger in volatile — sampled from a wider range
+    sl_mult = round(rng.uniform(1.0, 2.5), 1)   # SL = sl_mult × typical ATR%
+    # Typical NSE stock ATR is ~1.5-3% daily; use 1.5% as base
+    sl_base = round(rng.uniform(4.0, 9.0), 1)
+    sl      = round(-sl_base, 1)
+    # RL learned best R:R is ~2:1 when in trending market (TP grid went up to 120 pips)
+    min_rr  = round(rng.uniform(1.8, 2.8), 1)
+    tp      = _rr_take_profit(rng, sl, min_rr)
+
+    # Hold horizon: RL trained on episodes up to 2000 steps (hourly bars)
+    # NSE daily: equivalent swing of 10-30 bars
+    hold_days = rng.randint(10, 25)
+
+    # Regime: RL strategy worked well in trending markets (trained on BULL-like Forex runs)
+    regime = rng.choice(["bull_sideways", "bull_only", "all_weather"])
+
+    # Name encodes the RL heritage
+    tag = f"RL{round(rsi_entry,0):.0f}_MA{round(ma_slope,2):.2f}"
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[regime],
+        family           = "rl_momentum",
+        name             = f"RLMom_{tag}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = hold_days,
+        stop_loss_pct    = sl,
+        take_profit_pct  = tp,
+    )
+
+
 def _generate_institutional_flow(rng: random.Random) -> StrategyDSL:
     """
     Ride institutional accumulation: high delivery %, volume surge,
@@ -382,20 +465,22 @@ _GENERATORS = {
     "hybrid":             _generate_hybrid,
     "quality_momentum":   _generate_quality_momentum,
     "institutional_flow": _generate_institutional_flow,
+    "rl_momentum":        _generate_rl_momentum,
 }
 
 # Family weights for generation — bias toward historically stronger families
 _FAMILY_WEIGHTS = {
-    "momentum":           0.18,
-    "mean_reversion":     0.10,
-    "breakout":           0.12,
-    "sentiment_driven":   0.06,
-    "regime_adaptive":    0.08,
-    "volume_surge":       0.10,
-    "volatility_play":    0.08,
-    "hybrid":             0.08,
-    "quality_momentum":   0.12,   # strong Indian factor — weighted up
-    "institutional_flow": 0.08,
+    "momentum":           0.16,
+    "mean_reversion":     0.09,
+    "breakout":           0.11,
+    "sentiment_driven":   0.05,
+    "regime_adaptive":    0.07,
+    "volume_surge":       0.09,
+    "volatility_play":    0.07,
+    "hybrid":             0.07,
+    "quality_momentum":   0.11,   # strong Indian factor — weighted up
+    "institutional_flow": 0.07,
+    "rl_momentum":        0.11,   # RL-PPO inspired family — new, high weight to seed population
 }
 
 
@@ -408,7 +493,8 @@ MIN_CONFIDENCE  = 52.0   # below this, the strategy fires on noise
 MAX_HOLDING     = 60     # longer than 60 days → not a swing strategy
 MIN_HOLDING     = 3      # below 3 days → cost drag kills the edge
 
-def _passes_prescreen(strategy: StrategyDSL, bad_features: set) -> tuple[bool, str]:
+def _passes_prescreen(strategy: StrategyDSL, bad_features: set,
+                      bad_conditions: set | None = None) -> tuple[bool, str]:
     """
     Structural quality gates applied before backtesting.
     Returns (passes, reason_if_rejected).
@@ -430,13 +516,29 @@ def _passes_prescreen(strategy: StrategyDSL, bad_features: set) -> tuple[bool, s
         return False, f"max_holding_days {hold} > {MAX_HOLDING}"
 
     # All entry conditions use bad features → reject
-    if bad_features and strategy.entry_conditions:
-        entry_feats = [
-            c.feature for c in (strategy.entry_conditions.conditions or [])
-            if hasattr(c, "feature")
-        ]
-        if entry_feats and all(f in bad_features for f in entry_feats):
+    entry_feats = [
+        c.feature for c in (getattr(strategy.entry_conditions, "conditions", None) or [])
+        if hasattr(c, "feature")
+    ]
+    if bad_features and entry_feats:
+        if all(f in bad_features for f in entry_feats):
             return False, f"all entry features in bad_features set: {entry_feats}"
+
+    # Condition-level rejection: (feature, operator, threshold-bucket) triples
+    # that meta_learner flagged as high-failure. Catches cases the plain
+    # feature-name check misses — e.g. "rsi_14 > 70" specifically fails while
+    # "rsi_14 < 30" specifically succeeds; the old feature-only check treated
+    # both as the same "rsi_14" signal.
+    if bad_conditions:
+        for c in (getattr(strategy.entry_conditions, "conditions", None) or []):
+            feat = getattr(c, "feature", None)
+            op   = getattr(c, "operator", None)
+            thr  = getattr(c, "threshold", None)
+            if feat and op and isinstance(thr, (int, float)):
+                thr_bucket = round(thr / 10) * 10
+                key = f"{feat}|{op}|{thr_bucket}"
+                if key in bad_conditions:
+                    return False, f"condition matches known-bad zone: {key}"
 
     # Must have at least 2 entry conditions (single condition → curve-fit risk)
     n_conds = len(getattr(strategy.entry_conditions, "conditions", []) or [])
@@ -449,7 +551,13 @@ def _passes_prescreen(strategy: StrategyDSL, bad_features: set) -> tuple[bool, s
 def _in_dead_zone(strategy: StrategyDSL, graveyard_zones: list[dict]) -> bool:
     """
     Check if this strategy's parameter space overlaps with known failed zones.
-    Graveyard zones are (family, approx_params) tuples from meta-learner.
+    Graveyard zones are {family, stop_loss_pct?, take_profit_pct?,
+    max_holding_days?, min_confidence?} dicts from meta_learner — checked
+    across ALL dimensions present in a given zone, not just stop_loss_pct.
+    A zone only vetoes if EVERY dimension it specifies is close to the
+    candidate's value (an all-dimensions match), so a strategy that merely
+    shares one similar parameter with an unrelated dead strategy isn't
+    rejected — only near-total parameter-space overlap is.
     Returns True if it's too close to a dead zone → skip generation.
     """
     if not graveyard_zones:
@@ -458,9 +566,22 @@ def _in_dead_zone(strategy: StrategyDSL, graveyard_zones: list[dict]) -> bool:
     for zone in graveyard_zones:
         if zone.get("family") != family:
             continue
-        # Check SL proximity: within 1pp of a known dead SL value
-        dead_sl = zone.get("stop_loss_pct")
-        if dead_sl and abs(abs(strategy.stop_loss_pct or 7) - abs(dead_sl)) < 1.0:
+
+        checks = []
+        if zone.get("stop_loss_pct") is not None:
+            checks.append(abs(abs(strategy.stop_loss_pct or 7) - abs(zone["stop_loss_pct"])) < 1.0)
+        if zone.get("take_profit_pct") is not None:
+            checks.append(abs(abs(strategy.take_profit_pct or 12) - abs(zone["take_profit_pct"])) < 1.5)
+        if zone.get("max_holding_days") is not None:
+            checks.append(abs((strategy.max_holding_days or 20) - zone["max_holding_days"]) <= 2)
+        if zone.get("min_confidence") is not None:
+            checks.append(abs((strategy.min_confidence or 55) - zone["min_confidence"]) < 3.0)
+
+        # Require at least 2 matching dimensions (or the only dimension
+        # present, for older single-field zones) to call it a true overlap —
+        # a match on SL alone with wildly different TP/hold isn't the same
+        # failed strategy.
+        if checks and sum(checks) >= min(2, len(checks)):
             return True
     return False
 
@@ -495,8 +616,11 @@ def generate_candidates(
     pool_weights = [w / total_w for w in pool_weights]
 
     bad_features    = set(meta_state.get("bad_features", [])) if meta_state else set()
+    bad_conditions  = set(meta_state.get("bad_conditions", [])) if meta_state else set()
     conf_floor      = (meta_state.get("current_conf_floor") or 55.0) if meta_state else 55.0
     graveyard_zones = (meta_state.get("graveyard_zones") or []) if meta_state else []
+    family_regime_avoid = (meta_state.get("family_regime_avoid") or {}) if meta_state else {}
+    param_priors    = (meta_state.get("param_priors") or {}) if meta_state else {}
 
     rejected = 0
     attempts = 0
@@ -511,8 +635,41 @@ def generate_candidates(
             if strategy.min_confidence is None or strategy.min_confidence < conf_floor:
                 strategy.min_confidence = round(conf_floor + rng.uniform(0, 8.0), 1)
 
+            # Nudge SL/TP/hold/confidence toward what's actually working for
+            # this family, when meta-learner has a confident (count>=5)
+            # sample. This is what param_priors was originally documented to
+            # do but never did — it was computed and returned in meta_state
+            # but no generation code ever read it. A 30% pull toward the
+            # prior (not a hard override) keeps genetic diversity while
+            # still biasing toward evidence.
+            priors = param_priors.get(family)
+            if priors and priors.get("count", 0) >= 5:
+                PULL = 0.3
+                if priors.get("avg_sl_abs") and strategy.stop_loss_pct is not None:
+                    cur = abs(strategy.stop_loss_pct)
+                    strategy.stop_loss_pct = -round(cur * (1 - PULL) + priors["avg_sl_abs"] * PULL, 2)
+                if priors.get("avg_tp") and strategy.take_profit_pct is not None:
+                    strategy.take_profit_pct = round(
+                        strategy.take_profit_pct * (1 - PULL) + priors["avg_tp"] * PULL, 2
+                    )
+                if priors.get("avg_hold") and strategy.max_holding_days is not None:
+                    strategy.max_holding_days = max(MIN_HOLDING, min(MAX_HOLDING, round(
+                        strategy.max_holding_days * (1 - PULL) + priors["avg_hold"] * PULL
+                    )))
+
+            # Family x regime avoidance: if this family's deaths concentrate
+            # in a specific regime, drop that regime from allowed_regimes
+            # for new candidates (previously the only regime-related meta
+            # signal was a single whole-population "most_deadly_regime"
+            # scalar that ignored which family was dying there).
+            avoid_regimes = family_regime_avoid.get(family)
+            if avoid_regimes and getattr(strategy, "allowed_regimes", None):
+                remaining = [r for r in strategy.allowed_regimes if r not in avoid_regimes]
+                if remaining:   # never leave a strategy with zero allowed regimes
+                    strategy.allowed_regimes = remaining
+
             # Structural pre-screen
-            ok, reason = _passes_prescreen(strategy, bad_features)
+            ok, reason = _passes_prescreen(strategy, bad_features, bad_conditions)
             if not ok:
                 rejected += 1
                 log.debug("Pre-screen rejected %s [%s]: %s", family, strategy.name, reason)

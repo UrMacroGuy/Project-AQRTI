@@ -42,11 +42,53 @@ def compute_trend_features(df: pd.DataFrame) -> dict:
             ema_cache[span]     = None
 
     # ── SMA ──────────────────────────────────────────────────────
+    sma20_val: Optional[float] = None
+    sma50_val: Optional[float] = None
     for w in (20, 50):
-        results[f"sma_{w}"] = float(close.iloc[-w:].mean()) if n >= w else None
+        if n >= w:
+            val = float(close.iloc[-w:].mean())
+            results[f"sma_{w}"] = val
+            if w == 20:
+                sma20_val = val
+            else:
+                sma50_val = val
+        else:
+            results[f"sma_{w}"] = None
+
+    curr_close = float(close.iloc[-1])
+
+    # ── MA Slopes (% change of MA over 5 bars) ──────────────────
+    # slope = (MA_now - MA_5bars_ago) / MA_5bars_ago * 100
+    # Used by rl_momentum family strategies
+    if n >= 25:
+        sma20_prev = float(close.iloc[-25:-5].mean())  # SMA20 computed ending 5 bars ago
+        results["ma_20_slope"] = (sma20_val - sma20_prev) / sma20_prev * 100 if sma20_val and sma20_prev else None
+    else:
+        results["ma_20_slope"] = None
+
+    if n >= 55:
+        sma50_prev = float(close.iloc[-55:-5].mean())  # SMA50 computed ending 5 bars ago
+        results["ma_50_slope"] = (sma50_val - sma50_prev) / sma50_prev * 100 if sma50_val and sma50_prev else None
+    else:
+        results["ma_50_slope"] = None
+
+    # ── MA Spread: (SMA20 - SMA50) / SMA50 * 100 ────────────────
+    if sma20_val and sma50_val and sma50_val != 0:
+        results["ma_spread"] = (sma20_val - sma50_val) / sma50_val * 100
+    else:
+        results["ma_spread"] = None
+
+    # ── Close vs MA diff (%) ─────────────────────────────────────
+    if sma20_val and sma20_val != 0:
+        results["close_ma20_diff"] = (curr_close - sma20_val) / sma20_val * 100
+    else:
+        results["close_ma20_diff"] = None
+    if sma50_val and sma50_val != 0:
+        results["close_ma50_diff"] = (curr_close - sma50_val) / sma50_val * 100
+    else:
+        results["close_ma50_diff"] = None
 
     # ── Price vs EMA % ───────────────────────────────────────────
-    curr_close = float(close.iloc[-1])
     for span in (21, 50):
         ema_val = ema_cache.get(span)
         if ema_val and ema_val != 0:

@@ -99,8 +99,13 @@ def compute_dna(strategy: StrategyV2, db: Session) -> dict:
 
     returns  = [t.pnl_pct for t in trades if t.pnl_pct is not None]
     avg_vol  = float(np.std(returns)) if len(returns) > 1 else None
-    neg_rets = [r for r in returns if r < 0]
-    avg_dd   = float(np.mean(neg_rets)) if neg_rets else None
+    # Use the strategy's actual max_drawdown from backtester (equity-curve peak-to-trough),
+    # falling back to average losing trade return if not available.
+    if strategy.max_drawdown is not None:
+        avg_dd = float(strategy.max_drawdown)
+    else:
+        neg_rets = [r for r in returns if r < 0]
+        avg_dd = float(np.mean(neg_rets)) if neg_rets else None
 
     return {
         "strategy_id": strategy.strategy_id, "family": family,

@@ -133,6 +133,16 @@ FEATURE_CATALOG: List[FeatureDef] = [
                "EMA(|DI+ - DI-|/(DI+ + DI-), 14) * 100", ["high", "low", "close"], 28),
     FeatureDef("di_plus_minus",     "trend", "DI+ minus DI- (positive = uptrend)",
                "di_plus_14 - di_minus_14", ["high", "low", "close"], 15),
+    FeatureDef("ma_20_slope",       "trend", "SMA20 5-bar slope as % change (RL momentum)",
+               "(sma_20_now - sma_20_5bars_ago) / sma_20_5bars_ago * 100", ["close"], 25),
+    FeatureDef("ma_50_slope",       "trend", "SMA50 5-bar slope as % change (RL momentum)",
+               "(sma_50_now - sma_50_5bars_ago) / sma_50_5bars_ago * 100", ["close"], 55),
+    FeatureDef("ma_spread",         "trend", "(SMA20 - SMA50) / SMA50 * 100 — golden cross proximity",
+               "(sma_20 - sma_50) / sma_50 * 100", ["close"], 50),
+    FeatureDef("close_ma20_diff",   "trend", "(close - SMA20) / SMA20 * 100 — price vs MA20",
+               "(close - sma_20) / sma_20 * 100", ["close"], 20),
+    FeatureDef("close_ma50_diff",   "trend", "(close - SMA50) / SMA50 * 100 — price vs MA50",
+               "(close - sma_50) / sma_50 * 100", ["close"], 50),
 
     # ── MARKET / SECTOR FEATURES ─────────────────────────────
     FeatureDef("nifty_rs_21d",          "market", "Stock 21d return minus NIFTY 21d return",

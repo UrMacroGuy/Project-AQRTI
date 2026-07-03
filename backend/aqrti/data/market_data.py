@@ -204,6 +204,43 @@ def _compute_returns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _valid_price_row(symbol: str, row, close_val: float) -> bool:
+    """
+    Sanity-check one OHLCV row before insert. Rejects impossible bars
+    (non-positive prices, high < low, close outside [low, high] range,
+    negative volume). Logs and flags — extreme moves (>25%) are kept but
+    logged as possible split artifacts.
+    """
+    o = _safe_float(row.get("Open"))
+    h = _safe_float(row.get("High"))
+    l = _safe_float(row.get("Low"))
+    v = _safe_float(row.get("Volume"))
+
+    if close_val <= 0:
+        data_logger.warning("%s: rejected row (close<=0: %s)", symbol, close_val)
+        return False
+    if h is not None and l is not None:
+        if h < l:
+            data_logger.warning("%s: rejected row (high %s < low %s)", symbol, h, l)
+            return False
+        # allow tiny float tolerance
+        if close_val > h * 1.001 or close_val < l * 0.999:
+            data_logger.warning("%s: rejected row (close %s outside [%s, %s])", symbol, close_val, l, h)
+            return False
+    if (o is not None and o <= 0) or (h is not None and h <= 0) or (l is not None and l <= 0):
+        data_logger.warning("%s: rejected row (non-positive OHLC)", symbol)
+        return False
+    if v is not None and v < 0:
+        data_logger.warning("%s: rejected row (negative volume %s)", symbol, v)
+        return False
+
+    ret = _safe_float(row.get("daily_return"))
+    if ret is not None and abs(ret) > 25:
+        data_logger.warning("%s: extreme move %.1f%% on %s — possible split artifact, kept but flagged",
+                            symbol, ret, row.get("Date"))
+    return True
+
+
 # ══════════════════════════════════════════════════════════════
 # DOWNLOAD STOCK PRICES
 # ══════════════════════════════════════════════════════════════
@@ -265,6 +302,8 @@ def download_stock_prices(
                 close_val = _safe_float(row.get("Close"))
                 if close_val is None:
                     continue  # skip incomplete/in-progress trading day
+                if not _valid_price_row(symbol, row, close_val):
+                    continue  # bad OHLC — logged inside the validator
                 row_date = row["Date"].date() if hasattr(row["Date"], "date") else row["Date"]
                 stmt = sqlite_insert(DailyPrice).values(
                     symbol       = symbol,

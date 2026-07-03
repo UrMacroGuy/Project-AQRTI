@@ -169,7 +169,8 @@ class EnsembleEngine:
             except Exception as exc:
                 log.debug("Outperform predict failed (%s/%s): %s", symbol, model_name, exc)
 
-        outperform_prob = _weighted_average(op_probas, dir_weights) if op_probas else direction_prob
+        op_weights = self._weights.get("outperform_binary", EQUAL_WEIGHTS)
+        outperform_prob = _weighted_average(op_probas, op_weights) if op_probas else direction_prob
 
         # ── Direction label ──────────────────────────────────────
         if direction_prob >= BULLISH_THRESHOLD:

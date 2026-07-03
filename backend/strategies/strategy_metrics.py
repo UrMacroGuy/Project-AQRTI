@@ -22,7 +22,9 @@ from aqrti.utils.logger import get_logger
 
 log = get_logger("strategy_metrics")
 
-RISK_FREE = 0.067 / 252   # daily risk-free rate (approx. India T-bill)
+# Daily risk-free rate in PERCENT units (all return series passed to these
+# functions are in percent, e.g. 0.83 = 0.83%). 6.7% annual India T-bill.
+RISK_FREE = 6.7 / 252   # ≈ 0.0266 %/day
 ANNUALISE  = 252
 
 
@@ -34,7 +36,10 @@ def compute_sharpe(returns: list[float]) -> float:
     std  = exc.std()
     if std == 0:
         return 0.0
-    return round(float(exc.mean() / std * np.sqrt(ANNUALISE)), 4)
+    sharpe = float(exc.mean() / std * np.sqrt(ANNUALISE))
+    # Sane cap: a daily-series Sharpe above ~5 on Indian equities is a data
+    # artifact, not skill. Bounds keep one corrupt bar from inflating the score.
+    return round(max(min(sharpe, 8.0), -8.0), 4)
 
 
 def compute_sortino(returns: list[float]) -> float:
@@ -43,10 +48,18 @@ def compute_sortino(returns: list[float]) -> float:
     arr      = np.array(returns)
     exc      = arr - RISK_FREE
     downside = arr[arr < 0]
-    ds_std   = downside.std() if len(downside) > 1 else 0.0
-    if ds_std == 0:
+    # Require enough downside observations for a meaningful downside deviation.
+    # A sparse series (mostly 0.0 uninvested days + a couple of tiny negatives)
+    # produces a near-zero ds_std that inflates Sortino to absurd values.
+    if len(downside) < 3:
         return 0.0
-    return round(float(exc.mean() / ds_std * np.sqrt(ANNUALISE)), 4)
+    ds_std = downside.std()
+    if ds_std == 0:
+        # No downside dispersion → return 0, NOT inf. Deflationary on purpose.
+        return 0.0
+    sortino = float(exc.mean() / ds_std * np.sqrt(ANNUALISE))
+    # Sane cap — Sortino should track Sharpe's order of magnitude, not explode.
+    return round(max(min(sortino, 10.0), -10.0), 4)
 
 
 def compute_max_drawdown(cumulative_returns: list[float]) -> float:
@@ -68,8 +81,10 @@ def compute_profit_factor(gains: list[float], losses: list[float]) -> float:
     total_gain = sum(g for g in gains if g > 0)
     total_loss = sum(abs(l) for l in losses if l < 0)
     if total_loss == 0:
-        return 99.0 if total_gain > 0 else 1.0
-    return round(total_gain / total_loss, 4)
+        # No losing trades → conservative cap, NOT 99. A small no-loss sample
+        # would otherwise dominate every fitness weighting.
+        return 5.0 if total_gain > 0 else 1.0
+    return round(min(total_gain / total_loss, 10.0), 4)
 
 
 def compute_expectancy(returns: list[float]) -> float:

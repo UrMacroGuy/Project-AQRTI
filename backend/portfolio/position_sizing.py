@@ -108,7 +108,7 @@ def confidence_based_sizing(
     if not candidates:
         return {}
 
-    raw = {c["symbol"]: max(c.get("confidence", 50.0), 1.0) for c in candidates}
+    raw = {c["symbol"]: max(c.get("confidence") or 50.0, 1.0) for c in candidates}
     w   = _normalize(raw)
 
     sectors = {c["symbol"]: (c.get("sector") or "Unknown") for c in candidates}

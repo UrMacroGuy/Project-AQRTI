@@ -27,13 +27,75 @@ from aqrti.utils.logger import get_logger
 
 log = get_logger("strategy_lifecycle")
 
-PROMOTE_THRESHOLD  = 50.0    # strategies must reach this fitness to be promoted
-RETIRE_THRESHOLD   = 15.0    # retire strategies that fall below this fitness
-DRAWDOWN_LIMIT     = -100.0  # MDD gate disabled — backtester MDD is per-strategy equity, not per-trade; fitness captures drawdown indirectly
-MIN_TRADES         = 300     # minimum backtest trades required for promotion
-MIN_WIN_RATE       = 52.0    # raised 50→52%: must beat coin flip with margin
-MIN_SHARPE         = 0.3     # new gate: Sharpe < 0.3 → not worth promoting regardless of win rate
-PAPER_WIN_RATE     = 53.0    # raised 52→53%
+from strategies.promotion_config import (
+    PROMOTE_THRESHOLD, RETIRE_THRESHOLD, MIN_BACKTEST_TRADES,
+    MIN_WIN_RATE, MIN_SHARPE, REQUIRE_OOS_PASS, MIN_OOS_SHARPE,
+    PAPER_WIN_RATE_GATE, BENCHMARK_SHARPE_FACTOR, MAX_TRADE_OVERLAP,
+    QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
+    MAX_DRAWDOWN_LIMIT,
+)
+
+DRAWDOWN_LIMIT = MAX_DRAWDOWN_LIMIT     # backwards-compat alias for external importers
+MIN_TRADES     = MIN_BACKTEST_TRADES   # backwards-compat alias for external importers
+PAPER_WIN_RATE = PAPER_WIN_RATE_GATE   # backwards-compat alias
+
+_nifty_sharpe_cache: dict = {}
+
+
+def _nifty_benchmark_sharpe(db: Session, start, end) -> float:
+    """Honest daily Sharpe of buy-and-hold NIFTY50 over [start, end]."""
+    key = (start, end)
+    if key in _nifty_sharpe_cache:
+        return _nifty_sharpe_cache[key]
+    from aqrti.database.models import IndexData
+    from strategies.strategy_metrics import compute_sharpe
+    rows = (
+        db.query(IndexData.returns)
+        .filter(IndexData.index_name == "NIFTY50",
+                IndexData.date >= start, IndexData.date <= end)
+        .order_by(IndexData.date.asc())
+        .all()
+    )
+    rets = [r[0] for r in rows if r[0] is not None]
+    val = compute_sharpe(rets) if len(rets) >= 20 else 0.0
+    _nifty_sharpe_cache[key] = val
+    return val
+
+
+def _trade_overlap_with_promoted(db: Session, strategy_id: str) -> tuple[float, Optional[str]]:
+    """
+    Max Jaccard similarity of (symbol, entry_date) backtest-trade sets between
+    this strategy and any currently promoted/active strategy.
+    Returns (max_overlap, most_similar_strategy_id).
+    """
+    from aqrti.database.models import StrategyBacktestTrade
+    mine = {
+        (r[0], r[1]) for r in
+        db.query(StrategyBacktestTrade.symbol, StrategyBacktestTrade.entry_date)
+        .filter(StrategyBacktestTrade.strategy_id == strategy_id).all()
+    }
+    if not mine:
+        return 0.0, None
+    peers = [
+        r[0] for r in
+        db.query(StrategyV2.strategy_id)
+        .filter(StrategyV2.status.in_(["promoted", "active"]),
+                StrategyV2.strategy_id != strategy_id)
+        .all()
+    ]
+    worst, worst_id = 0.0, None
+    for pid in peers:
+        theirs = {
+            (r[0], r[1]) for r in
+            db.query(StrategyBacktestTrade.symbol, StrategyBacktestTrade.entry_date)
+            .filter(StrategyBacktestTrade.strategy_id == pid).all()
+        }
+        if not theirs:
+            continue
+        jac = len(mine & theirs) / len(mine | theirs)
+        if jac > worst:
+            worst, worst_id = jac, pid
+    return worst, worst_id
 
 
 def promote_strategy(
@@ -58,6 +120,29 @@ def promote_strategy(
         return {"success": False, "error": f"win_rate {row.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"}
     if (row.sharpe or 0) < MIN_SHARPE:
         return {"success": False, "error": f"sharpe {row.sharpe:.2f} below {MIN_SHARPE} threshold"}
+    # Out-of-sample HARD gate: strategy must have proven itself on the
+    # held-out walk-forward window. None = never OOS-tested → not promotable.
+    if REQUIRE_OOS_PASS and not row.oos_passed:
+        return {"success": False, "error": f"OOS gate failed (oos_passed={row.oos_passed}, oos_wr={row.oos_win_rate})"}
+    if REQUIRE_OOS_PASS and (row.oos_sharpe or 0) < MIN_OOS_SHARPE:
+        return {"success": False, "error": f"oos_sharpe {row.oos_sharpe or 0:.2f} below {MIN_OOS_SHARPE}"}
+
+    # Benchmark gate: must reach BENCHMARK_SHARPE_FACTOR × buy-and-hold
+    # NIFTY50 Sharpe over the same backtest window. Worse than doing nothing
+    # = not worth capital.
+    if row.backtest_start and row.backtest_end:
+        bench = _nifty_benchmark_sharpe(db, row.backtest_start, row.backtest_end)
+        if bench > 0 and (row.sharpe or 0) < bench * BENCHMARK_SHARPE_FACTOR:
+            return {"success": False,
+                    "error": f"sharpe {row.sharpe or 0:.2f} below benchmark gate "
+                             f"({BENCHMARK_SHARPE_FACTOR}x NIFTY {bench:.2f})"}
+
+    # Duplicate gate: near-clone of an already-promoted strategy adds
+    # concentration risk, not edge.
+    overlap, twin = _trade_overlap_with_promoted(db, strategy_id)
+    if overlap > MAX_TRADE_OVERLAP:
+        return {"success": False,
+                "error": f"trade overlap {overlap:.0%} with {twin} exceeds {MAX_TRADE_OVERLAP:.0%}"}
 
     old_status   = row.status
     row.status   = "promoted"
@@ -150,6 +235,7 @@ def run_lifecycle_sweep(db: Session) -> dict:
             and (s.trade_count or 0) >= MIN_TRADES
             and (s.win_rate or 0) >= MIN_WIN_RATE
             and (s.sharpe or 0) >= MIN_SHARPE
+            and (not REQUIRE_OOS_PASS or (s.oos_passed and (s.oos_sharpe or 0) >= MIN_OOS_SHARPE))
         ):
             r = promote_strategy(db, s.strategy_id)
             if r["success"]:
@@ -173,6 +259,15 @@ def run_lifecycle_sweep(db: Session) -> dict:
         elif s.status == "promoted" and (s.win_rate or 0) < MIN_WIN_RATE:
             reason = "low_win_rate"
             detail = f"win_rate={s.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"
+        elif (s.max_drawdown or 0) < MAX_DRAWDOWN_LIMIT:
+            # max_drawdown is stored as a negative percent, so "worse than
+            # the limit" means more negative (< the limit). Was previously
+            # unreachable at -100.0; now checked against the honest daily
+            # mark-to-market drawdown. A strategy can pass fitness/win-rate
+            # while still carrying a catastrophic single blowout — this
+            # catches that failure mode independently.
+            reason = "drawdown"
+            detail = f"max_drawdown={s.max_drawdown:.1f}% breached {MAX_DRAWDOWN_LIMIT}% limit"
         if reason:
             r = retire_strategy(db, s.strategy_id, failure_reason=reason, failure_detail=detail)
             if r["success"]:

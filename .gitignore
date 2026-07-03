@@ -43,9 +43,19 @@ Thumbs.db
 *.user
 .gstack/
 
-# Large data files — never commit
+# Large data files â€” never commit
 backend/aqrti.db
 backend/aqrti.db-wal
 backend/aqrti.db-shm
+backend/aqrti.db.bak-*
 backend/ml_models/*.pkl
 backend/.yfinance-cache/
+
+# Backfill/backtest run logs and large CSV dumps (not source code)
+backend/scripts/*_log.txt
+backend/scripts/*log*.txt
+backend/scripts/*.csv
+backend/scripts/__pycache__/
+
+# Strategy population backup snapshots (large JSON, not source)
+backend/strategies_v2_backup_*.json

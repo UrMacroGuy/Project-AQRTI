@@ -182,7 +182,7 @@ def build_walk_forward_folds(
         # Slice sample weights for this fold's training rows
         fold_weights = None
         if sample_weights is not None:
-            fold_weights = sample_weights.loc[train_mask[train_mask].index].reindex(X_train.index)
+            fold_weights = sample_weights.loc[train_mask].reindex(X_train.index)
 
         folds.append(DataSplit(
             fold           = fold_idx,
@@ -324,21 +324,21 @@ def prepare_training_dataset(
     raw_features = get_feature_columns(df)
     log.info("Raw features available: %d", len(raw_features))
 
+    # Remove decayed features BEFORE IC selection so the top-N budget isn't wasted
+    # on features that will be dropped anyway after selection.
+    decayed = _get_decayed_features(lookback_days=30)
+    if decayed:
+        before = len(raw_features)
+        raw_features = [f for f in raw_features if f not in decayed]
+        log.info(
+            "Dropped %d decayed features before IC selection (%d → %d candidates)",
+            before - len(raw_features), before, len(raw_features),
+        )
+
     # Feature selection by IC on training portion only (no leakage: use first 80% for IC)
     cutoff_idx  = int(len(df) * 0.80)
     df_for_ic   = df.iloc[:cutoff_idx]
     feature_cols = select_features_by_ic(df_for_ic, raw_features, label_col, top_n=top_features)
-
-    # Drop features that FeatureDecayHistory flagged as severe/moderate — they no longer
-    # predict returns and would add noise to the training set.
-    decayed = _get_decayed_features(lookback_days=30)
-    if decayed:
-        before = len(feature_cols)
-        feature_cols = [f for f in feature_cols if f not in decayed]
-        log.info(
-            "Dropped %d decayed features from training set (%d → %d features)",
-            before - len(feature_cols), before, len(feature_cols),
-        )
 
     # Final dataset uses only selected features + labels
     keep_cols = ["symbol", "date"] + feature_cols + LABEL_COLUMNS
@@ -368,12 +368,13 @@ def get_final_train_test(
     dataset: TrainingDataset,
     test_fraction: float = 0.20,
     scale: bool = True,
-) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, Optional[RobustScaler]]:
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, Optional[RobustScaler], Optional[pd.Series]]:
     """
     Simple chronological train/test split of the full dataset.
     Used for final model training after walk-forward validation.
 
-    Returns: X_train, y_train, X_test, y_test, scaler
+    Returns: X_train, y_train, X_test, y_test, scaler, train_sample_weights
+    train_sample_weights is None when no failure records exist (safe to ignore).
     """
     df   = dataset.df.sort_values("date").reset_index(drop=True)
     feat = dataset.feature_cols
@@ -394,4 +395,10 @@ def get_final_train_test(
         X_train = pd.DataFrame(scaler.fit_transform(X_train), columns=feat, index=X_train.index)
         X_test  = pd.DataFrame(scaler.transform(X_test),      columns=feat, index=X_test.index)
 
-    return X_train, y_train, X_test, y_test, scaler
+    # Build failure-upweighted sample weights for the training split
+    train_weights = build_failure_sample_weights(train)
+    if train_weights is not None and train_weights.sum() == len(train):
+        # All weights equal 1.0 means no failure records — pass None so callers skip the overhead
+        train_weights = None
+
+    return X_train, y_train, X_test, y_test, scaler, train_weights

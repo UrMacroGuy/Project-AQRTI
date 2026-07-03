@@ -28,6 +28,8 @@ from features.market_features     import compute_market_features
 from features.feature_store       import save_feature_vector, get_last_computed_date
 from features.feature_registry    import seed_feature_metadata
 
+_EMA_MIN_ROWS = {"ema50": 50, "ema200": 200}
+
 log = get_logger("feature_generator")
 
 # Minimum rows of price history required before generating features
@@ -37,17 +39,21 @@ MIN_HISTORY_ROWS = 30
 # ══════════════════════════════════════════════════════════════
 # PUBLIC ENTRY POINTS
 # ══════════════════════════════════════════════════════════════
-def run_full_feature_generation(version: int = 1) -> dict:
+def run_full_feature_generation(version: int = 1, only_symbols: Optional[set] = None) -> dict:
     """
     Compute features for every symbol in the universe for every date that
     has price data but no stored features yet.
+    only_symbols: restrict regeneration to these symbols (market features
+    still use the full universe for breadth/sector context).
     Returns summary report.
     """
-    log.info("=== FULL FEATURE GENERATION STARTED ===")
+    log.info("=== FULL FEATURE GENERATION STARTED (only=%s) ===",
+             sorted(only_symbols) if only_symbols else "ALL")
     with get_db() as db:
         seed_feature_metadata(db)
         universe_dfs, nifty_df, sector_map = _load_universe_data(db)
-        report = _generate_all(db, universe_dfs, nifty_df, sector_map, version=version)
+        report = _generate_all(db, universe_dfs, nifty_df, sector_map,
+                               version=version, only_symbols=only_symbols)
     log.info("=== FEATURE GENERATION COMPLETE: %s ===", report)
     return report
 
@@ -76,6 +82,8 @@ def run_symbol_features(symbol: str, version: int = 1) -> dict[str, Optional[flo
         universe_dfs, nifty_df, sector_map = _load_universe_data(db)
         if symbol not in universe_dfs:
             return {}
+        universe_dfs = {s: _normalize_dates(df) for s, df in universe_dfs.items()}
+        nifty_df     = _normalize_dates(nifty_df)
         stock_df = universe_dfs[symbol]
         return _compute_all_features(symbol, stock_df, nifty_df, universe_dfs, sector_map)
 
@@ -85,7 +93,11 @@ def run_symbol_features(symbol: str, version: int = 1) -> dict[str, Optional[flo
 # ══════════════════════════════════════════════════════════════
 def _load_universe_data(
     db: Session,
-    days: int = 1200,
+    days: int = 2000,   # must stay >= actual DailyPrice history depth (currently
+                         # ~5yr / 1830 days back to 2021-06-29) or feature coverage
+                         # silently truncates and the fail-closed backtester blocks
+                         # entries across the missing window. Was 1200 (~3.3yr) —
+                         # left ~23 months of price history with zero features.
 ) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, dict[str, str]]:
     """
     Load price history for all universe stocks + NIFTY50.
@@ -146,28 +158,41 @@ def _load_universe_data(
 # ══════════════════════════════════════════════════════════════
 # INTERNAL: per-symbol feature computation
 # ══════════════════════════════════════════════════════════════
+def _coerce_numeric(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure all numeric columns are float dtype (None -> NaN). Call ONCE on
+    a full (unsliced) DataFrame — never on an .iloc[] view, which would risk
+    writing into the parent frame's buffer (SettingWithCopyWarning territory)
+    and corrupting other date-slices sharing the same underlying array."""
+    if df.empty:
+        return df
+    num_cols = ["open", "high", "low", "close", "volume", "delivery_volume", "daily_return"]
+    df = df.copy()
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
 def _compute_all_features(
     symbol: str,
     stock_df: pd.DataFrame,
     nifty_df: pd.DataFrame,
     universe_dfs: dict[str, pd.DataFrame],
     sector_map: dict[str, str],
+    breadth_snapshot: Optional[dict[str, tuple]] = None,
 ) -> dict[str, Optional[float]]:
-    """Merge all feature category outputs into one flat dict."""
-    # Ensure all numeric columns are float dtype (None → NaN) to prevent
-    # TypeError when feature modules do arithmetic on object-typed columns.
-    num_cols = ["open", "high", "low", "close", "volume", "delivery_volume", "daily_return"]
-    for col in num_cols:
-        if col in stock_df.columns:
-            stock_df[col] = pd.to_numeric(stock_df[col], errors="coerce")
-
+    """Merge all feature category outputs into one flat dict. Callers must
+    pass already-numeric-coerced DataFrames (see _coerce_numeric) — this
+    function no longer mutates its inputs, since slices may be read-only
+    views into a larger, shared, pre-sliced frame."""
     features: dict[str, Optional[float]] = {}
 
     features.update(compute_price_features(stock_df, nifty_df))
     features.update(compute_volume_features(stock_df))
     features.update(compute_volatility_features(stock_df, nifty_df))
     features.update(compute_trend_features(stock_df))
-    features.update(compute_market_features(symbol, stock_df, nifty_df, universe_dfs, sector_map))
+    features.update(compute_market_features(symbol, stock_df, nifty_df, universe_dfs, sector_map,
+                                            breadth_snapshot=breadth_snapshot))
 
     return features
 
@@ -175,93 +200,137 @@ def _compute_all_features(
 # ══════════════════════════════════════════════════════════════
 # INTERNAL: full generation loop
 # ══════════════════════════════════════════════════════════════
+def _normalize_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """Sort by date, coerce the date column to plain python date objects, and
+    numeric-coerce OHLCV columns — all ONCE per symbol, so every downstream
+    per-date slice is a cheap read-only .iloc[] view (safe: no mutation
+    happens on slices anymore, see _coerce_numeric) found via binary search
+    instead of a per-row .apply(lambda ...) conversion + fresh copy."""
+    if df.empty:
+        return df
+    df = df.sort_values("date").reset_index(drop=True)
+    if len(df) and isinstance(df["date"].iloc[0], pd.Timestamp):
+        df = df.assign(date=df["date"].dt.date)
+    return _coerce_numeric(df)
+
+
 def _generate_all(
     db: Session,
     universe_dfs: dict[str, pd.DataFrame],
     nifty_df: pd.DataFrame,
     sector_map: dict[str, str],
     version: int,
+    only_symbols: Optional[set] = None,
 ) -> dict:
     """
     Compute features for every date in every symbol's history.
     For each date d, slices all DataFrames up to d so features are
-    computed with only the information available on that day.
+    computed with only the information available on that day — IDENTICAL
+    point-in-time semantics to the original implementation, just found via
+    binary search on pre-sorted date arrays instead of a full-frame
+    .apply(lambda ...) boolean mask, and looped date-major so the universe-
+    wide slice used by market_features.py's breadth/sector calculations is
+    built ONCE per date and reused across all symbols on that date, instead
+    of being rebuilt from scratch inside every symbol's per-date iteration
+    (this was the O(dates × symbols²) hot spot).
     """
+    import numpy as np
+
     total_rows   = 0
     symbols_done = 0
     errors       = []
 
+    # Normalize once — avoids repeated Timestamp→date coercion in every slice
+    universe_dfs = {s: _normalize_dates(df) for s, df in universe_dfs.items()}
+    nifty_df     = _normalize_dates(nifty_df)
+
+    # Pre-extract numpy date arrays for O(log n) searchsorted slicing
+    universe_date_arr = {s: df["date"].values for s, df in universe_dfs.items()}
+    nifty_date_arr    = nifty_df["date"].values if not nifty_df.empty else None
+
+    # Precompute each symbol's FULL-HISTORY EMA50/200 series ONCE (vectorized
+    # pandas .ewm(), O(n) per symbol) instead of recomputing ewm(...).mean()
+    # from scratch for every symbol on every single date inside
+    # market_features.compute_market_features's breadth loop — that
+    # recomputation was ~45% of total backfill runtime (profiled). EMA is a
+    # recursive expanding-window stat: its value at date T is unaffected by
+    # dates after T, so this is exactly equivalent, just computed once.
+    ema50_arr:  dict[str, "np.ndarray"] = {}
+    ema200_arr: dict[str, "np.ndarray"] = {}
+    close_arr:  dict[str, "np.ndarray"] = {}
+    for s, df in universe_dfs.items():
+        if df.empty:
+            continue
+        c = df["close"].astype(float)
+        close_arr[s] = c.values
+        if len(c) >= 50:
+            ema50_arr[s] = c.ewm(span=50, adjust=False).mean().values
+        if len(c) >= 200:
+            ema200_arr[s] = c.ewm(span=200, adjust=False).mean().values
+
     # Collect all unique dates across the universe (sorted ascending)
     all_dates: list = sorted(set(
-        (d.date() if isinstance(d, pd.Timestamp) else d)
-        for df in universe_dfs.values()
-        for d in df["date"]
+        d for arr in universe_date_arr.values() for d in arr
     ))
 
-    # Nifty date index for fast slicing
-    if not nifty_df.empty:
-        nifty_dates = [
-            (d.date() if isinstance(d, pd.Timestamp) else d)
-            for d in nifty_df["date"]
-        ]
-    else:
-        nifty_dates = []
+    target_symbols = [s for s in universe_dfs if only_symbols is None or s in only_symbols]
+    sym_rows_count  = {s: 0 for s in target_symbols}
+    sym_error_count = {s: 0 for s in target_symbols}
+    # Track which symbols actually have a price on the current date, so we
+    # skip computing/saving a vector for symbols with no bar that day.
+    has_date_today: dict[str, bool] = {}
 
-    for symbol, stock_df in universe_dfs.items():
-        sym_errors = 0
-        sym_rows   = 0
+    for feat_date in all_dates:
+        # Build the point-in-time slice ONCE for this date — shared by every
+        # symbol's market_features() call below (this is the fix: was
+        # rebuilt per (symbol, date) pair, i.e. once per symbol per date).
+        slice_universe: dict[str, pd.DataFrame] = {}
+        # O(1)-lookup breadth snapshot for this date — see EMA precompute above.
+        breadth_snapshot: dict[str, tuple] = {}
+        for s, arr in universe_date_arr.items():
+            idx = int(np.searchsorted(arr, feat_date, side="right"))
+            if idx > 0:
+                slice_universe[s] = universe_dfs[s].iloc[:idx]
+                curr = float(close_arr[s][idx - 1])
+                ema50  = float(ema50_arr[s][idx - 1])  if s in ema50_arr  and idx >= 50  else None
+                ema200 = float(ema200_arr[s][idx - 1]) if s in ema200_arr and idx >= 200 else None
+                breadth_snapshot[s] = (curr, ema50, ema200)
+            has_date_today[s] = idx > 0 and arr[idx - 1] == feat_date
 
-        stock_dates = [
-            (d.date() if isinstance(d, pd.Timestamp) else d)
-            for d in stock_df["date"]
-        ]
+        if nifty_date_arr is not None:
+            n_idx = int(np.searchsorted(nifty_date_arr, feat_date, side="right"))
+            slice_nifty = nifty_df.iloc[:n_idx] if n_idx > 0 else nifty_df.iloc[:0]
+        else:
+            slice_nifty = nifty_df
 
-        for feat_date in all_dates:
-            # Only compute for dates where this symbol has a price
-            if feat_date not in stock_dates:
+        for symbol in target_symbols:
+            if not has_date_today.get(symbol):
                 continue
-
-            # Slice all data up to and including feat_date
-            slice_stock = stock_df[
-                stock_df["date"].apply(
-                    lambda d: (d.date() if isinstance(d, pd.Timestamp) else d) <= feat_date
-                )
-            ].copy()
-
-            if len(slice_stock) < MIN_HISTORY_ROWS:
+            slice_stock = slice_universe.get(symbol)
+            if slice_stock is None or len(slice_stock) < MIN_HISTORY_ROWS:
                 continue
-
-            slice_nifty = nifty_df[
-                nifty_df["date"].apply(
-                    lambda d: (d.date() if isinstance(d, pd.Timestamp) else d) <= feat_date
-                )
-            ].copy() if not nifty_df.empty else nifty_df
-
-            slice_universe = {
-                s: df[
-                    df["date"].apply(
-                        lambda d: (d.date() if isinstance(d, pd.Timestamp) else d) <= feat_date
-                    )
-                ]
-                for s, df in universe_dfs.items()
-            }
-
             try:
                 features = _compute_all_features(symbol, slice_stock, slice_nifty,
-                                                 slice_universe, sector_map)
-                rows = save_feature_vector(db, symbol, feat_date, features, version)
-                sym_rows += rows
+                                                 slice_universe, sector_map,
+                                                 breadth_snapshot=breadth_snapshot)
+                # commit=False: one commit per DATE (below) covers all symbols
+                # processed on that date, instead of one commit per symbol —
+                # cuts commit count from ~435k to ~1236 for a full backfill.
+                rows = save_feature_vector(db, symbol, feat_date, features, version, commit=False)
+                sym_rows_count[symbol] += rows
             except Exception as exc:
                 log.debug("%s %s: %s", symbol, feat_date, exc)
-                sym_errors += 1
+                sym_error_count[symbol] += 1
 
-        if sym_errors == 0:
+        db.commit()
+
+    for symbol in target_symbols:
+        if sym_error_count[symbol] == 0:
             symbols_done += 1
         else:
             errors.append(symbol)
-        total_rows += sym_rows
-        db.commit()
-        log.info("%s: %d feature rows written.", symbol, sym_rows)
+        total_rows += sym_rows_count[symbol]
+        log.info("%s: %d feature rows written.", symbol, sym_rows_count[symbol])
 
     return {
         "symbols_processed": symbols_done,
@@ -286,14 +355,21 @@ def _generate_incremental(
     skipped      = 0
     errors       = []
 
+    # Normalize once (sort, coerce dates, coerce numerics) — same contract as
+    # _generate_all; _compute_all_features no longer coerces its inputs.
+    universe_dfs = {s: _normalize_dates(df) for s, df in universe_dfs.items()}
+    nifty_df     = _normalize_dates(nifty_df)
+    universe_date_arr = {s: df["date"].values for s, df in universe_dfs.items()}
+    nifty_date_arr    = nifty_df["date"].values if not nifty_df.empty else None
+
+    import numpy as np
+
     for symbol, stock_df in universe_dfs.items():
         if len(stock_df) < MIN_HISTORY_ROWS:
             continue
         try:
             last_computed = get_last_computed_date(db, symbol, version)
             latest_price  = stock_df["date"].iloc[-1]
-            if isinstance(latest_price, pd.Timestamp):
-                latest_price = latest_price.date()
 
             if last_computed is not None and last_computed >= latest_price:
                 skipped += 1
@@ -301,19 +377,20 @@ def _generate_incremental(
 
             # Slice all data up to latest_price — same as _generate_all does per date.
             # This prevents look-ahead bias: incremental must use identical slicing.
-            def _to_date(d):
-                return d.date() if isinstance(d, pd.Timestamp) else d
+            s_idx = int(np.searchsorted(universe_date_arr[symbol], latest_price, side="right"))
+            slice_stock = stock_df.iloc[:s_idx]
 
-            slice_stock = stock_df[
-                stock_df["date"].apply(_to_date) <= latest_price
-            ].copy()
-            slice_nifty = nifty_df[
-                nifty_df["date"].apply(_to_date) <= latest_price
-            ].copy() if not nifty_df.empty else nifty_df
-            slice_universe = {
-                s: df[df["date"].apply(_to_date) <= latest_price]
-                for s, df in universe_dfs.items()
-            }
+            if nifty_date_arr is not None:
+                n_idx = int(np.searchsorted(nifty_date_arr, latest_price, side="right"))
+                slice_nifty = nifty_df.iloc[:n_idx]
+            else:
+                slice_nifty = nifty_df
+
+            slice_universe = {}
+            for s, arr in universe_date_arr.items():
+                idx = int(np.searchsorted(arr, latest_price, side="right"))
+                if idx > 0:
+                    slice_universe[s] = universe_dfs[s].iloc[:idx]
 
             if len(slice_stock) < MIN_HISTORY_ROWS:
                 skipped += 1

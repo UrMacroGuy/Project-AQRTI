@@ -2237,6 +2237,15 @@ async function hydrateStrategyResearch() {
       const avgPnlStr = avgPnl != null ? (avgPnl >= 0 ? '+' : '') + avgPnl.toFixed(2) + '%' : '—';
       const avgPnlColor = avgPnl == null ? '' : avgPnl > 0 ? 'color:var(--positive)' : avgPnl < 0 ? 'color:var(--negative)' : '';
       const canActivate = r.status === 'promoted';
+      // 'promoted' means it passed backtest+OOS gates but has NOT yet been
+      // forward-proven in paper trading (the quarantine). 'active' means a
+      // human approved it after quarantine (or forced). Make that distinction
+      // visible — otherwise an unproven strategy looks identical to a proven one.
+      const quarantineBadge = r.status === 'promoted'
+        ? ' <span style="font-size:0.6rem;color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:3px;padding:0 4px" title="Backtest-proven only — not yet forward-tested in paper trading">UNPROVEN</span>'
+        : r.status === 'active'
+          ? ' <span style="font-size:0.6rem;color:var(--positive);border:1px solid rgba(34,197,94,0.4);border-radius:3px;padding:0 4px" title="Human-approved after forward paper-trading quarantine">PROVEN</span>'
+          : '';
       const maxDd = r.max_drawdown != null ? r.max_drawdown : null;
       const ddWarn = maxDd != null && maxDd < -30;
       const ddStr  = maxDd != null ? `${maxDd.toFixed(1)}%` : '—';
@@ -2248,7 +2257,7 @@ async function hydrateStrategyResearch() {
           <div onclick="loadStrategyDna('${r.strategy_id}');document.getElementById('panel-dna-viewer').scrollIntoView({behavior:'smooth'})" style="font-size:0.62rem;color:var(--accent);letter-spacing:0.02em;cursor:pointer;text-decoration:underline dotted" title="Click to open DNA viewer">${r.strategy_id}</div>
         </td>
         <td><span class="chip">${r.family || '—'}</span></td>
-        <td class="${statusClass}" style="font-size:0.7rem">${(r.status || '').toUpperCase()}</td>
+        <td class="${statusClass}" style="font-size:0.7rem">${(r.status || '').toUpperCase()}${quarantineBadge}</td>
         <td style="font-weight:600">${fitness}</td>
         <td>${wr}</td>
         <td style="font-weight:600;${avgPnlColor}">${avgPnlStr}</td>

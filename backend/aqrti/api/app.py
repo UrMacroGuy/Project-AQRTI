@@ -509,6 +509,35 @@ def create_app() -> FastAPI:
         api_logger.info("Full historical feature generation triggered.")
         return await asyncio.to_thread(run_full_feature_generation)
 
+    @app.post("/admin/shadow-paper", tags=["Admin"])
+    async def trigger_shadow_paper():
+        """
+        Run one shadow paper-trading cycle: forward-tests every promoted/
+        active strategy's own DSL rules against today's data. Builds the
+        quarantine evidence required before human approval to 'active'.
+        """
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        from paper_trading.strategy_shadow_runner import run_shadow_paper_cycle
+        import asyncio
+        api_logger.info("Shadow paper cycle triggered.")
+        return await asyncio.to_thread(run_shadow_paper_cycle)
+
+    @app.post("/admin/integrity-sweep", tags=["Admin"])
+    async def trigger_integrity_sweep():
+        """
+        Run the price integrity sweep: detect split-adjustment drift per
+        symbol (incremental fetch + auto_adjust leaves old rows on the wrong
+        adjustment basis) and heal drifted symbols with a full re-download
+        + feature regeneration. Can take several minutes.
+        """
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        from aqrti.data.integrity_check import run_integrity_sweep
+        import asyncio
+        api_logger.info("Price integrity sweep triggered.")
+        return await asyncio.to_thread(run_integrity_sweep)
+
     @app.post("/admin/news", tags=["Admin"])
     async def trigger_news():
         """Manually trigger news collection pipeline."""
@@ -713,7 +742,142 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["Admin"])
     async def health():
-        return {"status": "ok", "version": "0.8.0"}
+        """
+        Basic liveness + data-freshness check. The daily scheduler wraps every
+        step in try/except and logs-and-continues on failure (by design, so
+        one bad step doesn't block the rest) — but that means a broken price
+        feed can silently leave predictions/paper-trading running on stale
+        data with nothing surfacing it. This endpoint is the single place a
+        user or the UI can check "is the data actually current."
+        """
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        from datetime import date, datetime, timedelta
+        from aqrti.database.engine import get_db
+        from aqrti.database.models import DailyPrice, FeatureValue, KnowledgeEvent, StrategyV2
+
+        result = {"status": "ok", "version": "0.8.0"}
+        problems = []
+        try:
+            with get_db() as db:
+                today = date.today()
+
+                # 1. Price/feature data freshness — is daily ingestion still running?
+                latest_price = db.query(DailyPrice.date).order_by(DailyPrice.date.desc()).first()
+                latest_feat  = db.query(FeatureValue.date).filter(FeatureValue.version == 1).order_by(FeatureValue.date.desc()).first()
+                price_date = latest_price[0] if latest_price else None
+                feat_date  = latest_feat[0] if latest_feat else None
+                price_stale_days = (today - price_date).days if price_date else None
+                feat_stale_days  = (today - feat_date).days if feat_date else None
+                # >3 calendar days covers weekends/holidays without false-alarming
+                data_stale = (price_stale_days is not None and price_stale_days > 3)
+                result["data_freshness"] = {
+                    "latest_price_date":   str(price_date) if price_date else None,
+                    "latest_feature_date": str(feat_date) if feat_date else None,
+                    "price_stale_days":    price_stale_days,
+                    "feature_stale_days":  feat_stale_days,
+                    "stale":               data_stale,
+                }
+                if data_stale:
+                    problems.append("price/feature data is stale — daily ingestion may have stopped")
+
+                # 2. Strategy research loop — is the daily population snapshot
+                # still being written? Silence here means Step 8 of the daily
+                # job (generate/backtest/evolve/promote) has stopped running,
+                # even if price ingestion is fine.
+                date_cutoff = today - timedelta(days=3)
+                dt_cutoff   = datetime.utcnow() - timedelta(days=3)
+                last_snapshot = (
+                    db.query(KnowledgeEvent.event_date)
+                    .filter(KnowledgeEvent.event_type == "population_snapshot")
+                    .order_by(KnowledgeEvent.event_date.desc())
+                    .first()
+                )
+                snapshot_stale = last_snapshot is None or last_snapshot[0] < date_cutoff
+                result["strategy_research"] = {
+                    "last_snapshot_date": str(last_snapshot[0]) if last_snapshot else None,
+                    "stale":              snapshot_stale,
+                }
+                if snapshot_stale:
+                    problems.append("strategy research loop hasn't produced a population snapshot in 3+ days")
+
+                # 3. Is anything actually being promoted/evolved, or has the
+                # population gone stagnant (no status changes recently)?
+                recent_promotions = (
+                    db.query(StrategyV2)
+                    .filter(StrategyV2.promoted_at.isnot(None),
+                            StrategyV2.promoted_at >= dt_cutoff)
+                    .count()
+                )
+                recent_candidates = (
+                    db.query(StrategyV2)
+                    .filter(StrategyV2.created_at >= dt_cutoff)
+                    .count()
+                )
+                result["evolution_activity"] = {
+                    "new_candidates_last_3d": recent_candidates,
+                    "new_promotions_last_3d": recent_promotions,
+                }
+                if recent_candidates == 0:
+                    problems.append("no new strategy candidates generated in 3+ days — evolution loop may have stalled")
+
+                # 4. Arena — is it producing any activity? The arena runs
+                # hourly (arena/arena_engine.py); silence for 6+ hours means
+                # either the scheduler's arena_cycle job stopped firing, or
+                # every eligible strategy exhausted MAX_ROUNDS with nothing
+                # new promoted/active to feed it (itself worth surfacing,
+                # not just an error state).
+                from aqrti.database.models import ArenaRun
+                arena_cutoff = datetime.utcnow() - timedelta(hours=6)
+                recent_arena_runs = db.query(ArenaRun).filter(
+                    ArenaRun.completed_at.isnot(None),
+                    ArenaRun.completed_at >= arena_cutoff,
+                ).count()
+                eligible_for_arena = db.query(StrategyV2).filter(
+                    StrategyV2.status.in_(["promoted", "active"]),
+                    StrategyV2.dsl_json.isnot(None),
+                ).count()
+                champions_total = db.query(StrategyV2).filter(
+                    StrategyV2.arena_status == "champion"
+                ).count()
+                result["arena_activity"] = {
+                    "runs_last_6h":        recent_arena_runs,
+                    "eligible_strategies": eligible_for_arena,
+                    "champions_total":     champions_total,
+                }
+                if eligible_for_arena > 0 and recent_arena_runs == 0:
+                    problems.append("arena has eligible strategies but produced no runs in 6+ hours — hourly arena_cycle job may have stopped")
+
+                # 5. Meta-learner — sanity-check its own shrinkage isn't
+                # producing a degenerate all-zero or all-max family-weight
+                # distribution, which would mean either a bug in the
+                # computation or a graveyard/evolution-history table that's
+                # gone empty/corrupt. Cheap to compute (same query
+                # compute_meta_state uses), read-only.
+                try:
+                    from strategies.meta_learner import get_latest_meta_state
+                    meta = get_latest_meta_state(db)
+                    weights = meta.get("family_weights", {})
+                    degenerate = bool(weights) and (
+                        max(weights.values()) > 0.9 or
+                        len({round(w, 3) for w in weights.values()}) == 1
+                    )
+                    result["meta_learner"] = {
+                        "family_weights_computed": len(weights),
+                        "degenerate":              degenerate,
+                    }
+                    if degenerate:
+                        problems.append("meta-learner family weights look degenerate (all-equal or one family dominating >90%)")
+                except Exception as meta_exc:
+                    result["meta_learner"] = {"error": str(meta_exc)}
+                    problems.append(f"meta-learner health check failed: {meta_exc}")
+
+            if problems:
+                result["status"] = "degraded"
+                result["problems"] = problems
+        except Exception as exc:
+            result["error"] = str(exc)
+        return result
 
     return app
 

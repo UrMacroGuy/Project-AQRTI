@@ -25,7 +25,9 @@ from aqrti.utils.logger import get_logger
 
 log = get_logger("retrain_loop")
 
-WIN_RATE_TARGET  = 52.0   # % — keep retraining until this is hit (CatBoost achieves 51-55% on direction)
+from strategies.promotion_config import RETRAIN_WIN_RATE_TARGET
+
+WIN_RATE_TARGET  = RETRAIN_WIN_RATE_TARGET   # % — keep retraining until this is hit
 MIN_TRADES_EVAL  = 10     # need at least this many closed trades before evaluating
 MAX_ITERATIONS   = 5      # cap retrain cycles per call to avoid runaway
 
@@ -43,12 +45,13 @@ def _get_live_win_rate(db) -> tuple[float, int]:
 
 
 def _retrain_ml(version: int = 1) -> dict:
-    """Retrain ML models on the latest feature data."""
+    """Retrain ML models on the latest feature data via the working retrainer."""
     try:
-        from ml.trainers.model_trainer import train_all_models
-        result = train_all_models(version=version)
+        from ml.model_retrainer import check_and_retrain
+        with get_db() as db:
+            result = check_and_retrain(db, force=True)
         log.info("ML retrain complete: %s", result)
-        return result
+        return result if isinstance(result, dict) else {"result": str(result)}
     except Exception as exc:
         log.error("ML retrain failed: %s", exc)
         return {"error": str(exc)}
@@ -69,8 +72,8 @@ def _run_strategy_research() -> dict:
 def _refresh_predictions(version: int = 1) -> dict:
     """Generate fresh predictions with newly trained models."""
     try:
-        from ml.predictors.predictor import run_predictions
-        result = run_predictions(version=version)
+        from ml.prediction_pipeline import run_prediction_pipeline
+        result = run_prediction_pipeline(version=version)
         log.info("Predictions refreshed: %s", result)
         return result
     except Exception as exc:

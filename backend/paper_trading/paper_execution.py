@@ -111,9 +111,11 @@ def execute_rebalance(
         if result:
             freed_cash = deployed + (result["grossPnl"] or 0.0)
             portfolio.current_cash += freed_cash
-            db.commit()
             closed_pnl += result["grossPnl"]
             closed_list.append(result["symbol"])
+
+    # Commit all closes + cash updates together so refresh sees the correct cash balance
+    db.commit()
 
     # ── Refresh portfolio after closes ────────────────────────────
     db.refresh(portfolio)
@@ -151,6 +153,8 @@ def execute_rebalance(
             prediction_id   = cand.get("predictionId"),
             strategy_id     = cand.get("strategyId"),
             strategy_name   = cand.get("strategyName"),
+            stop_loss_pct   = cand.get("stopLossPct"),
+            take_profit_pct = cand.get("takeProfitPct"),
         )
         if pos:
             portfolio.current_cash -= capital

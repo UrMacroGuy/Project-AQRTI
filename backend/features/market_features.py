@@ -24,7 +24,19 @@ def compute_market_features(
     nifty_df: pd.DataFrame,
     universe_dfs: dict[str, pd.DataFrame],
     sector_map: dict[str, str],
+    breadth_snapshot: Optional[dict[str, tuple]] = None,
 ) -> dict:
+    """
+    breadth_snapshot: optional {symbol: (close, ema50_or_None, ema200_or_None)}
+    precomputed by the caller for the CURRENT date across the whole universe.
+    When provided, breadth is computed from this O(1) lookup instead of
+    recomputing ewm(span=50/200).mean() from scratch for all 352 symbols on
+    every single date (that recomputation was ~45% of total backfill runtime
+    — EMA is a recursive expanding-window stat, its value at date T doesn't
+    need the full history recomputed every time a later date is processed).
+    When None (e.g. run_symbol_features' single-date on-demand path), falls
+    back to the original in-place computation — identical formula either way.
+    """
     results: dict[str, Optional[float]] = {}
     stock_df = stock_df.sort_values("date").reset_index(drop=True)
 
@@ -52,21 +64,32 @@ def compute_market_features(
     valid_ema50_count  = 0
     valid_ema200_count = 0
 
-    for sym, df in universe_dfs.items():
-        if df.empty:
-            continue
-        c = df["close"].astype(float)
-        curr = float(c.iloc[-1])
-        if len(c) >= 50:
-            ema50 = float(c.ewm(span=50, adjust=False).mean().iloc[-1])
-            valid_ema50_count += 1
-            if curr > ema50:
-                above_ema50_count += 1
-        if len(c) >= 200:
-            ema200 = float(c.ewm(span=200, adjust=False).mean().iloc[-1])
-            valid_ema200_count += 1
-            if curr > ema200:
-                above_ema200_count += 1
+    if breadth_snapshot is not None:
+        for sym, (curr, ema50, ema200) in breadth_snapshot.items():
+            if ema50 is not None:
+                valid_ema50_count += 1
+                if curr > ema50:
+                    above_ema50_count += 1
+            if ema200 is not None:
+                valid_ema200_count += 1
+                if curr > ema200:
+                    above_ema200_count += 1
+    else:
+        for sym, df in universe_dfs.items():
+            if df.empty:
+                continue
+            c = df["close"].astype(float)
+            curr = float(c.iloc[-1])
+            if len(c) >= 50:
+                ema50 = float(c.ewm(span=50, adjust=False).mean().iloc[-1])
+                valid_ema50_count += 1
+                if curr > ema50:
+                    above_ema50_count += 1
+            if len(c) >= 200:
+                ema200 = float(c.ewm(span=200, adjust=False).mean().iloc[-1])
+                valid_ema200_count += 1
+                if curr > ema200:
+                    above_ema200_count += 1
 
     results["breadth_pct_above_ema50"]  = (
         above_ema50_count  / valid_ema50_count  * 100 if valid_ema50_count  > 0 else None

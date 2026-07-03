@@ -124,8 +124,10 @@ def compute_regression_metrics(
 
     # Sharpe proxy: mean predicted return / std of actual returns (simplified)
     try:
-        if y_true.std() > 0:
-            metrics["sharpe_proxy"] = float(y_true[y_pred > 0].mean() / y_true.std())
+        pos_returns = y_true[y_pred > 0]
+        if y_true.std() > 0 and len(pos_returns) > 0:
+            val = float(pos_returns.mean() / y_true.std())
+            metrics["sharpe_proxy"] = val if not np.isnan(val) else 0.0
         else:
             metrics["sharpe_proxy"] = 0.0
     except Exception:

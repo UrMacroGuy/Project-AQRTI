@@ -56,8 +56,37 @@ POSITION_SIZE   = 0.05    # 5% of capital per trade
 MAX_OPEN_TRADES = 8       # max concurrent positions
 
 
+# Symbols in the DB are stored WITHOUT the yfinance suffix (e.g. "RELIANCE",
+# not "RELIANCE.NS"), so suffix detection alone maps every Indian stock to US
+# costs (0.10% instead of 0.28% — a serious backtest inflation). Build a set
+# of known Indian symbols from the universe definitions for correct lookup.
+_INDIA_SYMBOLS: Optional[set] = None
+
+
+def _india_symbol_set() -> set:
+    global _INDIA_SYMBOLS
+    if _INDIA_SYMBOLS is None:
+        syms: set[str] = set()
+        try:
+            from aqrti.data.global_universe import GLOBAL_UNIVERSE
+            for t, meta in GLOBAL_UNIVERSE.items():
+                if t.endswith((".NS", ".BO")) or meta.get("region") == "India":
+                    syms.add(t.rsplit(".", 1)[0] if "." in t else t)
+        except Exception:
+            pass
+        try:
+            from aqrti.data.market_data import STOCK_META
+            syms.update(STOCK_META.keys())
+        except Exception:
+            pass
+        _INDIA_SYMBOLS = syms
+    return _INDIA_SYMBOLS
+
+
 def _detect_exchange(symbol: str) -> str:
-    """Detect exchange from symbol suffix."""
+    """Detect exchange: known-Indian-symbol lookup first, then suffix."""
+    if symbol.rsplit(".", 1)[0] in _india_symbol_set():
+        return "NSE"
     if symbol.endswith(".NS") or symbol.endswith(".BO"):
         return "NSE"
     if symbol.endswith(".L"):
@@ -138,9 +167,17 @@ STOCK_UNIVERSE = [
 ]
 
 
-def get_backtest_universe(db: Session, min_price_rows: int = 50) -> list[str]:
+# Minimum average daily traded value for a symbol to be backtestable/tradeable.
+# 5 crore INR (~50M). Illiquid names produce fills a real order could never get
+# (your order IS the volume) and are the worst survivorship-bias offenders.
+MIN_AVG_TURNOVER = 5e7
+
+
+def get_backtest_universe(db: Session, min_price_rows: int = 50,
+                          min_avg_turnover: float = MIN_AVG_TURNOVER) -> list[str]:
     """
-    Return all active symbols that have sufficient price history for backtesting.
+    Return all active symbols with sufficient price history AND liquidity
+    (average close×volume over the stored window >= min_avg_turnover).
     Falls back to STOCK_UNIVERSE if DB query returns nothing.
     """
     from aqrti.database.models import Stock
@@ -152,6 +189,7 @@ def get_backtest_universe(db: Session, min_price_rows: int = 50) -> list[str]:
         ))
         .group_by(DailyPrice.symbol)
         .having(_func.count(DailyPrice.date) >= min_price_rows)
+        .having(_func.avg(DailyPrice.close * DailyPrice.volume) >= min_avg_turnover)
         .all()
     )
     result = [r[0] for r in rows]
@@ -283,7 +321,16 @@ class BacktestResult:
     volatile_sharpe:  float = 0.0
     regime_trades:    dict  = field(default_factory=dict)
 
-    def compute_metrics(self) -> None:
+    def compute_metrics(self, daily_returns: Optional[list[float]] = None) -> None:
+        """
+        Compute trade-level stats and portfolio-level risk metrics.
+
+        `daily_returns` must be a REAL mark-to-market daily portfolio return
+        series (percent units) from build_daily_portfolio_returns(). The old
+        approach of repeating each trade's per-day average `holding_days`
+        times collapsed intra-trade variance and inflated Sharpe — never
+        reintroduce it.
+        """
         closed = [t for t in self.trades if t.pnl_pct is not None]
         if not closed:
             return
@@ -295,26 +342,110 @@ class BacktestResult:
         self.win_rate         = len(wins) / len(closed) * 100
         self.profit_factor    = compute_profit_factor(wins, losses)
         self.expectancy       = compute_expectancy(returns)
-
-        equity = 100.0
-        eq_curve = [100.0]
-        for r in returns:
-            equity *= (1 + r / 100)
-            eq_curve.append(equity)
-        self.max_drawdown  = compute_max_drawdown(eq_curve)
-        self.total_return  = round(sum(returns), 4)
         self.avg_holding_days = round(
             sum(t.holding_days for t in closed) / len(closed), 1
         )
 
-        daily_returns = []
-        for t in closed:
-            days = max(t.holding_days, 1)
-            daily = t.pnl_pct / days   # per-day return; portfolio scaling done at fitness layer
-            daily_returns.extend([daily] * days)
+        if daily_returns:
+            # Portfolio-level equity from the daily mark-to-market series
+            equity = 100.0
+            eq_curve = [100.0]
+            for r in daily_returns:
+                equity *= (1 + r / 100)
+                eq_curve.append(equity)
+            self.max_drawdown = compute_max_drawdown(eq_curve)
+            self.total_return = round(equity - 100.0, 4)
+            self.sharpe  = compute_sharpe(daily_returns)
+            self.sortino = compute_sortino(daily_returns)
+        else:
+            # No daily series available: report position-sized trade-chain
+            # equity, and leave sharpe/sortino at 0 rather than fabricate.
+            equity = 100.0
+            eq_curve = [100.0]
+            for r in returns:
+                equity *= (1 + (r / 100) * POSITION_SIZE)
+                eq_curve.append(equity)
+            self.max_drawdown = compute_max_drawdown(eq_curve)
+            self.total_return = round(equity - 100.0, 4)
+            self.sharpe  = 0.0
+            self.sortino = 0.0
 
-        self.sharpe  = compute_sharpe(daily_returns)
-        self.sortino = compute_sortino(daily_returns)
+
+def build_daily_portfolio_returns(
+    trades:              list,
+    closes_by_sym:       dict,
+    sorted_dates_by_sym: dict,
+    position_size:       float = POSITION_SIZE,
+) -> tuple[list[float], float]:
+    """
+    Build a REAL mark-to-market daily portfolio return series (percent units).
+
+    For each closed trade, construct its per-day price path:
+      entry_price (cost-loaded) → daily closes → final value implied by the
+      recorded net pnl_pct (so per-trade daily returns compound EXACTLY to
+      the trade's net-of-cost result).
+    Portfolio daily return = position_size × Σ(open-trade daily returns);
+    uninvested capital earns 0. Days between the first entry and last exit
+    with no open positions contribute 0.0 (honest exposure accounting).
+
+    Returns (daily_returns_pct, exposure_pct).
+    """
+    import bisect as _bisect
+
+    closed = [t for t in trades if t.pnl_pct is not None and t.exit_date is not None]
+    if not closed:
+        return [], 0.0
+
+    # Per-trade daily return contributions keyed by mark date
+    contrib: dict[date, float] = {}
+    active_days: set[date] = set()
+
+    for t in closed:
+        sym_dates = sorted_dates_by_sym.get(t.symbol, [])
+        if not sym_dates:
+            continue
+        # Mark dates: trading days strictly after signal date, up to exit date.
+        # The first mark day is the fill day (entry at that day's close).
+        lo = _bisect.bisect_right(sym_dates, t.entry_date)
+        hi = _bisect.bisect_right(sym_dates, t.exit_date)
+        mark_dates = sym_dates[lo:hi]
+        if not mark_dates:
+            mark_dates = [t.exit_date]
+
+        sym_closes = closes_by_sym.get(t.symbol, {})
+        final_value = t.entry_price * (1 + t.pnl_pct / 100)
+
+        prev = t.entry_price
+        for i, md in enumerate(mark_dates):
+            if i == len(mark_dates) - 1:
+                price = final_value          # exit fill, net of all costs
+            else:
+                price = sym_closes.get(md, prev)
+            if prev > 0:
+                r = (price - prev) / prev * 100
+                contrib[md] = contrib.get(md, 0.0) + r
+                active_days.add(md)
+            prev = price
+
+    if not contrib:
+        return [], 0.0
+
+    first_day = min(active_days)
+    last_day  = max(active_days)
+
+    # Use the union of all symbols' trading dates in [first_day, last_day]
+    all_days: set[date] = set()
+    for sym_dates in sorted_dates_by_sym.values():
+        lo = _bisect.bisect_left(sym_dates, first_day)
+        hi = _bisect.bisect_right(sym_dates, last_day)
+        all_days.update(sym_dates[lo:hi])
+
+    series = []
+    for dd in sorted(all_days):
+        series.append(position_size * contrib.get(dd, 0.0))
+
+    exposure = round(len(active_days) / max(len(all_days), 1) * 100, 2)
+    return series, exposure
 
 
 # ── Data loaders ──────────────────────────────────────────────
@@ -386,12 +517,13 @@ def _preload_prices(
     """
     Bulk-load all prices for universe in one query.
     Returns:
-      price_on_date:  {(symbol, date): close}  — exact date
-      sorted_dates_by_sym: {symbol: [date, ...]} sorted asc
       closes_by_sym:  {symbol: {date: close}}
+      sorted_dates_by_sym: {symbol: [date, ...]} sorted asc
+      hilo_by_sym:    {symbol: {date: (open, high, low)}} — intrabar SL/TP checks
     """
     rows = (
-        db.query(DailyPrice.symbol, DailyPrice.date, DailyPrice.close)
+        db.query(DailyPrice.symbol, DailyPrice.date, DailyPrice.close,
+                 DailyPrice.open, DailyPrice.high, DailyPrice.low)
         .filter(
             DailyPrice.symbol.in_(universe),
             DailyPrice.date >= start - timedelta(days=180),  # extra history for technicals
@@ -402,13 +534,16 @@ def _preload_prices(
         .all()
     )
     closes_by_sym: dict[str, dict[date, float]] = {}
-    for sym, dt, close in rows:
+    hilo_by_sym:   dict[str, dict[date, tuple]] = {}
+    for sym, dt, close, open_, high, low in rows:
         closes_by_sym.setdefault(sym, {})[dt] = close
+        if high is not None and low is not None:
+            hilo_by_sym.setdefault(sym, {})[dt] = (open_, high, low)
 
     sorted_dates_by_sym: dict[str, list[date]] = {
         sym: sorted(d.keys()) for sym, d in closes_by_sym.items()
     }
-    return closes_by_sym, sorted_dates_by_sym
+    return closes_by_sym, sorted_dates_by_sym, hilo_by_sym
 
 
 def _price_on_cached(closes_by_sym: dict, sorted_dates: dict, symbol: str, on_date: date, look_ahead: int = 0) -> Optional[float]:
@@ -543,6 +678,10 @@ def backtest_strategy(
     use_technical_fallback: bool = True,
     entry_conditions: Optional[object] = None,   # ConditionGroup from StrategyDSL
     exit_conditions:  Optional[object] = None,   # ConditionGroup from StrategyDSL
+    use_ml_predictions: bool = False,
+    shared_feature_cache: Optional[dict] = None,  # pre-built {(sym,date): {fname: val}} for batch runs
+    shared_price_data: Optional[tuple] = None,    # pre-built (closes_by_sym, sorted_dates_by_sym, hilo_by_sym)
+    shared_signal_cache: Optional[dict] = None,   # memoized {(sym,date): technical signal} across strategies
 ) -> BacktestResult:
     """
     Signal-driven backtest using ML predictions + price technicals.
@@ -580,11 +719,16 @@ def backtest_strategy(
         return result
 
     # Pre-load ALL price data in one bulk query (replaces per-day/per-sym DB calls in hot loop)
-    closes_by_sym, sorted_dates_by_sym = _preload_prices(db, universe, start_date, end_date)
+    if shared_price_data is not None:
+        closes_by_sym, sorted_dates_by_sym, hilo_by_sym = shared_price_data
+    else:
+        closes_by_sym, sorted_dates_by_sym, hilo_by_sym = _preload_prices(db, universe, start_date, end_date)
 
     # Pre-load feature vectors for DSL condition evaluation (only when DSL has conditions)
     feature_cache: dict[tuple, dict] = {}
-    if entry_conditions is not None or exit_conditions is not None:
+    if shared_feature_cache is not None:
+        feature_cache = shared_feature_cache   # batch runs: one load, many backtests
+    elif entry_conditions is not None or exit_conditions is not None:
         from aqrti.database.models import FeatureValue
         feat_rows = (
             db.query(FeatureValue.symbol, FeatureValue.date, FeatureValue.feature_name, FeatureValue.value)
@@ -602,8 +746,11 @@ def backtest_strategy(
                 feature_cache[key] = {}
             feature_cache[key][fname] = fval
 
-    # Pre-load ML predictions
-    ml_preds = _load_ml_predictions(db, start_date, end_date, universe)
+    # Pre-load ML predictions — DISABLED by default: Prediction rows are only
+    # written with date.today() by models trained on full history, so any
+    # historical prediction row is look-ahead. Backtests are technical+DSL
+    # only unless explicitly opted in (e.g. for recent-window live analysis).
+    ml_preds = _load_ml_predictions(db, start_date, end_date, universe) if use_ml_predictions else {}
     has_ml = bool(ml_preds)
 
     # Pre-load regimes and NIFTY trend for all dates in one pass
@@ -643,13 +790,12 @@ def backtest_strategy(
             vol = statistics.stdev(past)
         except Exception:
             vol = 0.0
-        # Returns stored as percentage (e.g. 0.83 = 0.83%) — baseline ~1% daily
-        avg_vol = 1.0
-        if vol > avg_vol * 1.8:   # stdev > 1.8% → VOLATILE
+        # Returns stored as percentage (e.g. 0.83 = 0.83%) — see market_data._compute_returns
+        if vol > 1.6:             # 20d stdev > 1.6%/day → VOLATILE
             return "VOLATILE"
-        if mean_ret > 0.2:        # avg daily +0.2% → BULL
+        if mean_ret > 0.05:       # avg +0.05%/day ≈ +1%/month → BULL
             return "BULL"
-        if mean_ret < -0.1:       # avg daily -0.1% → BEAR
+        if mean_ret < -0.05:      # avg -0.05%/day → BEAR
             return "BEAR"
         return "SIDEWAYS"
 
@@ -661,11 +807,10 @@ def backtest_strategy(
         idx = bisect.bisect_right(_regime_dates_sorted, d) - 1
         if idx >= 0:
             return regime_by_date[_regime_dates_sorted[idx]]
-        # No DB entry for this date: use NIFTY-derived regime
-        pr = _price_regime(d)
-        # Map SIDEWAYS → BULL in historical mode so strategies that only
-        # allow BULL/BEAR still get entries when regime DB is sparse
-        return pr if pr in ("BULL", "BEAR", "VOLATILE") else "BULL"
+        # No DB entry for this date: use NIFTY-derived regime as-is.
+        # (Previously SIDEWAYS was remapped to BULL, which let BULL-only
+        # strategies trade sideways markets by fiat — removed.)
+        return _price_regime(d)
 
     def _nifty_trend_on(d: date, lookback: int = 5) -> str:
         rets = [nifty_ret_by_date[nd] for nd in nifty_dates_sorted if nd <= d][-lookback:]
@@ -679,6 +824,8 @@ def backtest_strategy(
         return "FLAT"
 
     open_positions: dict[str, dict] = {}
+    entries_blocked_no_features = 0
+    _bad_bar_trades = 0
     regime_returns: dict[str, list[float]] = {
         "BULL": [], "BEAR": [], "SIDEWAYS": [], "VOLATILE": []
     }
@@ -696,39 +843,79 @@ def backtest_strategy(
             if cur_price is None:
                 continue
 
-            if pos["entry_price"] <= 0:
+            entry_px = pos["entry_price"]
+            if entry_px <= 0:
                 continue
-            pnl_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
-            exit_reason = ""
 
-            if pnl_pct <= stop_loss_pct:
-                exit_reason = "stop_loss"
-            elif pnl_pct >= take_profit_pct:
-                exit_reason = "take_profit"
-            elif pos["holding_days"] >= max_holding_days:
-                exit_reason = "max_holding_days"
-            elif d == end_date:
-                exit_reason = "end_of_backtest"
-            else:
-                # Bearish ML flip — exit early
-                flip = ml_day.get(sym, {})
-                if flip.get("direction") == "Bearish" and flip.get("confidence", 0) >= 65:
-                    exit_reason = "bearish_flip"
-                # DSL exit conditions evaluated against feature vectors
-                elif exit_conditions is not None:
-                    feat_vec = feature_cache.get((sym, d), {})
-                    if feat_vec and exit_conditions.evaluate(feat_vec):
-                        exit_reason = "exit_rule"
+            exit_reason = ""
+            exit_fill   = cur_price   # default: exit at close
+
+            # ── Intrabar SL/TP using the day's open/high/low ──
+            # Skip the fill bar itself (entry happened at its close),
+            # and skip if OHLC not available for the day.
+            bar = hilo_by_sym.get(sym, {}).get(d)
+            if bar is not None and d > pos.get("fill_date", pos["entry_date"]):
+                bar_open, bar_high, bar_low = bar
+                # Circuit-locked bar (high == low): the stock is pinned at an
+                # NSE circuit band — no counterparty, you CANNOT exit. Carry
+                # the position; close-based checks below also skipped for SL/TP
+                # realism (a locked stock fills at neither stop nor target).
+                locked = (bar_high is not None and bar_low is not None
+                          and bar_high == bar_low)
+                if not locked:
+                    sl_level = entry_px * (1 + stop_loss_pct / 100)
+                    tp_level = entry_px * (1 + take_profit_pct / 100)
+                    # Conservative ordering: stop-loss checked before take-profit
+                    if bar_open is not None and bar_open <= sl_level:
+                        exit_reason, exit_fill = "stop_loss", bar_open    # gap through stop
+                    elif bar_low is not None and bar_low <= sl_level:
+                        exit_reason, exit_fill = "stop_loss", sl_level
+                    elif bar_open is not None and bar_open >= tp_level:
+                        exit_reason, exit_fill = "take_profit", bar_open  # gap through target
+                    elif bar_high is not None and bar_high >= tp_level:
+                        exit_reason, exit_fill = "take_profit", tp_level
+
+            if not exit_reason:
+                pnl_close = (cur_price - entry_px) / entry_px * 100
+                if pnl_close <= stop_loss_pct:
+                    exit_reason = "stop_loss"        # close-based fallback (no OHLC)
+                elif pnl_close >= take_profit_pct:
+                    exit_reason = "take_profit"
+                elif pos["holding_days"] >= max_holding_days:
+                    exit_reason = "max_holding_days"
+                elif d == end_date:
+                    exit_reason = "end_of_backtest"
+                else:
+                    # Bearish ML flip — exit early (only if ML enabled)
+                    flip = ml_day.get(sym, {})
+                    if flip.get("direction") == "Bearish" and flip.get("confidence", 0) >= 65:
+                        exit_reason = "bearish_flip"
+                    # DSL exit conditions evaluated against feature vectors
+                    elif exit_conditions is not None:
+                        feat_vec = feature_cache.get((sym, d), {})
+                        if feat_vec and exit_conditions.evaluate(feat_vec):
+                            exit_reason = "exit_rule"
 
             if exit_reason:
+                pnl_pct = (exit_fill - entry_px) / entry_px * 100
+                # Corrupt-bar guard: a long delivery trade cannot plausibly
+                # return beyond a sane bound. A blowout (e.g. +15,000%) means
+                # the exit or entry price is a bad tick / unhealed split
+                # artifact. Clamp to the take-profit ceiling so one garbage
+                # bar can't dominate expectancy, Sharpe, and the daily series.
+                sane_ceiling = max(take_profit_pct * 2.0, 60.0)
+                if pnl_pct > sane_ceiling or pnl_pct < -99.0:
+                    _bad_bar_trades += 1
+                    pnl_pct = min(max(pnl_pct, -99.0), take_profit_pct)
+                    exit_fill = entry_px * (1 + pnl_pct / 100)
                 exit_cost_pct = _transaction_cost("sell", sym) * 100
                 net_pnl = pnl_pct - exit_cost_pct
                 t = TradeRecord(
                     symbol        = sym,
                     entry_date    = pos["entry_date"],
                     exit_date     = d,
-                    entry_price   = pos["entry_price"],
-                    exit_price    = cur_price,
+                    entry_price   = entry_px,
+                    exit_price    = exit_fill,
                     pnl_pct       = round(net_pnl, 4),
                     exit_reason   = exit_reason,
                     holding_days  = pos["holding_days"],
@@ -755,17 +942,23 @@ def backtest_strategy(
             if sym in ml_day:
                 signals.append((sym, ml_day[sym]))
             elif use_technical_fallback:
-                # Use cached price history with bisect for O(log n) slice
-                import bisect
-                sym_dates = sorted_dates_by_sym.get(sym, [])
-                sym_closes = closes_by_sym.get(sym, {})
-                if sym_dates:
-                    end_idx = bisect.bisect_right(sym_dates, d)
-                    hist_closes = [sym_closes[sym_dates[i]] for i in range(max(0, end_idx-120), end_idx)]
-                    if len(hist_closes) >= 22:
-                        sig = _technical_signal(hist_closes)
-                        sig["source"] = "technical"
-                        signals.append((sym, sig))
+                # Technical signal depends only on (symbol, date) — memoize
+                # across strategies in batch runs via shared_signal_cache.
+                sig = shared_signal_cache.get((sym, d)) if shared_signal_cache is not None else None
+                if sig is None:
+                    import bisect
+                    sym_dates = sorted_dates_by_sym.get(sym, [])
+                    sym_closes = closes_by_sym.get(sym, {})
+                    if sym_dates:
+                        end_idx = bisect.bisect_right(sym_dates, d)
+                        hist_closes = [sym_closes[sym_dates[i]] for i in range(max(0, end_idx-120), end_idx)]
+                        if len(hist_closes) >= 22:
+                            sig = _technical_signal(hist_closes)
+                            sig["source"] = "technical"
+                            if shared_signal_cache is not None:
+                                shared_signal_cache[(sym, d)] = sig
+                if sig is not None:
+                    signals.append((sym, sig))
 
         # Sort by confidence descending — highest conviction first
         signals.sort(key=lambda x: x[1]["confidence"], reverse=True)
@@ -777,17 +970,27 @@ def backtest_strategy(
             if not _should_enter(signal, regime, nifty_trend, min_confidence, allowed_regimes):
                 continue
 
-            # Evaluate DSL entry conditions against pre-loaded feature vectors
-            # Only apply when feature data actually exists for this date/symbol;
-            # if missing, fall through — signal + confidence gate is sufficient.
+            # Evaluate DSL entry conditions — FAIL-CLOSED. A strategy's rules
+            # are its identity; if the feature vector is missing for this
+            # (symbol, date) we must NOT trade on the generic fallback, or the
+            # backtest measures the fallback rather than the strategy.
             if entry_conditions is not None:
-                feat_vec = feature_cache.get((sym, d), {})
-                if feat_vec and not entry_conditions.evaluate(feat_vec):
+                feat_vec = feature_cache.get((sym, d))
+                if not feat_vec:
+                    entries_blocked_no_features += 1
+                    continue
+                if not entry_conditions.evaluate(feat_vec):
                     continue  # DSL conditions not met — skip
 
             # Enter at next-day close; fall back to same-day if not available
-            entry_price = _price_on_cached(closes_by_sym, sorted_dates_by_sym, sym, d, look_ahead=1)
-            if entry_price is None:
+            import bisect as _b
+            sym_dates_e = sorted_dates_by_sym.get(sym, [])
+            fill_idx = _b.bisect_left(sym_dates_e, d + timedelta(days=1))
+            if fill_idx < len(sym_dates_e):
+                fill_date   = sym_dates_e[fill_idx]
+                entry_price = closes_by_sym[sym][fill_date]
+            else:
+                fill_date   = d
                 entry_price = _price_before_cached(closes_by_sym, sorted_dates_by_sym, sym, d)
             if entry_price is None or entry_price <= 0:
                 continue
@@ -795,6 +998,7 @@ def backtest_strategy(
             entry_cost_pct = _transaction_cost("buy", sym)
             open_positions[sym] = {
                 "entry_date":   d,
+                "fill_date":    fill_date,
                 "entry_price":  entry_price * (1 + entry_cost_pct),
                 "holding_days": 0,
                 "regime_entry": regime,
@@ -808,6 +1012,12 @@ def backtest_strategy(
         if cur_price is None or pos["entry_price"] <= 0:
             continue
         pnl_pct = (cur_price - pos["entry_price"]) / pos["entry_price"] * 100
+        # Same corrupt-bar guard as the main exit path
+        sane_ceiling = max(take_profit_pct * 2.0, 60.0)
+        if pnl_pct > sane_ceiling or pnl_pct < -99.0:
+            _bad_bar_trades += 1
+            pnl_pct = min(max(pnl_pct, -99.0), take_profit_pct)
+            cur_price = pos["entry_price"] * (1 + pnl_pct / 100)
         exit_cost_pct = _transaction_cost("sell", sym) * 100
         net_pnl = pnl_pct - exit_cost_pct
         t = TradeRecord(
@@ -827,7 +1037,12 @@ def backtest_strategy(
         if reg_key in regime_returns:
             regime_returns[reg_key].append(net_pnl)
 
-    result.compute_metrics()
+    # Real mark-to-market daily portfolio return series (percent units)
+    daily_series, exposure = build_daily_portfolio_returns(
+        result.trades, closes_by_sym, sorted_dates_by_sym
+    )
+    result.compute_metrics(daily_returns=daily_series)
+    result.exposure_pct = exposure
 
     # Regime-stratified Sharpe
     for reg, rets in regime_returns.items():
@@ -837,10 +1052,21 @@ def backtest_strategy(
 
     result.regime_trades = {k: len(v) for k, v in regime_returns.items()}
 
+    if entries_blocked_no_features:
+        log.info(
+            "Backtest %s: %d entries blocked (no feature vector — fail-closed DSL)",
+            strategy_id, entries_blocked_no_features,
+        )
+    if _bad_bar_trades:
+        log.warning(
+            "Backtest %s: %d trades clamped for corrupt price bars (bad tick / unhealed split) — "
+            "run /admin/integrity-sweep to heal source data",
+            strategy_id, _bad_bar_trades,
+        )
     log.info(
-        "Backtest %s: trades=%d sharpe=%.3f win_rate=%.1f%% mdd=%.1f%%",
+        "Backtest %s: trades=%d sharpe=%.3f win_rate=%.1f%% mdd=%.1f%% exposure=%.0f%%",
         strategy_id, result.trade_count, result.sharpe,
-        result.win_rate, result.max_drawdown,
+        result.win_rate, result.max_drawdown, result.exposure_pct,
     )
     return result
 
@@ -851,7 +1077,10 @@ def _walk_forward_oos_check(
     full_end:         date,
     oos_months:       int = 6,
     min_oos_trades:   int = 5,
-    min_oos_win_rate: float = 48.0,
+    min_oos_win_rate: float = 50.0,
+    shared_feature_cache: Optional[dict] = None,
+    shared_price_data: Optional[tuple] = None,
+    shared_signal_cache: Optional[dict] = None,
 ) -> dict:
     """
     Quick out-of-sample check: re-run the strategy on the last `oos_months` of data
@@ -890,13 +1119,20 @@ def _walk_forward_oos_check(
             use_technical_fallback = True,
             entry_conditions = entry_conds,
             exit_conditions  = exit_conds,
+            shared_feature_cache = shared_feature_cache,
+            shared_price_data    = shared_price_data,
+            shared_signal_cache  = shared_signal_cache,
         )
         oos_wr     = oos_result.win_rate
         oos_trades = oos_result.trade_count
         oos_sharpe = oos_result.sharpe
-        oos_passed = oos_trades >= min_oos_trades and oos_wr >= min_oos_win_rate
-        # Penalty: if OOS win rate is >10pp below in-sample, flag it
-        oos_penalty = max(0.0, 0.0)  # computed by caller using in-sample WR
+        # Hard pass requires: enough trades, win rate >= 50%, and positive
+        # net expectancy in the held-out window (profitable after costs).
+        oos_passed = (
+            oos_trades >= min_oos_trades
+            and oos_wr >= min_oos_win_rate
+            and oos_result.expectancy > 0
+        )
     except Exception as e:
         log.debug("OOS check failed (non-fatal): %s", e)
         return {"oos_win_rate": None, "oos_trades": 0, "oos_sharpe": None, "oos_passed": None, "oos_penalty": 0.0}
@@ -916,6 +1152,9 @@ def backtest_and_update(
     start_date: Optional[date] = None,
     end_date:   Optional[date] = None,
     universe:   Optional[list[str]] = None,
+    shared_feature_cache: Optional[dict] = None,
+    shared_price_data: Optional[tuple] = None,
+    shared_signal_cache: Optional[dict] = None,
 ) -> BacktestResult:
     """Backtest a strategy and write results to StrategyV2 + individual trades."""
     from strategies.strategy_store import upsert_strategy
@@ -948,10 +1187,21 @@ def backtest_and_update(
         family            = strategy.get("family",           "hybrid")
         name              = strategy.get("name",             "")
 
-    # Main in-sample backtest (first 82% of the window — last 18% ≈ 11 months held out)
-    # Use start→(end - 11 months) as in-sample; run OOS on the held-out tail
-    oos_months = 6
-    is_end   = end - timedelta(days=oos_months * 30)
+    # Walk-forward split: in-sample = start → (oos_end - 6mo - embargo), where
+    # the embargo (= max holding period) prevents trades opened near the
+    # boundary from leaking into the out-of-sample window.
+    #
+    # Anti-leak rotation: a single fixed holdout shared by thousands of
+    # evolved candidates gets overfit BY SELECTION even though no individual
+    # strategy saw it. Shift each strategy's holdout end by a deterministic
+    # 0-59 day offset derived from its ID, so the population is graded on
+    # staggered windows rather than one leaky one.
+    import hashlib
+    oos_months   = 6
+    embargo_days = int(max_holding_days or 20)
+    shift_days   = int(hashlib.md5(sid.encode()).hexdigest()[:8], 16) % 60
+    oos_end      = end - timedelta(days=shift_days)
+    is_end       = oos_end - timedelta(days=oos_months * 30 + embargo_days)
 
     result = backtest_strategy(
         db               = db,
@@ -967,10 +1217,16 @@ def backtest_and_update(
         use_technical_fallback = True,
         entry_conditions = entry_conds,
         exit_conditions  = exit_conds,
+        shared_feature_cache = shared_feature_cache,
+        shared_price_data    = shared_price_data,
+        shared_signal_cache  = shared_signal_cache,
     )
 
-    # Walk-forward OOS check on the held-out 6 months
-    oos = _walk_forward_oos_check(db, strategy, full_end=end, oos_months=oos_months)
+    # Walk-forward OOS check on the held-out (rotated) 6-month window
+    oos = _walk_forward_oos_check(db, strategy, full_end=oos_end, oos_months=oos_months,
+                                  shared_feature_cache=shared_feature_cache,
+                                  shared_price_data=shared_price_data,
+                                  shared_signal_cache=shared_signal_cache)
     oos_win_rate = oos.get("oos_win_rate")
     oos_passed   = oos.get("oos_passed")
 
@@ -984,14 +1240,21 @@ def backtest_and_update(
             result.sharpe  = round(result.sharpe * penalty_factor, 4)
             result.sortino = round(result.sortino * penalty_factor, 4)
             log.info(
-                "OOS overfit detected %s: IS_WR=%.1f%% OOS_WR=%.1f%% gap=%.1fpp → sharpe penalised ×%.2f",
+                "OOS overfit detected %s: IS_WR=%.1f%% OOS_WR=%.1f%% gap=%.1fpp -> sharpe penalised x%.2f",
                 sid, result.win_rate, oos_win_rate, wr_gap, penalty_factor,
             )
 
     # Write results in a dedicated short-lived session to avoid holding the
     # long read session open during the commit (prevents SQLite "database is locked").
     from aqrti.database.engine import get_db as _get_write_db
+    from aqrti.database.models import StrategyV2 as _SV2
     with _get_write_db() as write_db:
+        # Preserve the strategy's current lifecycle status — a re-backtest
+        # must not silently demote promoted/active strategies. Demotion is
+        # the lifecycle sweep's job, based on the fresh metrics.
+        existing = write_db.query(_SV2.status).filter(_SV2.strategy_id == result.strategy_id).first()
+        current_status = existing[0] if existing else "shadow"
+
         upsert_strategy(write_db, {
             "strategy_id":       result.strategy_id,
             "sharpe":            result.sharpe,
@@ -1002,18 +1265,21 @@ def backtest_and_update(
             "expectancy":        result.expectancy,
             "trade_count":       result.trade_count,
             "avg_holding_days":  result.avg_holding_days,
+            "exposure_pct":      result.exposure_pct,
             "bull_sharpe":       result.bull_sharpe,
             "bear_sharpe":       result.bear_sharpe,
             "sideways_sharpe":   result.sideways_sharpe,
             "volatile_sharpe":   result.volatile_sharpe,
+            "oos_sharpe":        oos.get("oos_sharpe"),
+            "oos_win_rate":      oos_win_rate,
+            "oos_trades":        oos.get("oos_trades", 0),
+            "oos_passed":        oos_passed,
             "backtest_start":    start,
             "backtest_end":      end,
             "backtest_universe": result.universe_size,
-            "status":            "shadow",
+            "status":            current_status,
             "family":            family,
             "name":              name,
-            # OOS metadata stored in notes field for visibility
-            "notes":             f"OOS({oos_months}m): wr={oos_win_rate or 'n/a'} trades={oos.get('oos_trades',0)} passed={oos_passed}",
         })
 
         # Persist individual trades — delete stale, insert fresh

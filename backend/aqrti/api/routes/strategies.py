@@ -37,6 +37,48 @@ def _safe_json(s):
         return s
 
 
+def _quarantine_status(db: Session, row: StrategyV2) -> dict | None:
+    """
+    Progress toward the paper-trading quarantine gate that /activate enforces
+    (see promotion_config.QUARANTINE_*). Only meaningful for 'promoted'
+    strategies — 'active' ones already cleared it (or were force-approved).
+    """
+    if row.status != "promoted":
+        return None
+    from datetime import datetime as _dt
+    from aqrti.database.models import PaperTrade
+    from strategies.promotion_config import (
+        QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
+    )
+    days_promoted = (_dt.utcnow() - row.promoted_at).days if row.promoted_at else 0
+    closed = (
+        db.query(PaperTrade)
+        .filter(PaperTrade.portfolio_name == f"strat_{row.strategy_id}",
+                PaperTrade.is_open == False)
+        .all()
+    )
+    n = len(closed)
+    wins = sum(1 for t in closed if (t.gross_pnl_pct or 0) > 0)
+    wr = wins / n * 100 if n else 0.0
+    net_pnl = sum(t.gross_pnl or 0 for t in closed)
+    ready = (
+        days_promoted >= QUARANTINE_MIN_DAYS
+        and n >= QUARANTINE_MIN_TRADES
+        and (n == 0 or wr >= QUARANTINE_MIN_WIN_RATE)
+        and (n == 0 or net_pnl > 0)
+    )
+    return {
+        "days_promoted":   days_promoted,
+        "days_required":   QUARANTINE_MIN_DAYS,
+        "shadow_trades":   n,
+        "trades_required": QUARANTINE_MIN_TRADES,
+        "shadow_win_rate": round(wr, 1),
+        "win_rate_required": QUARANTINE_MIN_WIN_RATE,
+        "shadow_net_pnl":  round(net_pnl, 2),
+        "ready_for_activation": ready,
+    }
+
+
 @router.get("")
 def get_strategies(
     status:   str | None = Query(default=None),
@@ -60,9 +102,14 @@ def get_strategies(
                 "profit_factor":  r.profit_factor,
                 "max_drawdown":   r.max_drawdown,
                 "trade_count":    r.trade_count,
+                "oos_sharpe":     r.oos_sharpe,
+                "oos_win_rate":   r.oos_win_rate,
+                "oos_trades":     r.oos_trades,
+                "oos_passed":     r.oos_passed,
                 "allowed_regimes": _safe_json(r.allowed_regimes),
                 "created_at":     r.created_at.isoformat() if r.created_at else None,
                 "promoted_at":    r.promoted_at.isoformat() if r.promoted_at else None,
+                "quarantine":     _quarantine_status(db, r),
             }
             for r in rows
         ],
@@ -286,6 +333,10 @@ def get_strategy_detail(strategy_id: str, db: Session = Depends(get_db_dependenc
         "bear_sharpe":      row.bear_sharpe,
         "sideways_sharpe":  row.sideways_sharpe,
         "volatile_sharpe":  row.volatile_sharpe,
+        "oos_sharpe":       row.oos_sharpe,
+        "oos_win_rate":     row.oos_win_rate,
+        "oos_trades":       row.oos_trades,
+        "oos_passed":       row.oos_passed,
         "backtest_start":   str(row.backtest_start) if row.backtest_start else None,
         "backtest_end":     str(row.backtest_end) if row.backtest_end else None,
         "allowed_regimes":  _safe_json(row.allowed_regimes),
@@ -295,6 +346,7 @@ def get_strategy_detail(strategy_id: str, db: Session = Depends(get_db_dependenc
         "promoted_at":      row.promoted_at.isoformat() if row.promoted_at else None,
         "retired_at":       row.retired_at.isoformat() if row.retired_at else None,
         "created_at":       row.created_at.isoformat() if row.created_at else None,
+        "quarantine":       _quarantine_status(db, row),
     }
 
 
@@ -498,8 +550,23 @@ def promote(
 
 
 @router.post("/{strategy_id}/activate")
-def activate(strategy_id: str, db: Session = Depends(get_db_dependency)):
-    """Human approval — moves 'promoted' → 'active'. No automatic path exists."""
+def activate(strategy_id: str, force: bool = False, db: Session = Depends(get_db_dependency)):
+    """
+    Human approval — moves 'promoted' → 'active'. No automatic path exists.
+
+    Paper-trading QUARANTINE gate: the strategy must have spent
+    QUARANTINE_MIN_DAYS in 'promoted' AND produced QUARANTINE_MIN_TRADES
+    closed live paper trades with win rate >= QUARANTINE_MIN_WIN_RATE and
+    positive net P&L. Forward performance on data that didn't exist when the
+    strategy was created is the only test that can't be overfit.
+    Pass force=true to override (logged in status_reason).
+    """
+    from datetime import datetime as _dt
+    from aqrti.database.models import PaperTrade
+    from strategies.promotion_config import (
+        QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
+    )
+
     row = get_strategy(db, strategy_id)
     if not row:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -508,10 +575,43 @@ def activate(strategy_id: str, db: Session = Depends(get_db_dependency)):
             status_code=400,
             detail=f"Strategy must be in 'promoted' state to activate. Current: {row.status}",
         )
+
+    if not force:
+        days_promoted = (_dt.utcnow() - row.promoted_at).days if row.promoted_at else 0
+        # Count ONLY genuine shadow trades (the strategy's own DSL exercised
+        # forward, portfolio "strat_<id>") — NOT default-portfolio ML trades
+        # that merely borrowed this strategy's ID for SL/TP params.
+        closed = (
+            db.query(PaperTrade)
+            .filter(PaperTrade.portfolio_name == f"strat_{strategy_id}",
+                    PaperTrade.is_open == False)
+            .all()
+        )
+        n = len(closed)
+        wins = sum(1 for t in closed if (t.gross_pnl_pct or 0) > 0)
+        wr = wins / n * 100 if n else 0.0
+        net_pnl = sum(t.gross_pnl or 0 for t in closed)
+        failures = []
+        if days_promoted < QUARANTINE_MIN_DAYS:
+            failures.append(f"only {days_promoted}/{QUARANTINE_MIN_DAYS} days in quarantine")
+        if n < QUARANTINE_MIN_TRADES:
+            failures.append(f"only {n}/{QUARANTINE_MIN_TRADES} closed paper trades")
+        if n and wr < QUARANTINE_MIN_WIN_RATE:
+            failures.append(f"paper win rate {wr:.1f}% < {QUARANTINE_MIN_WIN_RATE}%")
+        if n and net_pnl <= 0:
+            failures.append(f"paper net P&L {net_pnl:.0f} not positive")
+        if failures:
+            raise HTTPException(
+                status_code=400,
+                detail="Quarantine gate not met: " + "; ".join(failures) +
+                       ". Pass force=true to override.",
+            )
+
     row.status        = "active"
-    row.status_reason = "human_approved"
+    row.status_reason = "human_approved_forced" if force else "human_approved_after_quarantine"
     db.commit()
-    return {"strategy_id": strategy_id, "status": "active", "message": "Strategy activated by human approval"}
+    return {"strategy_id": strategy_id, "status": "active",
+            "message": "Strategy activated by human approval" + (" (FORCED past quarantine)" if force else "")}
 
 
 @router.post("/{strategy_id}/retire")

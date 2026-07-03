@@ -115,7 +115,7 @@ def run_paper_trading_cycle(version: int = 1, strategy_id: str | None = None) ->
         mtm["totalValue"],
     )
 
-    # ── Auto-retrain: if live win rate is below 70%, trigger retrain loop ────
+    # ── Auto-retrain: if live win rate is below WIN_RATE_TARGET, trigger retrain loop ────
     retrain_triggered = False
     try:
         from paper_trading.retrain_loop import run_retrain_loop, _get_live_win_rate, MIN_TRADES_EVAL, WIN_RATE_TARGET

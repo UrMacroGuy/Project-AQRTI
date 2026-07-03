@@ -26,17 +26,18 @@ It is **not** a trading bot with real money. It is a research and validation pla
 
 ---
 
-## Current Stats (2026-06-28)
+## Current Stats (2026-07-03)
 
 | Metric | Value |
 |---|---|
-| Strategy population | 7,000+ total · multiple families |
-| Best strategy fitness | 69.8 (regime_adaptive family) |
-| Intelligence Score | 71.5 |
+| Feature history coverage | 2021-08-10 → present, 5yr, matches full price history (previously capped at 3.3yr — fixed 2026-07-03) |
+| Strategy population | ~927 candidates re-earning honest scores + 1 promoted (post-cleanup) |
+| Promotion gates | Fitness, win-rate, Sharpe, OOS (held-out 6mo), benchmark vs NIFTY50, duplicate-overlap, max drawdown |
+| Arena | Champion grading now requires OOS pass + ≥30 trades + regime robustness, not just in-sample return |
 | Market regime | SIDEWAYS |
 | Agent pipeline | 7 agents · 100% success |
 | Stock universe | 779 global symbols · 309 Indian (137 NSE + 172 BSE) |
-| Strategy Arena | Autonomous self-learning loop — refines losing strategies daily |
+| Strategy Arena | Autonomous self-learning loop — refines losing strategies daily under human-approval gate |
 
 ---
 

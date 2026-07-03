@@ -41,7 +41,7 @@ from aqrti.database.models import StrategyV2
 log = get_logger("strategy_research_loop")
 
 
-def _backtest_unscored(db, max_stocks: int = 200) -> dict:
+def _backtest_unscored(db, max_stocks: int = 300) -> dict:
     """Backtest all candidates that have no fitness score yet.
     Selects proportionally across families so no family is starved."""
     import random as _random
@@ -95,7 +95,9 @@ def _backtest_unscored(db, max_stocks: int = 200) -> dict:
     tested = 0
     errors = 0
     end_date   = date.today()
-    start_date = end_date - timedelta(days=1095)  # 3 years → ~756 trading days for 500+ trades
+    # 5 years — MUST match the population/evolution window so every strategy is
+    # scored on the same data (mixed windows corrupt fitness comparison).
+    start_date = end_date - timedelta(days=1825)
 
     for row in rows:
         try:
@@ -237,8 +239,8 @@ def _apply_arena_champion_boost(db) -> dict:
 
 
 def run_daily_strategy_research(
-    generate_n:    int = 30,    # reduced 100→30: pre-screened quality over random volume
-    evolve_n:      int = 20,    # reduced 40→20: fewer but higher-quality offspring
+    generate_n:    int = 50,    # raised 30→50: 50-stock universe → more signal combinations to explore
+    evolve_n:      int = 30,    # raised 20→30: more offspring from top parents
     skip_generate: bool = False,
     skip_evolve:   bool = False,
 ) -> dict:

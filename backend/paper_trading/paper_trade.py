@@ -21,6 +21,15 @@ log = get_logger("paper_trade")
 
 PORTFOLIO_NAME = "default"
 
+# Must match strategy_backtester.py's NSE delivery round-trip cost model
+# (0.28% total, ~55/45 buy/sell split) so paper P&L is comparable to backtest
+# P&L. Previously this module applied ZERO cost — every paper trade's return
+# was inflated by the full round-trip vs. both the backtester and the
+# strategy_shadow_runner, which do apply it.
+_NSE_ROUND_TRIP_COST = 0.0028
+NSE_BUY_COST_PCT  = _NSE_ROUND_TRIP_COST * 0.55
+NSE_SELL_COST_PCT = _NSE_ROUND_TRIP_COST * 0.45
+
 # NSE symbol → Yahoo Finance ticker map
 _NSE_TO_YF = {
     # Original 20
@@ -124,6 +133,8 @@ def open_position(
     prediction_id:   int  = None,
     strategy_id:     str  = None,
     strategy_name:   str  = None,
+    stop_loss_pct:   Optional[float] = None,   # from the driving strategy's DSL, if any
+    take_profit_pct: Optional[float] = None,
 ) -> Optional[PaperPosition]:
     """
     Open a new paper position. Idempotent — no-op if symbol already open.
@@ -142,17 +153,30 @@ def open_position(
         log.warning("Invalid entry price %.4f for %s", entry_price, symbol)
         return None
 
-    shares    = capital / entry_price
+    # Cost-loaded fill — matches strategy_backtester.py's entry cost model
+    filled_price = entry_price * (1 + NSE_BUY_COST_PCT)
+    shares    = capital / filled_price
     weight    = capital / portfolio_value * 100 if portfolio_value > 0 else 0.0
-    stop_loss = entry_price * 0.92        # 8% hard stop
-    target    = entry_price * (1 + max(expected_return / 100, 0.03))
+    # Use the driving strategy's OWN backtested SL/TP when available — a flat
+    # 8%/max(expected_return,3%) fallback only applies when no strategy is
+    # attached (pure-ML signal with no strategy match). Using the strategy's
+    # actual thresholds here is what makes paper P&L attributable to "this
+    # strategy works", matching what strategy_shadow_runner.py already does.
+    if stop_loss_pct is not None:
+        stop_loss = filled_price * (1 + stop_loss_pct / 100)   # stop_loss_pct is negative
+    else:
+        stop_loss = filled_price * 0.92        # 8% hard stop fallback
+    if take_profit_pct is not None:
+        target = filled_price * (1 + take_profit_pct / 100)
+    else:
+        target = filled_price * (1 + max(expected_return / 100, 0.03))
 
     pos = PaperPosition(
         portfolio_name   = PORTFOLIO_NAME,
         symbol           = symbol,
         sector           = sector,
         entry_date       = date.today(),
-        entry_price      = entry_price,
+        entry_price      = filled_price,
         shares           = shares,
         capital_deployed = capital,
         weight_pct       = round(weight, 4),
@@ -172,7 +196,7 @@ def open_position(
         symbol           = symbol,
         sector           = sector,
         entry_date       = date.today(),
-        entry_price      = entry_price,
+        entry_price      = filled_price,
         shares           = shares,
         capital_deployed = capital,
         weight_pct       = round(weight, 4),
@@ -207,7 +231,11 @@ def close_position(
     if not pos:
         return None
 
-    exit_price = _current_price(db, symbol, pos.entry_price)
+    raw_exit_price = _current_price(db, symbol, pos.entry_price)
+    # Cost-loaded fill on exit — matches strategy_backtester.py's exit cost model.
+    # pos.entry_price is already cost-loaded (see open_position), so this
+    # nets both legs of the round-trip, same as backtest/shadow-runner trades.
+    exit_price    = raw_exit_price * (1 - NSE_SELL_COST_PCT)
     gross_pnl     = (exit_price - pos.entry_price) / pos.entry_price * pos.capital_deployed
     gross_pnl_pct = (exit_price - pos.entry_price) / pos.entry_price * 100
     actual_return  = gross_pnl_pct

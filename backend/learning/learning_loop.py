@@ -86,8 +86,7 @@ def _backfill_prediction_outcomes(db, days: int = 30) -> dict:
         p.actual_return = actual
         filled += 1
 
-    if filled:
-        db.commit()
+    db.commit()
 
     log.info("Prediction backfill: filled=%d skipped=%d", filled, skipped)
     return {"filled": filled, "skipped": skipped, "total_checked": len(preds)}
@@ -136,10 +135,24 @@ def run_daily_learning(days: int = 7) -> dict:
         from learning.root_cause_engine import run_failure_analysis
         _run_step("failure_analysis", lambda: run_failure_analysis(db, days=days))
 
-        # Step 3: Model drift detection
+        # Step 3: Model drift detection (now includes 7d window for early detection)
         log.info("[Learning Loop] Step 3: Model drift detection")
         from learning.model_drift import run_drift_detection
-        _run_step("drift_detection", lambda: run_drift_detection(db, windows=[30, 90]))
+        drift_result = _run_step("drift_detection", lambda: run_drift_detection(db, windows=[7, 30, 90]))
+
+        # Step 3B: Auto-retrain if 30d drift is flagged — connects learning to retraining
+        flagged = (drift_result or {}).get("flagged", [])
+        thirty_day_flags = [f for f in flagged if f.get("window") == 30]
+        if thirty_day_flags:
+            log.info("[Learning Loop] Step 3B: 30d drift detected — triggering model retrain check")
+            try:
+                from ml.model_retrainer import check_and_retrain
+                retrain_r = check_and_retrain(db, force=False)
+                summary["steps"]["auto_retrain"] = retrain_r
+                log.info("[Learning Loop] Step 3B — Retrain: triggered=%s", retrain_r.get("triggered"))
+            except Exception as _re:
+                log.warning("[Learning Loop] Step 3B — Retrain check failed: %s", _re)
+                summary["steps"]["auto_retrain"] = {"status": "error", "error": str(_re)}
 
         # Step 4: Confidence scaling recommendation
         log.info("[Learning Loop] Step 4: Confidence scaling")

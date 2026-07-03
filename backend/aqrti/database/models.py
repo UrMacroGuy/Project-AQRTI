@@ -897,9 +897,20 @@ class StrategyV2(Base):
     # Lifecycle
     status           = Column(String(20), nullable=False, default="candidate")
     # candidate → shadow → promoted → active → retired → archived
+    # Owned exclusively by strategy_lifecycle.py's promote_strategy/retire_strategy.
+    # The arena (arena/arena_engine.py) must NEVER write "champion"/"needs_review"
+    # here — see arena_status below. A prior version of the arena did write into
+    # this field, silently colliding with the lifecycle state machine and
+    # (via auto_promote_strategies) bypassing the human-approval + paper-trading
+    # quarantine gate required before "active". Fixed 2026-07-03.
     status_reason    = Column(Text,       nullable=True)
     promoted_at      = Column(DateTime,   nullable=True)
     retired_at       = Column(DateTime,   nullable=True)
+    # Arena refinement state — separate namespace from `status` above so the
+    # arena's internal grading (champion / refining / needs_review) can never
+    # collide with or bypass the human-approval lifecycle state machine.
+    arena_status     = Column(String(20), nullable=True)   # None|refining|champion|needs_review
+    arena_rounds     = Column(Integer,    nullable=True, default=0)
     # Fitness / Backtest Metrics
     fitness_score    = Column(Float,      nullable=True)    # 0-100 composite
     sharpe           = Column(Float,      nullable=True)
@@ -916,6 +927,11 @@ class StrategyV2(Base):
     bear_sharpe      = Column(Float,      nullable=True)
     sideways_sharpe  = Column(Float,      nullable=True)
     volatile_sharpe  = Column(Float,      nullable=True)
+    # Out-of-sample (walk-forward holdout) results
+    oos_sharpe       = Column(Float,      nullable=True)
+    oos_win_rate     = Column(Float,      nullable=True)
+    oos_trades       = Column(Integer,    nullable=True)
+    oos_passed       = Column(Boolean,    nullable=True)
     # Meta
     backtest_start   = Column(Date,       nullable=True)
     backtest_end     = Column(Date,       nullable=True)

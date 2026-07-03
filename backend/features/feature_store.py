@@ -11,6 +11,7 @@ from typing import Optional
 
 import pandas as pd
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from aqrti.database.models import FeatureValue
 from aqrti.utils.logger import get_logger
@@ -27,39 +28,46 @@ def save_feature_vector(
     feature_date: date,
     features: dict[str, Optional[float]],
     version: int = 1,
+    commit: bool = True,
 ) -> int:
     """
     Upsert a full feature vector for one (symbol, date).
-    Returns number of rows written.
+    Single bulk INSERT ... ON CONFLICT DO UPDATE — was previously one SELECT
+    + one INSERT/UPDATE per feature (~30 round-trips per call); over a full
+    backfill (352 symbols x ~1236 dates x ~30 features) that was ~13M
+    individual SELECTs and was the dominant cost, far exceeding the actual
+    feature computation. Same upsert semantics (skip None values, update
+    value + computed_at on conflict), same return contract (count written).
+
+    commit=False lets the caller batch many calls into one transaction
+    (e.g. one commit per date across all symbols) instead of one commit per
+    (symbol, date) pair — cuts commit count by ~30-350x in the full backfill.
     """
-    count = 0
     now = datetime.utcnow()
+    rows = [
+        {
+            "symbol":       symbol,
+            "date":         feature_date,
+            "feature_name": name,
+            "value":        value,
+            "version":      version,
+            "computed_at":  now,
+        }
+        for name, value in features.items()
+        if value is not None
+    ]
+    if not rows:
+        return 0
 
-    for name, value in features.items():
-        if value is None:
-            continue
-
-        existing = (
-            db.query(FeatureValue)
-            .filter_by(symbol=symbol, date=feature_date, feature_name=name, version=version)
-            .first()
-        )
-        if existing:
-            existing.value       = value
-            existing.computed_at = now
-        else:
-            db.add(FeatureValue(
-                symbol       = symbol,
-                date         = feature_date,
-                feature_name = name,
-                value        = value,
-                version      = version,
-                computed_at  = now,
-            ))
-        count += 1
-
-    db.commit()
-    return count
+    stmt = sqlite_insert(FeatureValue).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["symbol", "date", "feature_name", "version"],
+        set_={"value": stmt.excluded.value, "computed_at": stmt.excluded.computed_at},
+    )
+    db.execute(stmt)
+    if commit:
+        db.commit()
+    return len(rows)
 
 
 # ══════════════════════════════════════════════════════════════

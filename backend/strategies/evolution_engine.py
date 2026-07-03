@@ -37,12 +37,15 @@ from strategies.meta_learner import run_meta_learning, compute_meta_state
 
 log = get_logger("evolution_engine")
 
-TOURNAMENT_SIZE    = 7      # raised 5→7: higher selection pressure toward the best
-MUTATION_RATE      = 0.70   # slightly raised: more exploration while population is still small
-CROSSOVER_RATE     = 0.30   # crossover: when two good parents exist
-MIN_PARENT_FITNESS = 45.0   # raised 15→45: only breed from the top tier
-MIN_PARENT_SHARPE  = 0.25   # new: parents must show real risk-adjusted edge
-BACKTEST_DAYS      = 1825   # raised 3yr→5yr: more data = more robust signal
+TOURNAMENT_SIZE    = 7      # higher selection pressure toward the best
+MUTATION_RATE      = 0.65   # 65% mutation, 35% crossover — slightly more exploitation
+CROSSOVER_RATE     = 0.35   # crossover: when two good parents exist
+MIN_PARENT_FITNESS = 40.0   # lowered 45→40: allows more diverse parents early on
+MIN_PARENT_SHARPE  = 0.20   # slightly relaxed while universe is expanding
+BACKTEST_DAYS      = 1825   # 5 years — MUST match the population re-backtest window
+                            # (backtest_and_update defaults to 5yr); a shorter
+                            # window here would score offspring on different data
+                            # than their parents, corrupting selection.
 
 
 def _tournament_select(
@@ -108,21 +111,39 @@ def evolve_population(
         except Exception as exc:
             log.warning("Meta-learning failed, proceeding without: %s", exc)
 
-    # Select parent pool — top tier only, diversified across families
-    # Cap per family at 10 (was 30) so one good family doesn't dominate breeding
+    # Select parent pool — top tier only, diversified across families.
+    # Under honest metrics the absolute-floor pool can be nearly empty, which
+    # stalls evolution. Try the strict floor first; if too few qualify, fall
+    # back to the best-available real performers (positive Sharpe + enough
+    # trades) so we always breed from the top of what exists, never from junk.
+    from strategies.promotion_config import MIN_BACKTEST_TRADES
     parents = (
         db.query(StrategyV2)
         .filter(
-            StrategyV2.trade_count    >= 300,
+            StrategyV2.trade_count    >= MIN_BACKTEST_TRADES,
             StrategyV2.fitness_score  >= MIN_PARENT_FITNESS,
             StrategyV2.sharpe         >= MIN_PARENT_SHARPE,
             StrategyV2.dsl_json.isnot(None),
             StrategyV2.family.isnot(None),
         )
         .order_by(StrategyV2.fitness_score.desc())
-        .limit(100)   # smaller pool → less chance of accidentally including mediocre parents
+        .limit(100)
         .all()
     )
+    if len(parents) < 20:
+        parents = (
+            db.query(StrategyV2)
+            .filter(
+                StrategyV2.trade_count   >= MIN_BACKTEST_TRADES,
+                StrategyV2.sharpe        > 0.0,   # positive honest edge, any size
+                StrategyV2.dsl_json.isnot(None),
+                StrategyV2.family.isnot(None),
+            )
+            .order_by(StrategyV2.fitness_score.desc())
+            .limit(100)
+            .all()
+        )
+        log.info("Parent pool relaxed to best-available (positive-Sharpe) — %d found", len(parents))
     # De-duplicate by family — cap at 10 per family so genetic diversity is maintained
     family_counts: dict[str, int] = {}
     diverse_parents = []

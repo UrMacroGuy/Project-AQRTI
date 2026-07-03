@@ -39,7 +39,10 @@ def compute_live_accuracy(
     preds: list of Prediction ORM objects with actual_return filled.
     """
     if not preds:
-        return {}
+        return {
+            "accuracy": 0.0, "ic": 0.0, "ic_pval": 1.0,
+            "directional_acc": 0.0, "auc_roc": 0.5, "sample_size": 0,
+        }
 
     y_true_dir = []
     y_pred_ret = []

@@ -1,4 +1,276 @@
-﻿## [2026-06-28k] — Fix Promotion Gate + Remove Broken MDD Limit
+﻿## [2026-07-03] — Feature Coverage Fix, Arena Rigor, Meta-Learner Shrinkage
+
+Root-caused and fixed a live bug corrupting every backtest: feature generation
+was hard-capped to a trailing 1200-day (~3.3yr) window while price history
+covers 5yr, silently blocking 5,000-35,000 DSL entries per strategy in the
+current window. Then closed the human-approval gap the arena had opened
+around it, and made the meta-learner's self-adjustments sample-size aware.
+
+### Feature pipeline (`feature_generator.py`, `feature_store.py`, `market_features.py`)
+- `_load_universe_data(days=1200→2000)` — feature history now covers the full
+  5yr price window instead of silently truncating to 3.3yr.
+- Rewrote `_generate_all()` date-major (was symbol-major), eliminating an
+  O(dates×symbols²) breadth recomputation; added EMA50/200 precomputation per
+  symbol and a per-date `breadth_snapshot` dict passed into
+  `compute_market_features()` for O(1) breadth lookups instead of recomputing
+  `ewm().mean()` for all 352 symbols on every date.
+- `save_feature_vector()` rewritten from per-feature SELECT+INSERT/UPDATE to a
+  single bulk `on_conflict_do_update` upsert.
+- New `backend/scripts/run_feature_backfill_parallel.py`: 4-worker
+  multiprocessing backfill driver at below-normal OS priority, safe to run
+  alongside normal use on a 16GB machine. Verified byte-identical against a
+  golden snapshot at every optimization stage.
+- Result: `FeatureValue` coverage now 2021-08-10 → 2026-07-01 (was capped at
+  2023-05-02), ~15.8M+ rows, matching `DailyPrice`'s 2021-06-29 start (the
+  ~40-day gap is expected indicator warm-up, not missing data).
+
+### Arena rigor (`arena_engine.py`, `replay_engine.py`, `strategy_merger.py`)
+- **Fixed a real trust gap**: `auto_promote_strategies()` was writing
+  `status="active"` directly, bypassing the human-approval gate and the
+  paper-trading quarantine entirely. It now only returns eligible IDs for
+  logging — never mutates status.
+- Added dedicated `arena_status`/`arena_rounds` columns (`StrategyV2`) so the
+  arena's champion/refining/needs_review tracking can never again collide with
+  `strategy_lifecycle.py`'s authoritative `status` field.
+- Added real rigor to champion grading: OOS validation on a held-out 6-month
+  window (`_grade_replay` now requires `passes_oos_gate`), a minimum
+  trade-count floor (`MIN_CHAMPION_TRADES=30`), and regime-robustness grading
+  (`_grade_regime_robustness` rejects any well-sampled regime with net-negative
+  PnL) — previously champions were graded once, in-sample, with no floor.
+- `strategy_merger.build_child_strategy()` no longer creates children as
+  `status="active"` with fitness inherited from parents (dishonest, never
+  earned) — children now start as `candidate` with null scores and must earn
+  promotion like any other strategy.
+
+### Meta-learner sample-size bias (`meta_learner.py`, `strategy_generator.py`)
+- Added `_shrink_toward_neutral()`: a linear shrinkage estimator that damps
+  small-sample adjustments toward neutral instead of applying them at full
+  strength. Applied to family-mortality suppression, mutation-op ranking, and
+  per-regime confidence floors — a single unlucky death could previously swing
+  a family's weight as hard as ten.
+- Added condition-level dead-zone tracking (`feature, operator,
+  threshold-bucket`, not just feature name) and family×regime cross-tabulation
+  (`family_regime_avoid`) so `rsi_14>70` and `rsi_14<30` are now correctly
+  treated as unrelated signals.
+- `_in_dead_zone()` now requires genuine multi-dimension overlap (SL, TP,
+  hold-days, min-confidence) instead of vetoing on a single coincidental match.
+- `param_priors` (previously computed but never consumed) now actually nudges
+  new candidates' SL/TP/hold-days 30% toward historically successful values
+  once a family has ≥5 confident samples.
+
+### Other fixes
+- `promotion_config.MAX_DRAWDOWN_LIMIT=-35.0` replaces the old, unreachable
+  `-100.0` — a strategy can score above the retirement fitness floor while
+  still carrying a catastrophic drawdown ("picking up pennies in front of a
+  steamroller"); this is now a real, enforced gate in `run_lifecycle_sweep()`.
+- `/health` extended with `strategy_research`, `evolution_activity`,
+  `arena_activity`, and `meta_learner` checks — flags a stalled research loop,
+  no new strategies/promotions, eligible-but-unrun arena strategies, or a
+  degenerate meta-learner state (one family >90% of weight).
+- `paper_portfolio.py` updated to check `status=="active" AND
+  arena_status=="champion"` (falling back to plain `active`) instead of the
+  stale `status.in_(["active","champion"])` pattern that silently broke once
+  arena stopped writing "champion" into `.status`.
+- Cleaned the strategy population: deleted 1,229 zero-trade strategies never
+  worth re-scoring; reset 926 shadow/candidate strategies with real trade
+  history to `candidate` with null scores (honest re-earn, not inherited);
+  kept the 1 currently promoted strategy as-is. Full backup retained
+  (`strategies_v2_backup_20260703.json`, gitignored).
+
+---
+
+## [2026-07-02b] — Proof-of-Edge: Realism Gates + Forward Quarantine
+
+Second pass on the same goal: strategies must be PROVEN, not lucky. Where the
+morning's work made the numbers honest, this makes promotion require real
+tradeable edge that survives forward-testing.
+
+### Realism in the backtester (`strategy_backtester.py`, `strategy_metrics.py`)
+- **Liquidity filter**: tradeable universe restricted to symbols with average
+  daily turnover >= ₹5cr (`MIN_AVG_TURNOVER`, `get_backtest_universe`). Illiquid
+  names give fills a real order could never obtain and are the worst
+  survivorship offenders.
+- **Circuit-lock realism**: a bar with high==low is an NSE circuit band — no
+  counterparty. Positions are carried, not filled at a fantasy stop/target.
+- **Corrupt-bar guard**: a long delivery trade cannot return beyond
+  `max(2×TP, 60%)`; blowouts (found a real +15,503% trade from a bad DD bar)
+  are clamped and logged, so one bad tick can't dominate expectancy/Sharpe.
+  Deleted the corrupt DD 2026-06-18 bar (+198% single-day) at source.
+- **Sharpe/Sortino caps + degeneracy guards**: Sharpe bounded ±8, Sortino ±10
+  and requires ≥3 downside observations (a sparse daily series with near-zero
+  downside std was inflating Sortino to 66).
+- **Per-strategy OOS window rotation**: each strategy's 6-month holdout end is
+  shifted 0–59 days by a hash of its ID, so the population is graded on
+  staggered windows — a single fixed holdout gets overfit BY SELECTION across
+  thousands of evolved candidates even when no individual saw it.
+
+### New promotion gates (`promotion_config.py`, `strategy_lifecycle.py`)
+- **Benchmark gate**: strategy Sharpe must reach 0.8× buy-and-hold NIFTY50
+  Sharpe over the same window. Beating "do nothing" is mandatory.
+- **Duplicate gate**: reject promotion if backtest-trade overlap (Jaccard on
+  symbol+entry_date) with an already-promoted strategy exceeds 60%. Near-clones
+  are one leveraged bet, not diversification.
+
+### Forward-testing quarantine (the un-overfittable test)
+- **New `paper_trading/strategy_shadow_runner.py`**: every promoted/active
+  strategy gets its own virtual book (`strat_<id>`) and is forward-paper-traded
+  DAILY on its OWN DSL rules (fail-closed on missing features), NSE costs,
+  circuit awareness. Wired as daily scheduler Step 6B + `POST /admin/shadow-paper`.
+- **Quarantine gate on `/strategies/{id}/activate`**: human approval to
+  'active' now blocked until the strategy has spent ≥60 days promoted AND
+  produced ≥20 closed SHADOW trades with ≥50% win rate and positive net P&L.
+  `force=true` overrides (logged). This is forward performance on data that did
+  not exist at creation — the only test that cannot be overfit.
+
+### Evolution consistency
+- `evolution_engine.BACKTEST_DAYS` 1095→1825 and `_backtest_unscored` window
+  1095→1825: offspring/candidates are now scored on the SAME 5yr window as the
+  population re-backtest. Mixed windows were corrupting fitness comparison.
+- Adaptive parent pool: if the strict floor (fitness≥40, sharpe≥0.20) yields
+  <20 parents (likely under honest metrics), fall back to best-available
+  positive-Sharpe strategies so evolution keeps breeding from the real top,
+  never from junk, and never stalls.
+
+### Honest population result
+- Full re-backtest + rescore + full-gate re-evaluation. Of 112 previously
+  "promoted/active" strategies (earned under inflated metrics), the vast
+  majority demote to shadow (status_reason `trust_overhaul_2026_07: ...`).
+  Of ~700 strategies that actually trade ≥60 times, only ~12% have positive
+  honest Sharpe. This is the real baseline; evolution now breeds against it.
+
+---
+
+## [2026-07-02] — Trust Restoration: Backtester Honesty Overhaul + Data Integrity
+
+Full audit of data pipeline, backtester, and arena revealed that every stored
+strategy metric was inflated. Everything below is aimed at one goal: promoted
+strategies must be trustworthy enough for real money.
+
+### Backtester correctness (`strategy_backtester.py`, `strategy_metrics.py`)
+- **Sharpe/Sortino were fabricated**: each trade's per-day average was repeated
+  `holding_days` times, collapsing variance → inflated Sharpe. Replaced with a
+  REAL mark-to-market daily portfolio return series (`build_daily_portfolio_returns`)
+  with position sizing (5%/trade) and honest exposure accounting. Spot check: a
+  top promoted strategy went from Sharpe +1.63 → **-1.66** under honest math.
+- **Intrabar SL/TP**: stops/targets were checked on close only. Now checked
+  against the day's open/high/low with realistic fills (gap-through-stop fills
+  at open; SL priority over TP when both hit in one bar).
+- **DSL fail-closed**: if a (symbol, date) had no feature vector, the strategy's
+  own entry rules were SKIPPED and it traded on the generic RSI/EMA fallback.
+  Now: no features → no entry (blocked entries are logged).
+- **ML predictions removed from backtests** (`use_ml_predictions=False` default):
+  Prediction rows are only ever written with today's date by models trained on
+  full history — any historical use is look-ahead. Backtests are technical+DSL only.
+- **NSE cost bug**: DB symbols are stored suffix-less, so `_detect_exchange`
+  charged Indian stocks US costs (0.10% instead of 0.28% round-trip) on 1.08M
+  backtest trades. Fixed with an India-symbol lookup set.
+- **OOS is now a HARD promotion gate**: walk-forward holdout (last 6 months,
+  embargoed by max_holding_days) must pass (≥5 trades, ≥50% WR, positive
+  expectancy, oos_sharpe ≥ 0.2). Results persisted in new `strategies_v2`
+  columns: `oos_sharpe`, `oos_win_rate`, `oos_trades`, `oos_passed`.
+- **Status preservation**: `backtest_and_update` no longer force-writes
+  status="shadow" (was silently demoting active/promoted strategies on re-backtest).
+- Risk-free rate unit fix (was decimal in a percent-unit series), profit factor
+  capped at 10 (no-loss samples returned 99), regime SIDEWAYS→BULL remap removed,
+  regime thresholds recalibrated.
+- `shared_feature_cache` param for batch re-backtests (86s → ~2s per strategy).
+
+### Promotion gates (`promotion_config.py` — new single source of truth)
+- MIN_BACKTEST_TRADES 300→60 (300 was unreachable; empirical avg 52/strategy)
+- MIN_SHARPE 0.3→0.5 on the honest scale; OOS hard gates added
+- `strategy_lifecycle.py`, `evolution_engine.py` (parent pool), `retrain_loop.py`
+  now import from promotion_config
+
+### Wiring fixes
+- `paper_trading/retrain_loop.py` imported non-existent modules
+  (`ml.trainers.model_trainer`, `ml.predictors.predictor`) — ML retrain was a
+  silent no-op for every auto-retrain cycle. Now calls the working
+  `ml.model_retrainer.check_and_retrain` + `ml.prediction_pipeline`.
+
+### Data integrity
+- **New `aqrti/data/integrity_check.py`**: detects split-adjustment drift
+  (incremental fetch + auto_adjust leaves old rows on the wrong basis), heals
+  by full re-download + per-symbol feature regen. Weekly scheduler job
+  (Sat 10:00 IST) + `POST /admin/integrity-sweep`.
+- Price sanity validation at ingest (`_valid_price_row`): rejects high<low,
+  non-positive prices, close outside [low,high]; flags >25% moves.
+- `ticker_to_symbol` canonicalizes .NS/.BO → suffix-less (was creating duplicate
+  Stock rows); 491 dead suffixed Stock rows deactivated; fictitious LTM.NS /
+  TMPV.NS removed from GLOBAL_UNIVERSE.
+- Migration `scripts/migrate_oos_and_cleanup.py` (idempotent).
+
+### Population re-score
+- `scripts/rebacktest_population.py`: full re-backtest of all 2,151 non-retired
+  strategies with the honest engine + rescore + lifecycle sweep with OOS gates.
+  DB backed up first (`aqrti.db.bak-20260702`). Before/after metric CSVs kept
+  for distribution comparison. Mass demotion of previously "promoted"
+  strategies is expected and is the honest outcome.
+
+---
+
+## [2026-07-01b] — RL-PPO Strategy Family + MA Slope Features
+
+### New Strategy Family: `rl_momentum`
+- Adapted from ZiadFrancis/ReinforcementTrading_Part_1 (PPO Forex agent) for NSE equity delivery
+- Entry: RSI(14) > threshold, MA20 slope positive, MA20 > MA50 (golden cross zone)
+- Exit: RSI overbought OR MA20 slope turns negative
+- SL: 4–9% | TP: min 1.8× risk-reward | Hold: 10–25 days
+- Weight: 11% in family selection (redistributed from other families)
+
+### New Features in `trend_features.py` + `feature_registry.py`
+- `ma_20_slope` — SMA20 5-bar slope as % change (trend direction)
+- `ma_50_slope` — SMA50 5-bar slope as % change
+- `ma_spread` — (SMA20 − SMA50) / SMA50 × 100 (golden cross proximity)
+- `close_ma20_diff` — (close − SMA20) / SMA20 × 100
+- `close_ma50_diff` — (close − SMA50) / SMA50 × 100
+- Full feature generation triggered to populate DB for all 639 symbols × history
+
+### Strategy Research UI
+- Status label + Refresh button added to strategy page header
+- Activity feed: fixed `e.type` → `e.eventType` (camelCase) so events show
+- Leaderboard strategy ID now clickable → opens DNA viewer panel
+- Best strategy KPI now populated from leaderboard[0]
+
+---
+
+## [2026-07-01] — Strategy Arena Refinement + Self-Learning Review + Full Documentation
+
+### Strategy Arena Improvements
+
+**Fitness Engine** (`fitness_engine.py`)
+- `MIN_TRADES` 500 → 10: was blocking 100% of strategies from Cost Efficiency and Longevity scores (500 unreachable with 3yr NSE data; empirical max = ~430, avg = ~52)
+- `TARGET_TRADES` 500 → 100: calibrated to realistic 3yr × 50-stock signal frequency
+- `LIVE_BUFFER_PCT` 0.10% → 0.05%: backtester already models NSE costs accurately; 10bp buffer was double-penalising
+
+**Evolution Engine** (`evolution_engine.py`)
+- `BACKTEST_DAYS` 1825 → 1095: 5yr setting was wasting time on empty data; matched to actual 3yr data available
+- `MIN_PARENT_FITNESS` 45.0 → 40.0: allows more diverse parents during universe expansion phase
+- `MIN_PARENT_SHARPE` 0.25 → 0.20: slightly relaxed to avoid parent pool starvation
+- `MUTATION_RATE` 0.70 → 0.65: slight shift toward exploitation
+
+**Strategy Research Loop** (`strategy_research_loop.py`)
+- `generate_n` 30 → 50: more candidates per day now that 50-stock universe provides more signal combinations
+- `evolve_n` 20 → 30: more offspring from top parents
+- `max_stocks` in `_backtest_unscored` 200 → 300: higher throughput for expanded population
+
+**Meta-Learner** (`meta_learner.py`)
+- `_extract_alive_signals` min `trade_count` 8 → 20: prevents minimal-trade strategies from poisoning param priors
+
+### Self-Learning System — Bug Fixes & Wiring
+
+**Learning Loop** (`learning_loop.py`)
+- Added Step 3B: Auto-retrain when 30d model drift is flagged — closes the loop between drift detection and model improvement (was previously passive: drift was logged but nothing acted on it)
+- Added 7d window to drift detection (was 30d + 90d only) — enables early warning before 30d deterioration
+
+### Documentation
+- Created `docs/STRATEGY_ARENA.md` — comprehensive 15-section reference covering every component of the strategy arena and self-learning system
+
+### Backend
+- Restarted backend to apply all changes
+
+---
+
+## [2026-06-28k] — Fix Promotion Gate + Remove Broken MDD Limit
 
 ### Fix: Sub-50 strategies were being promoted (stale .pyc from old 35.0 threshold)
 - Demoted 331 strategies that had fitness < 50 but were already in "promoted" state
