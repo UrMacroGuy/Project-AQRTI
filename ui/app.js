@@ -114,7 +114,7 @@ const pageSubtitles = {
   opportunity:         'Opportunity Rankings',
   news:                'News Intelligence',
   sentiment:           'Sentiment Center',
-  strategy:            'Strategy Lab',
+  strategy:            'Algo Lab',
   model:               'Model Center',
   learning:            'Learning Center',
   risk:                'Risk Center',
@@ -296,7 +296,7 @@ const CMD_PAGES = [
   { icon: '◆', label: 'Opportunity Rankings',  hint: 'Signals · Confidence',  page: 'opportunity' },
   { icon: '◉', label: 'News Intelligence',     hint: 'Headlines · Sentiment', page: 'news' },
   { icon: '◐', label: 'Sentiment Center',      hint: 'Fear/Greed · Scores',   page: 'sentiment' },
-  { icon: '▣', label: 'Strategy Research',     hint: 'Leaderboard · Replay',  page: 'strategy' },
+  { icon: '▣', label: 'Algo Research',     hint: 'Leaderboard · Replay',  page: 'strategy' },
   { icon: '▦', label: 'Model Center',          hint: 'ML Registry · AUC',     page: 'model' },
   { icon: '▷', label: 'Learning Center',       hint: 'Knowledge · Failures',  page: 'learning' },
   { icon: '◎', label: 'Research Ops',          hint: '7 Agents · Daily Brief',page: 'agents' },
@@ -1772,7 +1772,7 @@ async function triggerBacktest() {
     const res = await Api.runBacktest(null, 2);
     if (res.status === 'started') {
       if (statusEl) {
-        statusEl.textContent = `✓ Running: ${res.strategy_name} — results in Strategy Arena tab`;
+        statusEl.textContent = `✓ Running: ${res.strategy_name} — results in Algo Arena tab`;
         statusEl.style.color = 'rgba(139,92,246,0.9)';
       }
       // Poll status after 30s
@@ -1946,7 +1946,7 @@ async function hydratePaperPortfolio() {
   if (stratBadge) {
     const pos0 = pp && pp.positions && pp.positions[0];
     const stratName = pos0 && (pos0.strategyName || pos0.strategyId);
-    stratBadge.textContent = stratName ? `◈ Strategy: ${stratName}` : `◈ Best Fitness Strategy (auto-selected)`;
+    stratBadge.textContent = stratName ? `◈ Algo: ${stratName}` : `◈ Best Fitness Algo (auto-selected)`;
   }
 
   // ── Equity curve chart ──
@@ -2145,7 +2145,7 @@ async function triggerMTM() {
     if (sl) msg += `  · SL hit: ${sl}`;
     if (tp) msg += `  · TP hit: ${tp}`;
     if (ex) msg += `  · Expired: ${ex}`;
-    if (data.lossesRefined) msg += `  · Strategies refined: ${data.lossesRefined}`;
+    if (data.lossesRefined) msg += `  · Algos refined: ${data.lossesRefined}`;
     if (statusEl) { statusEl.textContent = msg; statusEl.style.color = sl || ex ? '#f59e0b' : 'var(--positive)'; }
     await hydratePaperPortfolio();
   } catch(e) {
@@ -2453,12 +2453,12 @@ async function hydrateStrategyResearch() {
 }
 
 async function activateStrategy(strategyId) {
-  if (!confirm(`Activate strategy ${strategyId}?\n\nThis marks it ACTIVE (requires "promoted" status).`)) return;
+  if (!confirm(`Activate algo ${strategyId}?\n\nThis marks it ACTIVE (requires "promoted" status).`)) return;
   try {
     const res = await fetch(`${API_CONFIG.BASE}/strategies/${strategyId}/activate`, { method: 'POST' });
     const result = await res.json();
     if (res.ok && result.status === 'active') {
-      alert(`Strategy ${strategyId} is now ACTIVE.`);
+      alert(`Algo ${strategyId} is now ACTIVE.`);
       _liveHydrated.delete('strategy');
       hydrateStrategyResearch();
     } else {
@@ -2526,7 +2526,7 @@ async function loadStrategyDna(strategyId) {
     return;
   }
   if (!dna || dna.detail) {
-    container.innerHTML = `<div style="color:var(--negative);padding:1rem">Strategy not found: <code>${strategyId}</code><br><span style="color:var(--text-muted);font-size:0.75rem">Backend may be offline or the ID is invalid.</span></div>`;
+    container.innerHTML = `<div style="color:var(--negative);padding:1rem">Algo not found: <code>${strategyId}</code><br><span style="color:var(--text-muted);font-size:0.75rem">Backend may be offline or the ID is invalid.</span></div>`;
     return;
   }
 
@@ -2720,7 +2720,7 @@ async function loadStrategyDna(strategyId) {
     </div>
   `;
   } catch (renderErr) {
-    container.innerHTML = `<div style="color:var(--negative);padding:1rem">Render error: ${renderErr.message}<br><span style="color:var(--text-muted);font-size:0.72rem">Strategy data loaded but failed to display. Check browser console.</span></div>`;
+    container.innerHTML = `<div style="color:var(--negative);padding:1rem">Render error: ${renderErr.message}<br><span style="color:var(--text-muted);font-size:0.72rem">Algo data loaded but failed to display. Check browser console.</span></div>`;
   }
 }
 
@@ -2751,7 +2751,7 @@ async function loadTradeRecommendations() {
 
   if (data.topStrategy && stratBar) {
     const ts = data.topStrategy;
-    stratBar.innerHTML = `Strategy: <b style="color:var(--accent)">${ts.name}</b> · Fitness <b>${(ts.fitness||0).toFixed(1)}</b> · Sharpe <b>${(ts.sharpe||0).toFixed(2)}</b> · Win% <b>${(ts.winRate||0).toFixed(1)}%</b> · 5% position size · max 8 trades`;
+    stratBar.innerHTML = `Algo: <b style="color:var(--accent)">${ts.name}</b> · Fitness <b>${(ts.fitness||0).toFixed(1)}</b> · Sharpe <b>${(ts.sharpe||0).toFixed(2)}</b> · Win% <b>${(ts.winRate||0).toFixed(1)}%</b> · 5% position size · max 8 trades`;
   }
 
   const recs = data.recommendations;
@@ -2801,7 +2801,7 @@ async function loadTradeRecommendations() {
             <span>Exp return <b style="color:var(--positive)">+${r.expectedReturn.toFixed(1)}%</b></span>
           </div>
 
-          ${r.strategyName ? `<div style="margin-top:6px;font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono)">Strategy: ${r.strategyName}</div>` : ''}
+          ${r.strategyName ? `<div style="margin-top:6px;font-size:0.65rem;color:var(--text-muted);font-family:var(--font-mono)">Algo: ${r.strategyName}</div>` : ''}
         </div>`;
       }).join('')}
     </div>
@@ -2822,7 +2822,7 @@ const MOCK_AGENT_DATA = {
     { agent_id: 'news_research',     name: 'News Research Agent',     agent_type: 'news',     status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 1 },
     { agent_id: 'pattern_research',  name: 'Pattern Research Agent',  agent_type: 'pattern',  status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
     { agent_id: 'model_research',    name: 'Model Research Agent',    agent_type: 'model',    status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
-    { agent_id: 'strategy_research', name: 'Strategy Research Agent', agent_type: 'strategy', status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
+    { agent_id: 'strategy_research', name: 'Algo Research Agent', agent_type: 'strategy', status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
     { agent_id: 'risk_research',     name: 'Risk Research Agent',     agent_type: 'risk',     status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
     { agent_id: 'cro',               name: 'Chief Research Officer',  agent_type: 'cro',      status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
   ],
@@ -4083,7 +4083,7 @@ async function hydrateOverview() {
   if (ov.knowledgeScore != null) {
     const ks = ov.knowledgeScore;
     _set('kpi-knowledge', ks > 0 ? `${Math.round(ks)} / 100` : 'Computing…');
-    _set('kpi-knowledge-sub', ks > 0 ? `${ov.activeStrategies || 0} Active Strategies` : `${ov.activeStrategies || 0} Strategies Active`);
+    _set('kpi-knowledge-sub', ks > 0 ? `${ov.activeStrategies || 0} Active Algos` : `${ov.activeStrategies || 0} Algos Active`);
   }
   // Show strategy count on overview
   if (ov.activeStrategies != null) {
@@ -5160,9 +5160,9 @@ function renderMetaLearningPanel(ms, rt) {
     const items = [
       ['Regime', ms.current_regime || '—', 'var(--text)'],
       ['Confidence Floor', ms.current_conf_floor != null ? `${ms.current_conf_floor}%` : '—', ms.current_conf_floor > 60 ? 'var(--warning)' : 'var(--positive)'],
-      ['Graveyard Strategies', ms.graveyard_total != null ? ms.graveyard_total : '—', 'var(--muted)'],
+      ['Graveyard Algos', ms.graveyard_total != null ? ms.graveyard_total : '—', 'var(--muted)'],
       ['Short-Hold Deaths', ms.short_hold_deaths != null ? ms.short_hold_deaths : '—', ms.short_hold_deaths > 10 ? 'var(--negative)' : 'var(--muted)'],
-      ['Top Alive Strategies', ms.top_alive_count != null ? ms.top_alive_count : '—', 'var(--positive)'],
+      ['Top Alive Algos', ms.top_alive_count != null ? ms.top_alive_count : '—', 'var(--positive)'],
       ['Top Mutation Op', ms.ranked_mutation_ops?.[0] || '—', 'var(--accent)'],
     ];
     items.forEach(([label, val, color]) => {
