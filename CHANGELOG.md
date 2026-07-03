@@ -1,4 +1,94 @@
-﻿## [2026-07-03e] — Fixed Backend Crash: Orphaned Paper Positions + Poisoned Session
+﻿## [2026-07-03f] — Index Futures Segment: Data, Features, Backtester Foundation
+
+Built the first phase of the index-futures segment (NIFTY50, BANKNIFTY,
+SENSEX, NIFTYIT, NIFTYPHARMA) — a separate, parallel strategy-training
+track from stocks, per the user's ask: real futures mechanics (lot sizes,
+margin, monthly expiry/roll), trained on 5yr history, isolated from the
+stock population end-to-end.
+
+### Data source reality check (real limitation, documented not hidden)
+Verified directly (not assumed): no free data source, yfinance included,
+carries historical NSE index FUTURES contract prices. Only the underlying
+SPOT index resolves (`^NSEI`, `^NSEBANK`, `^BSESN`, `^CNXIT`, `^CNXPHARMA`
+all confirmed with 5yr+ clean daily history via yfinance). Proceeded with a
+standard, textbook cost-of-carry approximation — F = S·e^((r-q)T) — rather
+than fabricate contract-level data. Every row is flagged `is_synthetic=True`
+in the schema and called out explicitly in every relevant docstring so this
+is never mistaken for real traded futures ticks.
+
+### Schema (`aqrti/database/models.py`) — fully parallel to stock tables
+- `IndexFuturesContract`: lot size, tick size, margin %, exchange per index.
+- `IndexFuturesPrice`: continuous monthly-contract OHLC + spot_close + basis,
+  `is_synthetic` flag baked in.
+- `IndexFuturesRoll`: records each contract-month rollover for cost/slippage
+  attribution.
+- `IndexFuturesFeatureValue`: mirrors `FeatureValue`'s shape, keyed on
+  `index_name` (no FK to `Stock` — `DailyPrice`/`FeatureValue` both have a
+  hard FK there, confirmed unusable for this segment).
+- `StrategyV2.asset_class` (`"stock"` default / `"index_futures"`) and
+  `StrategyV2.index_name` — same isolation pattern as `arena_status`
+  (dedicated namespace, never colliding with existing fields).
+
+### Backfill (`scripts/backfill_index_futures.py`)
+5yr synthetic continuous series for all 5 indices — 1,253-1,255 rows each,
+61 monthly roll markers each. Basis correctly always ≥0 (contango,
+consistent with r>q) and converges to 0 at each contract's expiry, matching
+real futures-spot convergence behavior.
+
+### Features (`features/index_features.py`)
+Reuses `compute_price_features`/`compute_trend_features`/
+`compute_volatility_features` UNCHANGED — verified these are pure OHLC
+functions with no volume/delivery dependency, so they apply to an index
+future exactly as they do to a stock. Deliberately does NOT compute
+volume/delivery/liquidity features (meaningless for a modeled index
+series). 39 features × 5 indices, ~195k rows, ~2.5 min total — no
+performance work needed at this scale (5 indices vs 352 stocks).
+
+### Backtester (`strategies/index_futures_backtester.py`)
+Lot-based position sizing (not share-count), margin-based capital
+accounting (`MARGIN_PCT=0.13` fixed-%, not full notional — real leverage),
+auto-roll `ROLL_DAYS_BEFORE_EXPIRY` before each contract's expiry with
+modeled roll cost, no circuit-band logic (doesn't apply to index futures),
+lower futures-specific transaction cost (not the stock 0.28% NSE cash-equity
+figure). Reuses `TradeRecord`/`compute_sharpe`/`compute_sortino`/etc.
+unchanged — that math is instrument-agnostic.
+
+**Bug found and fixed during testing**: the roll trigger initially fired on
+`contract_month != entry_contract_month` OR near-expiry — but the
+continuous series' `contract_month` advances once per calendar month
+regardless of when a position was opened, so the OR-condition fired a
+spurious "roll" on almost every position spanning a month boundary (71
+rolls / 79-98 trades in a 5yr test — way too high). Fixed to only trigger
+on genuine near-expiry (`days_to_expiry <= ROLL_DAYS_BEFORE_EXPIRY`);
+re-verified at ~52 rolls over 5yr (~monthly), matching expectation.
+
+### Arena/promotion isolation (`arena_engine.py`, `strategy_lifecycle.py`)
+- Arena's strategy-selection query now explicitly filters
+  `asset_class == "stock"` — the arena's replay path
+  (`replay_engine.run_replay`) is stock-specific; index-futures strategies
+  need their own arena path and must never be silently replayed against the
+  wrong instrument.
+- Duplicate-trade-overlap gate now compares peers within the SAME
+  `asset_class` only — an index strategy's (index, entry_date) trades can
+  never meaningfully overlap a stock strategy's (symbol, entry_date) trades.
+- New `_own_instrument_benchmark_sharpe()`: index-futures strategies are
+  now benchmarked against THEIR OWN underlying's buy-and-hold Sharpe, not
+  always NIFTY50 — a BANKNIFTY strategy vs NIFTY50 buy-and-hold is the wrong
+  comparison, and a NIFTY50 strategy vs NIFTY50 itself would be circular.
+  Wired into `promote_strategy`'s benchmark gate.
+- All changes verified with a smoke test against the live stock population
+  (`run_lifecycle_sweep`) — no regression, same result as before.
+
+### Not yet built (next phase)
+Strategy generation/DSL for index instruments (this session built the
+data/feature/backtest FOUNDATION only — no index strategies exist yet to
+generate/evolve/promote). Paper-trading execution model for index futures.
+Cross-index relative-strength features (BANKNIFTY vs NIFTY50) — deliberately
+deferred, each index's features computed standalone for v1.
+
+---
+
+## [2026-07-03e] — Fixed Backend Crash: Orphaned Paper Positions + Poisoned Session
 
 Found the backend had gone down since the last restart. Root cause: the
 2026-07-03 population cleanup (deleted 1,229 zero-trade strategies) left 58

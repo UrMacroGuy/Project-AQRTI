@@ -888,6 +888,18 @@ class StrategyV2(Base):
     strategy_id      = Column(String(40), nullable=False, unique=True)   # AQRTI_STR_<hash>
     name             = Column(String(120), nullable=True)
     family           = Column(String(40), nullable=False)   # momentum|mean_reversion|breakout|sentiment|regime|hybrid
+    # Separate namespace from `family` — same isolation pattern as
+    # arena_status below. "stock" strategies trade the existing
+    # DailyPrice/get_backtest_universe pipeline; "index_futures" strategies
+    # trade IndexFuturesPrice and must never be mixed into stock arena
+    # rounds, stock benchmark comparisons, or stock promotion pools.
+    asset_class      = Column(String(20), nullable=False, default="stock")
+    # Which index this strategy trades — only set when asset_class ==
+    # "index_futures" (NIFTY50|BANKNIFTY|SENSEX|NIFTYIT|NIFTYPHARMA). A
+    # stock strategy trades a multi-symbol universe (no single value fits);
+    # an index-futures strategy trades exactly one instrument, so this is
+    # a plain column rather than forcing it into the DSL's universe concept.
+    index_name       = Column(String(30), nullable=True)
     generation       = Column(Integer,    nullable=False, default=0)   # 0=seed, 1=evolved, etc.
     parent_ids       = Column(Text,       nullable=True)    # JSON list of parent strategy_ids
     # DSL definition
@@ -2302,4 +2314,115 @@ class ArenaRun(Base):
 
     started_at           = Column(DateTime,   nullable=True)
     completed_at         = Column(DateTime,   nullable=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# LAYER: INDEX FUTURES (separate segment from stock DailyPrice)
+# ══════════════════════════════════════════════════════════════
+# DailyPrice has a hard FK to Stock.symbol, and IndexData (spot-only, no
+# lot/margin/expiry concept) is used purely as a benchmark input elsewhere —
+# neither fits a real futures instrument. These tables are intentionally
+# parallel and self-contained so the index-futures segment can never collide
+# with or be mistaken for the stock pipeline.
+#
+# DATA SOURCE CAVEAT (real limitation, not a bug): no free data source
+# (yfinance included) carries historical NSE index FUTURES contract prices
+# for a 5-year window — only the underlying SPOT index. IndexFuturesPrice is
+# therefore a MODELED continuous series: spot close + a cost-of-carry basis
+# (risk-free rate minus dividend yield, prorated to days-to-expiry), not real
+# traded futures ticks. This is a standard, textbook futures-pricing
+# approximation (F = S * e^((r-q)*T)), not fabricated data — but it is an
+# approximation, and `is_synthetic=True` on every row plus this comment
+# exists so nobody downstream mistakes it for real contract-level data.
+class IndexFuturesContract(Base):
+    """Metadata for one tradeable index future (NIFTY, BANKNIFTY, etc.)."""
+    __tablename__ = "index_futures_contracts"
+
+    id            = Column(Integer,   primary_key=True, autoincrement=True)
+    index_name    = Column(String(30), nullable=False, unique=True, index=True)
+    # NIFTY50 | BANKNIFTY | SENSEX | NIFTYIT | NIFTYPHARMA
+    underlying_source = Column(String(20), nullable=False)
+    # yfinance ticker for the underlying SPOT index (e.g. "^NSEI")
+    exchange      = Column(String(10), nullable=False, default="NSE")
+    lot_size      = Column(Integer,   nullable=False)
+    tick_size     = Column(Float,     nullable=False, default=0.05)
+    margin_pct    = Column(Float,     nullable=False, default=0.13)
+    # fixed % of notional (approximates typical SPAN+exposure margin) —
+    # see promotion_config-style rationale comment in index_futures_config.py
+    active        = Column(Boolean,   default=True)
+
+
+class IndexFuturesPrice(Base):
+    """
+    Daily continuous-series OHLC for one index future, per calendar month
+    contract. is_synthetic is always True today (see module-level caveat
+    above) — the column exists so a future switch to a real F&O data
+    provider doesn't require a schema change, just is_synthetic=False rows.
+    """
+    __tablename__ = "index_futures_prices"
+    __table_args__ = (
+        UniqueConstraint("index_name", "contract_month", "date",
+                          name="uq_ifp_index_month_date"),
+        Index("ix_ifp_index_date", "index_name", "date"),
+    )
+
+    id             = Column(Integer,  primary_key=True, autoincrement=True)
+    index_name     = Column(String(30), nullable=False, index=True)
+    contract_month = Column(String(7),  nullable=False)   # "2026-07" (expiry month)
+    date           = Column(Date,      nullable=False)
+    expiry_date    = Column(Date,      nullable=False)     # last Thursday of contract_month
+    open           = Column(Float,     nullable=True)
+    high           = Column(Float,     nullable=True)
+    low            = Column(Float,     nullable=True)
+    close          = Column(Float,     nullable=False)
+    spot_close     = Column(Float,     nullable=True)      # underlying index close, same date
+    basis          = Column(Float,     nullable=True)       # futures_close - spot_close
+    is_synthetic   = Column(Boolean,   nullable=False, default=True)
+
+
+class IndexFuturesRoll(Base):
+    """
+    Records each contract-month expiry roll for a continuous series —
+    needed so the backtester can apply a realistic roll cost/slippage and
+    so P&L attribution can distinguish "held through a roll" from a normal
+    intra-month move.
+    """
+    __tablename__ = "index_futures_rolls"
+    __table_args__ = (
+        Index("ix_ifr_index_date", "index_name", "roll_date"),
+    )
+
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    index_name          = Column(String(30), nullable=False)
+    roll_date           = Column(Date,       nullable=False)
+    from_contract_month = Column(String(7),  nullable=False)
+    to_contract_month   = Column(String(7),  nullable=False)
+    from_close          = Column(Float,      nullable=True)
+    to_close            = Column(Float,      nullable=True)
+    roll_cost_pct       = Column(Float,      nullable=True)   # (to_close - from_close) / from_close
     created_at           = Column(DateTime,   default=datetime.utcnow)
+
+
+class IndexFuturesFeatureValue(Base):
+    """
+    Computed feature values for index instruments — mirrors FeatureValue's
+    shape exactly but keyed on index_name (no FK to Stock) and computed by
+    a dedicated, smaller feature set (features/index_features.py) since
+    volume/delivery/liquidity features that dominate the stock feature set
+    don't apply to an index (no real traded volume, no delivery %).
+    """
+    __tablename__ = "index_futures_feature_values"
+    __table_args__ = (
+        UniqueConstraint("index_name", "date", "feature_name", "version",
+                         name="uq_iffv_index_date_name_ver"),
+        Index("ix_iffv_index_date",   "index_name", "date"),
+        Index("ix_iffv_feature_name", "feature_name"),
+    )
+
+    id           = Column(Integer,    primary_key=True, autoincrement=True)
+    index_name   = Column(String(30), nullable=False)
+    date         = Column(Date,       nullable=False)
+    feature_name = Column(String(80), nullable=False)
+    value        = Column(Float,      nullable=True)
+    version      = Column(Integer,    nullable=False, default=1)
+    computed_at  = Column(DateTime,   default=datetime.utcnow)

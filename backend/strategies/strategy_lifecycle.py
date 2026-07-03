@@ -40,6 +40,7 @@ MIN_TRADES     = MIN_BACKTEST_TRADES   # backwards-compat alias for external imp
 PAPER_WIN_RATE = PAPER_WIN_RATE_GATE   # backwards-compat alias
 
 _nifty_sharpe_cache: dict = {}
+_index_futures_sharpe_cache: dict = {}
 
 
 def _nifty_benchmark_sharpe(db: Session, start, end) -> float:
@@ -62,6 +63,40 @@ def _nifty_benchmark_sharpe(db: Session, start, end) -> float:
     return val
 
 
+def _own_instrument_benchmark_sharpe(db: Session, index_name: str, start, end) -> float:
+    """
+    Honest daily Sharpe of buy-and-hold on the strategy's OWN index future
+    over [start, end]. A BANKNIFTY strategy benchmarked against NIFTY50
+    buy-and-hold is comparing against the wrong instrument; a NIFTY50
+    strategy benchmarked against NIFTY50 itself would be circular either
+    way — so index-futures strategies use this instead of
+    _nifty_benchmark_sharpe, always benchmarked against their OWN
+    underlying's buy-and-hold return (computed from the spot close series,
+    since spot-vs-spot buy-and-hold is the right "did nothing" comparison
+    regardless of the synthetic futures basis layered on top for trading).
+    """
+    key = (index_name, start, end)
+    if key in _index_futures_sharpe_cache:
+        return _index_futures_sharpe_cache[key]
+    from aqrti.database.models import IndexFuturesPrice
+    from strategies.strategy_metrics import compute_sharpe
+    rows = (
+        db.query(IndexFuturesPrice.spot_close)
+        .filter(IndexFuturesPrice.index_name == index_name,
+                IndexFuturesPrice.date >= start, IndexFuturesPrice.date <= end)
+        .order_by(IndexFuturesPrice.date.asc())
+        .all()
+    )
+    closes = [r[0] for r in rows if r[0] is not None]
+    rets = [
+        (closes[i] / closes[i - 1] - 1) * 100
+        for i in range(1, len(closes)) if closes[i - 1]
+    ]
+    val = compute_sharpe(rets) if len(rets) >= 20 else 0.0
+    _index_futures_sharpe_cache[key] = val
+    return val
+
+
 def _trade_overlap_with_promoted(db: Session, strategy_id: str) -> tuple[float, Optional[str]]:
     """
     Max Jaccard similarity of (symbol, entry_date) backtest-trade sets between
@@ -76,11 +111,18 @@ def _trade_overlap_with_promoted(db: Session, strategy_id: str) -> tuple[float, 
     }
     if not mine:
         return 0.0, None
+    # Trade-overlap only means anything within the same asset class — an
+    # index-futures strategy's trades (index, entry_date) can never overlap
+    # a stock strategy's trades (symbol, entry_date) in any meaningful sense.
+    this_strat = db.query(StrategyV2.asset_class).filter(
+        StrategyV2.strategy_id == strategy_id
+    ).scalar()
     peers = [
         r[0] for r in
         db.query(StrategyV2.strategy_id)
         .filter(StrategyV2.status.in_(["promoted", "active"]),
-                StrategyV2.strategy_id != strategy_id)
+                StrategyV2.strategy_id != strategy_id,
+                StrategyV2.asset_class == (this_strat or "stock"))
         .all()
     ]
     worst, worst_id = 0.0, None
@@ -128,14 +170,23 @@ def promote_strategy(
         return {"success": False, "error": f"oos_sharpe {row.oos_sharpe or 0:.2f} below {MIN_OOS_SHARPE}"}
 
     # Benchmark gate: must reach BENCHMARK_SHARPE_FACTOR × buy-and-hold
-    # NIFTY50 Sharpe over the same backtest window. Worse than doing nothing
-    # = not worth capital.
+    # Sharpe over the same backtest window. Worse than doing nothing = not
+    # worth capital. Index-futures strategies benchmark against their OWN
+    # underlying's buy-and-hold (a BANKNIFTY strategy vs NIFTY50 buy-and-hold
+    # is the wrong comparison; vs its own instrument is the right one).
     if row.backtest_start and row.backtest_end:
-        bench = _nifty_benchmark_sharpe(db, row.backtest_start, row.backtest_end)
+        if row.asset_class == "index_futures" and row.index_name:
+            bench = _own_instrument_benchmark_sharpe(
+                db, row.index_name, row.backtest_start, row.backtest_end
+            )
+            bench_label = row.index_name
+        else:
+            bench = _nifty_benchmark_sharpe(db, row.backtest_start, row.backtest_end)
+            bench_label = "NIFTY"
         if bench > 0 and (row.sharpe or 0) < bench * BENCHMARK_SHARPE_FACTOR:
             return {"success": False,
                     "error": f"sharpe {row.sharpe or 0:.2f} below benchmark gate "
-                             f"({BENCHMARK_SHARPE_FACTOR}x NIFTY {bench:.2f})"}
+                             f"({BENCHMARK_SHARPE_FACTOR}x {bench_label} {bench:.2f})"}
 
     # Duplicate gate: near-clone of an already-promoted strategy adds
     # concentration risk, not edge.

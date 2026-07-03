@@ -658,6 +658,12 @@ def _run_arena_cycle_sync():
             ),
             StrategyV2.arena_status != "champion",
             StrategyV2.dsl_json.isnot(None),
+            # This arena cycle runs replay_engine.run_replay(), which is
+            # stock-specific (DailyPrice/get_backtest_universe). Index-futures
+            # strategies need their own arena path (index_futures_backtester +
+            # their own benchmark) — exclude them here rather than let them
+            # get silently replayed against the wrong instrument/universe.
+            StrategyV2.asset_class == "stock",
         ).order_by(StrategyV2.fitness_score.desc()).all()
 
         to_run = [
