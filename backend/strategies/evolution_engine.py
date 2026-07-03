@@ -144,6 +144,37 @@ def evolve_population(
             .all()
         )
         log.info("Parent pool relaxed to best-available (positive-Sharpe) — %d found", len(parents))
+
+    if not parents:
+        # Bootstrap case: right after an honest-metrics reset, it's possible for
+        # the ENTIRE population to have negative Sharpe (no strategy has proven
+        # a real edge yet). Refusing to breed here would stall evolution
+        # indefinitely — mutation/crossover would sit idle every cycle until
+        # pure-random generation happens to produce a positive-Sharpe seed,
+        # which could take a long time across thousands of candidates. Instead,
+        # breed from the least-bad, best-fitness strategies that still clear
+        # the real trade-count floor (so we're never breeding from small-sample
+        # noise) — mutation can still improve on "least negative" the same way
+        # it improves on "positive," and this population is temporary: real
+        # positive-Sharpe strategies graduate out of this tier automatically
+        # the moment they appear.
+        parents = (
+            db.query(StrategyV2)
+            .filter(
+                StrategyV2.trade_count   >= MIN_BACKTEST_TRADES,
+                StrategyV2.sharpe.isnot(None),
+                StrategyV2.dsl_json.isnot(None),
+                StrategyV2.family.isnot(None),
+            )
+            .order_by(StrategyV2.fitness_score.desc())
+            .limit(100)
+            .all()
+        )
+        log.warning(
+            "No positive-Sharpe parents exist anywhere in the population — "
+            "bootstrapping from best-available (least-negative) fitness, %d found",
+            len(parents),
+        )
     # De-duplicate by family — cap at 10 per family so genetic diversity is maintained
     family_counts: dict[str, int] = {}
     diverse_parents = []

@@ -1,4 +1,140 @@
-﻿## [2026-07-03b] — AQRTINet v3.1: Calibrated for 5yr Dataset
+﻿## [2026-07-03d] — Post-Reset Verification Complete + Evolution Bootstrap Fix
+
+### Population re-backtest + lifecycle sweep: honest baseline confirmed
+Re-ran the full 927-strategy population backtest against the now-complete
+feature set (0 errors, 8.6 min). Result: **0 strategies currently promoted**
+— the sole previously-promoted strategy demoted to shadow
+(`fitness=31, sharpe=-0.94, benchmark_ratio=0.21`), and every one of the
+921 scored candidates has either too few trades to be gradeable or a
+negative honest Sharpe. This is the real, honest starting point: no
+strategy in the population has yet proven a genuine edge under the fixed
+backtester. Investigated the "entries blocked (no feature vector)" log lines
+seen during the run (up to ~2,419 per strategy) and confirmed they're the
+expected ~42-day indicator warm-up window being hit across a multi-symbol
+universe, not a coverage regression — verified uniform across all 352
+symbols.
+
+### Arena grading verified via synthetic tests
+With 0 strategies currently eligible for the arena, verified the new OOS/
+regime-robustness gates (`arena_engine._grade_replay`,
+`_grade_regime_robustness`) directly with 5 constructed test cases: strong
+in-sample return with zero OOS data (correctly rejected), a genuinely
+robust multi-regime strategy (correctly approved), BEAR-concentrated losses
+in a well-sampled regime (correctly rejected), the same losses in an
+under-sampled regime (correctly NOT vetoed), and a strategy below the
+30-trade floor with otherwise excellent numbers (correctly rejected). All 5
+passed.
+
+### Real bug found: evolution had zero eligible parents anywhere
+Investigating why 22 fitness>=50 candidates still didn't promote led to a
+live gap: `evolution_engine.evolve_population`'s parent-selection had two
+tiers — a strict floor (`fitness>=40, sharpe>=0.20`) and a fallback
+(`sharpe>0.0`, any size) — but under today's honest re-scoring, **every
+single strategy in the entire 926-strategy population has negative Sharpe**,
+even the best-fitness, best-sampled ones (top candidate with 87 real trades:
+sharpe -1.54). Both tiers returned zero parents, meaning
+`evolve_population` was hitting `"status": "no_parents"` and doing nothing
+useful on every 5-minute scheduler cycle — only pure-random generation
+(`run_generation_cycle`, unaffected by parent selection) was still
+exploring.
+
+**Fix** (`evolution_engine.py`): added a third bootstrap tier — when even
+the positive-Sharpe fallback is empty, breed from the best-fitness
+strategies that still clear the real trade-count floor (`>= MIN_BACKTEST_TRADES`),
+regardless of Sharpe sign. This is not breeding from noise (trade-count
+floor still applies) and is self-limiting: the moment pure-random
+generation or mutation produces a genuinely positive-Sharpe strategy, the
+better tiers take over automatically and this bootstrap tier stops being
+used. Verified via a direct smoke test run alongside the live backend:
+bootstrap tier correctly triggered, yielded 100 candidates → 42 after
+family-diversity de-dup across 7 families, and evolution created 2 real
+offspring (1 skipped on a transient `database is locked` from running the
+manual test concurrently with the backend's own scheduler — expected
+contention from testing this way, not a defect in the fix itself; the
+backend's own internal cycles don't self-contend like this).
+
+### Backend restarted
+Confirmed alive and listening on :8000 with today's full fix set live
+(feature pipeline, arena gates, meta-learner shrinkage, drawdown gate,
+extended `/health`, and this evolution bootstrap fix). `/health` reports one
+expected, self-resolving `degraded` reason (research-loop snapshot 4 days
+stale from the backend downtime during today's work); data freshness,
+evolution activity, and meta-learner all report healthy.
+
+---
+
+## [2026-07-03c] — Feature Backfill Verified Complete + Index Futures Segment Planned
+
+### Feature backfill: confirmed done
+The 4-worker parallel backfill (started earlier today, see `[2026-07-03]`) finished
+cleanly. Verified directly against the DB: `FeatureValue` now spans 2021-08-10 →
+2026-07-02 (1,271 distinct dates, 16.68M rows), with max date exactly matching
+`DailyPrice`'s max date (2026-07-02) — every trading date has features. The
+2021-06-29 → 2021-08-10 gap is expected indicator warm-up (e.g. `sma_20` needs
+20 prior rows), not missing data. All 4 worker processes exited normally, no
+crash artifacts.
+
+Kicked off the full population re-backtest (`scripts/rebacktest_population.py`,
+927 strategies) against the now-complete feature set — running in background,
+will re-run the lifecycle sweep and arena smoke test once it finishes, then
+restart the backend with all of today's fixes live.
+
+### Index futures segment — planned, not yet built
+User requested a new, separate strategy-training segment for index futures
+(NIFTY50, BANKNIFTY, SENSEX, sector indices), trained on 5yr history, running
+through the same feature/backtest/evolution/arena/promotion pipeline as
+stocks but never competing with or mixing into the stock population.
+
+Key decisions locked in:
+- **Execution model: real futures mechanics**, not an ETF-proxy shortcut —
+  lot sizes, margin, and monthly expiry/roll, since indices aren't directly
+  tradeable (confirmed with user: NIFTY50 exposure in practice is via
+  futures/options or ETFs like NIFTYBEES; user explicitly chose futures for
+  realism over the simpler ETF-proxy path).
+- **Universe**: NIFTY50, BANKNIFTY, SENSEX, and sector index futures
+  (NIFTYIT, NIFTYPHARMA, etc.) — all four options selected.
+- **Margin model**: fixed % of notional (approximating typical NIFTY SPAN
+  margin, ~12-15%), not a full daily-varying SPAN replication — simpler,
+  no new external data dependency, still realistic for capital-efficiency
+  purposes.
+- **Expiry handling**: auto-roll to the next month's contract at expiry with
+  a realistic roll cost/slippage applied, rather than force-closing — lets
+  strategies naturally hold multi-month positions the way real index traders
+  do.
+
+Research findings (via Explore agent) that shape the design:
+- `IndexData` (`aqrti/database/models.py:74-88`) already exists but is a thin
+  spot-index table (no lot/margin/expiry concept) used only as a benchmark
+  input for stock features — not sufficient for a real futures pipeline, will
+  need new dedicated tables rather than reuse.
+- `DailyPrice` has a hard FK to `Stock.symbol` — futures contracts cannot be
+  inserted there; confirms a fully parallel schema is required, matching the
+  user's "separate from everything" requirement architecturally, not just by
+  choice.
+- `StrategyV2.arena_status` (added earlier today) is the precedent to follow:
+  a new `asset_class` column (`"stock"` default / `"index_futures"` new) keeps
+  index strategies in the same table without ever colliding with or competing
+  against the stock population in arena/promotion queries — same isolation
+  pattern, proven to work.
+- Stock-specific logic that must be bypassed for index instruments: circuit-band
+  halt detection (`strategy_backtester.py:858-864`, doesn't apply to index
+  futures), delivery-volume/turnover liquidity filtering (index "volume" from
+  most sources isn't a real traded quantity), and the NIFTY50 buy-and-hold
+  benchmark gate (would be circular for a NIFTY50-tracking strategy itself —
+  needs each index strategy benchmarked against its own instrument).
+- Open risk to resolve before implementation: confirming an actual 5yr
+  historical data source for NSE index futures contracts (yfinance does not
+  carry continuous NSE futures series) — likely needs either a dedicated
+  F&O data provider or a documented synthetic continuous-series approximation
+  (spot + modeled cost-of-carry basis), which would be a real limitation on
+  realism if used and must be flagged explicitly, not silently assumed.
+
+Explicitly paused per user instruction ("dont make index futures for now") —
+plan is recorded here to resume from once stock-side verification closes out.
+
+---
+
+## [2026-07-03b] — AQRTINet v3.1: Calibrated for 5yr Dataset
 
 AQRTINet upgraded from v3 to v3.1, adding 5 improvements specifically calibrated
 for the expanded 15.8M-row feature store (2021-2026, 639 symbols). Also tuned
