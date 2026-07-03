@@ -73,6 +73,13 @@ def record_strategy_live_day(
     Aggregate all paper trades for strategy_id that closed on on_date
     and upsert a StrategyPerformance row.
     """
+    # PaperTrade.strategy_id has no FK (positions may reference a strategy
+    # that's since been deleted, e.g. population cleanup). StrategyPerformance
+    # DOES have a hard FK to strategies_v2 — skip rather than let the insert
+    # violate it and poison the caller's shared session.
+    if not db.query(StrategyV2.id).filter_by(strategy_id=strategy_id).first():
+        return None
+
     # All trades for this strategy on this date
     day_trades = (
         db.query(PaperTrade)
@@ -276,6 +283,11 @@ def on_trade_closed(db: Session, trade: PaperTrade) -> None:
         record_strategy_live_day(db, trade.strategy_id, trade.exit_date)
         db.commit()
     except Exception as exc:
+        # Roll back — leaving the session in "pending rollback" state after a
+        # failed flush/commit poisons every subsequent operation on this same
+        # session (the caller's db.commit(), the next position's db.delete(),
+        # etc.), turning one skippable error into a cascading job failure.
+        db.rollback()
         log.warning("on_trade_closed failed for %s: %s", trade.strategy_id, exc)
 
 

@@ -1,4 +1,39 @@
-﻿## [2026-07-03d] — Post-Reset Verification Complete + Evolution Bootstrap Fix
+﻿## [2026-07-03e] — Fixed Backend Crash: Orphaned Paper Positions + Poisoned Session
+
+Found the backend had gone down since the last restart. Root cause: the
+2026-07-03 population cleanup (deleted 1,229 zero-trade strategies) left 58
+`PaperPosition` rows — mostly stale `arena_<strategy_id>` shadow portfolios,
+plus 2 real positions in the default portfolio — still referencing
+strategy_ids that no longer exist in `strategies_v2`. `PaperPosition.strategy_id`
+has no FK (by design, positions can outlive strategy metadata), but
+`StrategyPerformance.strategy_id` DOES have a hard FK. Every time one of
+these orphaned positions closed, `live_validator.on_trade_closed()` tried to
+insert a `StrategyPerformance` row for the deleted strategy_id, hit the FK
+violation, logged a warning — but never rolled back the session. The
+poisoned session then broke the *next* operation (the caller's own
+`db.commit()`), producing a cascading "transaction has been rolled back due
+to a previous exception" error that killed the scheduler job, every 5
+minutes, until the process eventually went down entirely.
+
+**Fixes** (`strategies/live_validator.py`):
+- `record_strategy_live_day()`: added an early-return guard — skip
+  entirely if the strategy no longer exists, rather than attempting an
+  insert that's guaranteed to violate the FK.
+- `on_trade_closed()`: added `db.rollback()` in the except block. A failed
+  flush/commit must roll back before the session is used again — logging
+  the error without rolling back leaves the session poisoned for every
+  subsequent caller.
+- Closed out all 58 orphaned positions directly (mirroring the exact
+  accounting `continuous_monitor._check_exits` already uses): settled P&L
+  at current price, credited the owning portfolio's cash, marked the
+  matching `PaperTrade` closed with `exit_reason='orphaned_strategy_cleanup'`
+  for auditability. 0 orphaned positions remain.
+- Restarted the backend; confirmed healthy, evolution progressing normally
+  (146 new candidates in the last 3 days).
+
+---
+
+## [2026-07-03d] — Post-Reset Verification Complete + Evolution Bootstrap Fix
 
 ### Population re-backtest + lifecycle sweep: honest baseline confirmed
 Re-ran the full 927-strategy population backtest against the now-complete
