@@ -35,7 +35,7 @@ MAX_NAN_RATIO = 0.30
 MIN_ROWS_PER_SYMBOL = 50
 
 
-def _load_price_data(db: Session, symbol: str, days: int = 1500) -> pd.DataFrame:
+def _load_price_data(db: Session, symbol: str, days: int = 2000) -> pd.DataFrame:
     """Load daily close prices for a symbol, sorted ascending."""
     cutoff = date.today() - timedelta(days=days)
     rows = (
@@ -49,7 +49,7 @@ def _load_price_data(db: Session, symbol: str, days: int = 1500) -> pd.DataFrame
     return pd.DataFrame(rows, columns=["date", "close"])
 
 
-def _load_nifty_data(db: Session, days: int = 1500) -> pd.DataFrame:
+def _load_nifty_data(db: Session, days: int = 2000) -> pd.DataFrame:
     """Load NIFTY50 daily close prices, sorted ascending."""
     cutoff = date.today() - timedelta(days=days)
     rows = (

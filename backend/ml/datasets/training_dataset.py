@@ -29,10 +29,11 @@ log = get_logger("training_dataset")
 # Gap between train end and test start (trading days approximated as calendar days)
 TRAIN_TEST_GAP_DAYS = 14
 
-# Default walk-forward fold configuration — tuned for ~1 year of available history
-WF_TRAIN_YEARS = 0.5     # minimum training window (6 months) — fits 1-year history
-WF_TEST_MONTHS = 2       # test window per fold in months
-WF_STEP_MONTHS = 2       # slide step per fold
+# Walk-forward fold config — tuned for 5yr feature history (2021-2026)
+# Larger training window = more stable IC estimates; larger test = more reliable OOS metric
+WF_TRAIN_YEARS = 1.0     # minimum training window (1yr) — now that we have 5yr of features
+WF_TEST_MONTHS = 3       # test window per fold (3 months = one quarter)
+WF_STEP_MONTHS = 3       # slide step (non-overlapping test windows)
 
 
 @dataclass
@@ -90,8 +91,8 @@ def select_features_by_ic(
     if len(df) < 100 or df[label_col].nunique() < 2:
         return feature_cols[:top_n]
 
-    # Sample up to 2000 rows for speed during feature selection
-    sample = df if len(df) <= 2000 else df.sample(2000, random_state=42)
+    # Sample up to 10000 rows for IC estimation — bigger sample = more stable IC ranks
+    sample = df if len(df) <= 10000 else df.sample(10000, random_state=42)
 
     ics = {}
     for feat in feature_cols:

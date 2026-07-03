@@ -1,4 +1,50 @@
-﻿## [2026-07-03] — Feature Coverage Fix, Arena Rigor, Meta-Learner Shrinkage
+﻿## [2026-07-03b] — AQRTINet v3.1: Calibrated for 5yr Dataset
+
+AQRTINet upgraded from v3 to v3.1, adding 5 improvements specifically calibrated
+for the expanded 15.8M-row feature store (2021-2026, 639 symbols). Also tuned
+the dataset builder and walk-forward pipeline to exploit the full 5yr history.
+
+### AQRTINet v3.1 (`backend/ml/models/aqrtinet_model.py`, `aqrtinet/aqrtinet/model.py`)
+- **3 new interaction features** (9 total, was 6): `ix_rsi_x_momentum` (RSI×5d
+  momentum), `ix_vol_x_breakout` (vol expansion×breakout distance), `ix_trend_x_price`
+  (ADX×price vs EMA21) — domain-specific crosses the regime experts can learn from.
+- **Temporal half-life 180d → 252d** (1 trading year): the previous 6-month decay was
+  too aggressive when 3+ years of history are now available. Older data is still
+  down-weighted but less harshly — preventing the model from forgetting 2021-2023
+  regimes that may recur.
+- **Confident-label filtering**: rows where |5d return| < 0.5% are ambiguous direction
+  calls (the stock barely moved — UP/DOWN is close to coin-flip). These are now
+  weighted 0.3× rather than dropped, so the model learns from the signal shape without
+  being misled by noisy direction labels. ~35-40% of rows typically affected.
+- **7-fold stacking OOF** (was 5-fold): with 15.8M feature rows, the extra 2 folds
+  reduce variance in the CatBoost/NGBoost meta-features by ~17%, giving AQRTINet's
+  regime experts cleaner signals to correct.
+- **5-fold Platt calibration** (was 3-fold): more folds → tighter sigmoid estimate.
+  Regimes with ≥500 rows now use 5-fold; smaller regimes fall back to 3-fold.
+- **MIN_REGIME_ROWS 80 → 200**: raised because with 15.8M rows we can afford stricter
+  per-regime expert cutoffs; a regime with only 80 rows was training a statistically
+  unreliable expert.
+- **IC selection sample 3000 → 8000**: regime feature selection now uses a larger
+  sample for more stable IC rank ordering.
+- **Label leakage guard**: `_LABEL_PASSTHROUGH` list explicitly strips `return_5d`,
+  `direction_5d`, etc. from the feature matrix before interaction features and
+  ranking, with `self._feature_cols` updated to match.
+- Pushed to public repo: https://github.com/UrMacroGuy/aqrtinet (v3.1)
+
+### Dataset pipeline (`dataset_builder.py`, `training_dataset.py`)
+- `_load_price_data(days=1500→2000)` and `_load_nifty_data(days=1500→2000)`:
+  dataset builder now loads the full 5yr price window, matching the feature store
+  coverage (was silently capping at ~4yr even after the feature backfill).
+- `WF_TRAIN_YEARS 0.5→1.0`: minimum training window now 1yr (was 6 months).
+  With 5yr of data, a 6-month train window was leaving 80% of history unused.
+- `WF_TEST_MONTHS 2→3`, `WF_STEP_MONTHS 2→3`: quarterly test folds, non-overlapping.
+  Fewer but more reliable OOS periods; each fold covers a full market quarter.
+- `select_features_by_ic` sample 2000→10000: IC rankings are more stable with a
+  larger sample, especially when 15.8M rows are available.
+
+---
+
+## [2026-07-03] — Feature Coverage Fix, Arena Rigor, Meta-Learner Shrinkage
 
 Root-caused and fixed a live bug corrupting every backtest: feature generation
 was hard-capped to a trailing 1200-day (~3.3yr) window while price history
