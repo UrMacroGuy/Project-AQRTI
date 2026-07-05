@@ -1,4 +1,47 @@
-﻿## [2026-07-03f] — Index Futures Segment: Data, Features, Backtester Foundation
+﻿## [2026-07-05] — Index Futures Segment: Strategy Generation Wired End-to-End
+
+Second phase of the index-futures segment — the piece explicitly deferred
+in the prior session ("strategy generation/DSL for index instruments is
+the next phase"). Now a full generate → backtest → score → lifecycle-sweep
+cycle runs for index strategies, isolated from the stock population.
+
+### Strategy generator (`strategies/index_futures_generator.py`)
+4 families (momentum, mean_reversion, breakout, volatility_play) — fewer
+than the stock generator's 11 by design: index futures are a single, less
+noisy instrument, so there's no sentiment/institutional-flow/pattern
+feature space to draw from, and those families wouldn't have real signal
+to bind to anyway. Scoped strictly to the 39 features
+`features/index_features.py` actually computes (verified against the live
+DB, not assumed) — no volume/delivery features, since none exist for a
+modeled index series. Each candidate gets `asset_class="index_futures"`
+and a specific `index_name` (one strategy trades exactly one instrument).
+
+### End-to-end driver (`scripts/run_index_futures_cycle.py`)
+Standalone script — generate, backtest via `index_futures_backtester`,
+score via the existing (instrument-agnostic) `fitness_engine.score_strategy`,
+then the shared `run_lifecycle_sweep`. Verified with a real 15-candidate
+run: 35 total index strategies scored (0 errors), lifecycle sweep correctly
+promoted 0 (honest — same "no strategy has proven real edge yet" state as
+the stock population), and a direct `promote_strategy()` test on the
+highest-fitness index candidate (58.3 fitness, NIFTYPHARMA) correctly
+rejected on trade-count (38 vs the 60 floor) — the benchmark-gate branching
+added last session (own-instrument vs NIFTY) runs cleanly with no crash.
+
+### Verified isolation
+Confirmed directly against the DB: 20 index-futures rows created, stock
+population's row count unchanged (1059 before and after) — no cross-talk
+between the two populations through generation, backtesting, or the shared
+lifecycle sweep.
+
+### Note on how this session's work was done
+The backend/scheduler was intentionally stopped for this work (per explicit
+instruction) — everything above runs as direct, standalone scripts against
+the DB, same pattern as `scripts/rebacktest_population.py`. No server
+process was started.
+
+---
+
+## [2026-07-03f] — Index Futures Segment: Data, Features, Backtester Foundation
 
 Built the first phase of the index-futures segment (NIFTY50, BANKNIFTY,
 SENSEX, NIFTYIT, NIFTYPHARMA) — a separate, parallel strategy-training
