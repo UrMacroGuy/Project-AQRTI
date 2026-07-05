@@ -1,4 +1,7 @@
 # MASTER IMPLEMENTATION ROADMAP
+
+> ⚠️ **Historical design document (June 2026, v1.0).** Kept for reference. Numbers, thresholds, and architecture here are aspirational or superseded. Current truth: `PROJECT_DIARY.md` (system), `docs/STRATEGY_ARENA.md` (arena), `backend/strategies/promotion_config.py` (gates), `DATABASE_AND_TRAINING.md` (DB/ML).
+
 # PROJECT AQRTI
 
 Last Updated: 2026-06-25
@@ -7,20 +10,24 @@ Last Updated: 2026-06-25
 
 ## PHASE STATUS OVERVIEW
 
+*(Table refreshed 2026-07-05 — see `IMPROVEMENTS.md` P2-3. Everything below Phase 8b predates the 2026-07 Trust Overhaul; treat pre-overhaul "Done" markers as historical record, not a claim that today's numbers match.)*
+
 | Phase | Name | Status | Completed |
 |---|---|---|---|
 | 0 | Foundation | ✅ Done | Project structure, DB, config, logging |
 | 1 | UI Shell | ✅ Done | 14-page terminal, all chart types, navigation |
-| 2 | Data Platform | ✅ Done | Market data, feature store, 148 features |
-| 3 | ML Prediction Engine | ✅ Done | CatBoost + LightGBM + XGBoost ensemble |
+| 2 | Data Platform | ✅ Done | Market data, feature store (now 5yr history, 16.7M+ feature rows) |
+| 3 | ML Prediction Engine | ✅ Done (superseded) | Original ensemble was CatBoost+LightGBM+XGBoost; LightGBM/XGBoost removed 2026-06-27 (sub-coin-flip accuracy) — current stack is CatBoost + NGBoost + AQRTINet v3.1 |
 | 4 | News & Sentiment | ✅ Done | RSS ingestion, NLP scoring, sentiment velocity |
-| 5 | Strategy Discovery | ✅ Done | 8-family genetic algorithm, 4,000+ strategies |
-| 6 | Learning System | ✅ Done | Failure analysis, knowledge score 71.5 |
-| 7 | Paper Trading | ✅ Done | Auto open/close, full analytics |
-| 8 | Research Agents | ✅ Done | 7 agents at 100% success, daily briefs |
+| 5 | Strategy Discovery | ✅ Done (superseded) | Original was an 8-family genetic algorithm; now 11 families, 9 mutation ops, 6-dimension fitness — see `docs/STRATEGY_ARENA.md` |
+| 6 | Learning System | ✅ Done | Failure analysis, meta-learner (now with shrinkage estimators, 2026-07-03) |
+| 7 | Paper Trading | ✅ Done | Auto open/close, full analytics, forward-paper quarantine gate added 2026-07-02b |
+| 8 | Research Agents | ✅ Done | 7 agents, daily briefs |
 | 8b | Strategy Engine Overhaul | ✅ Done | Fitness recalibration, historical regimes, family-balanced backtest |
-| 9 | Production Validation | 🔄 In Progress | Paper trading running, ML needs retrain |
-| 10 | Real Capital | ⏳ Pending | Requires Phase 9 success metrics |
+| G | **Trust Overhaul** (not in original roadmap) | ✅ Done (2026-07-01–02b) | Discovered and fixed system-wide Sharpe/Sortino fabrication, unrealistic costs, look-ahead bias; added OOS/benchmark/duplicate/quarantine promotion gates. See `PROJECT_DIARY.md` §14 phase G for full detail. |
+| H | **Feature Fix, Arena Rigor, Index Futures** (not in original roadmap) | ✅ Done (2026-07-03) | Fixed a live feature-coverage bug, added arena OOS/robustness gates, shipped AQRTINet v3.1, built the Index Futures segment. Current honest baseline: **927 population / 0 promoted** — see `PROJECT_DIARY.md` §14 phase H. |
+| 9 | Production Validation | 🔄 In progress | Re-baselined under honest metrics as of the Trust Overhaul — see refreshed criteria below |
+| 10 | Real Capital | ⏳ Pending | Requires Phase 9 success metrics under the HONEST gates, not the original pre-overhaul criteria |
 
 ---
 
@@ -172,17 +179,18 @@ Last Updated: 2026-06-25
 
 ### Requirements
 - [ ] Paper trading > 60 days with positive expectancy
-- [ ] Model direction accuracy ≥ 65% (currently needs retrain)
-- [ ] Strategy win rate ≥ 55% sustained
-- [ ] Max drawdown < 10%
-- [ ] Sharpe ≥ 1.0 on paper portfolio
+- [ ] Model direction accuracy ≥ 65%
+- [ ] Algo win rate ≥ 55% sustained, promoted under the HONEST gates in `promotion_config.py` (fitness/win-rate/Sharpe/OOS/benchmark/duplicate-overlap/drawdown — not the original, since-superseded criteria above)
+- [ ] Max drawdown < 10% (retirement gate is now -35% on honest MTM drawdown — see `promotion_config.MAX_DRAWDOWN_LIMIT`)
+- [ ] Sharpe ≥ 1.0 on paper portfolio (honest daily mark-to-market scale, not the pre-overhaul inflated per-trade-repeat scale)
 - [ ] Options Intelligence data populated
-- [ ] All 8 strategy families fully backtested (volatility_play at 2% coverage)
+- [ ] All 11 algo families represented in the backtested/scored population
 
-### Known gaps
-- ML model outputs biased Bearish/Neutral — needs retrain on balanced data
-- Options Intelligence scraper not run (shows `no_data`)
-- Volatility_play backtest coverage: 2% → needs automated clearing
+### Known gaps (re-verified 2026-07-05)
+- Options Intelligence still shows `no_data` on `GET /api/v1/options-intelligence` — confirmed still true today, real scraper (NSE option-chain API) not consistently returning data outside market hours.
+- The "volatility_play at 2% coverage" gap from the original roadmap is **resolved** — verified directly against the DB: volatility_play now has 131 strategies (13% of the 1,059-strategy stock population), on par with other families.
+- The "ML model outputs biased Bearish/Neutral" gap is **superseded, not fixed or refuted** — the entire ensemble (CatBoost+LightGBM+XGBoost) that claim was about no longer exists; LightGBM/XGBoost were removed 2026-06-27 and AQRTINet v3.1 was shipped 2026-07-03. Whether the *current* ensemble has a direction bias is an open question that needs its own fresh check, not an inherited answer from the old ensemble.
+- **The real current gap, not in the original list**: as of the 2026-07-03 honest re-baseline, the algo population has **0 promoted algos out of 927** — no algo has yet proven a genuine edge under the fully-honest backtester. This is correct, expected behavior post-Trust-Overhaul (see `PROJECT_DIARY.md` §14 phase H), not a bug to fix by loosening gates — but it means Phase 9's "Algo win rate ≥55% sustained" criterion has no candidate to even evaluate yet.
 
 ---
 

@@ -1,5 +1,8 @@
 # PAPER_TRADING_ENGINE.md
 
+> ⚠️ **Historical design document (June 2026, v1.0).** Kept for reference. Numbers, thresholds, and architecture here are aspirational or superseded. Current truth: `PROJECT_DIARY.md` (system), `docs/STRATEGY_ARENA.md` (arena), `backend/strategies/promotion_config.py` (gates), `DATABASE_AND_TRAINING.md` (DB/ML).
+
+
 # PROJECT AQRTI
 ## Virtual Capital Validation Environment
 

@@ -1,4 +1,7 @@
-# PROJECT AQRTI — Current State
+# PROJECT AQRTI — State as of 2026-06-25 (historical)
+
+> ⚠️ **Historical design document (June 2026, v1.0).** Kept for reference. Numbers, thresholds, and architecture here are aspirational or superseded. Current truth: `PROJECT_DIARY.md` (system), `docs/STRATEGY_ARENA.md` (arena), `backend/strategies/promotion_config.py` (gates), `DATABASE_AND_TRAINING.md` (DB/ML).
+
 ## Intelligence Terminal: Architecture, Component Map & System Status
 
 Version: 3.0 — Post Phase 8 (Strategy Engine Overhaul + Agent System)
