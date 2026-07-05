@@ -1,8 +1,18 @@
 # AQRTI Intelligence Terminal — User Guide
 ### For someone new to the stock market
 
-> **Last updated: 2026-06-25**
-> Current state: Intelligence Score 71.5 · Regime SIDEWAYS · 4,087 strategies · 847 promoted · 7 agents healthy
+> Population size, promotion counts, and Intelligence Score change
+> constantly as evolution runs — **check the live Overview and Algo Lab
+> pages for current numbers** rather than trusting a snapshot here.
+>
+> **2026-07 Trust Overhaul:** the backtester, feature pipeline, and
+> promotion gates were rebuilt to eliminate several sources of inflated
+> metrics (lookahead bias, unrealistic trading costs, a truncated feature
+> history window, an arena that could promote without human approval). If
+> you're comparing today's dashboard to an older screenshot and the
+> numbers look much lower, that's why — the honest baseline this produced
+> is intentionally strict, and every algo you see now is re-earning its
+> score under real conditions rather than inheriting an inflated one.
 
 ---
 
@@ -71,7 +81,7 @@ Each opportunity shows:
 - **Confidence** — AI confidence in the prediction
 - **Expected Return** — estimated % gain
 - **Risk Level** — Low / Medium / High
-- **Strategy** — what type of trading pattern is being used
+- **Algo** — what type of trading pattern is being used
 
 > **What to do:** Focus on opportunities with confidence above 75% and Low/Medium risk. These are AQRTI's strongest signals.
 
@@ -99,22 +109,22 @@ Each opportunity shows:
 
 ---
 
-### 6. Strategy Lab
-**What it shows:** All the trading strategies AQRTI has discovered through backtesting.
+### 6. Algo Lab
+**What it shows:** All the trading algos AQRTI has discovered through backtesting.
 
-- **Leaderboard** — strategies ranked by fitness score (combination of returns, Sharpe, drawdown)
-- **Promoted strategies** — ones AQRTI trusts enough to use for live paper trading
-- **Strategy Trades** — click any strategy to see every trade it made in backtests
-- **Replay** — watch the strategy's entire backtest history play out as an animation
+- **Leaderboard** — algos ranked by fitness score (combination of returns, Sharpe, drawdown)
+- **Promoted algos** — ones that passed every honest gate (fitness, win-rate, Sharpe, out-of-sample, benchmark-vs-buy-and-hold, duplicate-overlap, drawdown) — see `backend/strategies/promotion_config.py` for the exact thresholds
+- **Algo Trades** — click any algo to see every trade it made in backtests
+- **Replay** — watch the algo's entire backtest history play out as an animation
 
-> **What to do:** Look at the top strategy. Check its win rate (should be above 50%) and Sharpe ratio (above 1.0). The "Replay Backtest" button lets you watch how the strategy performed trade by trade.
+> **What to do:** Look at the top algo. Check its win rate (should be above 50%) and Sharpe ratio (above 1.0). The "Replay Backtest" button lets you watch how the algo performed trade by trade. Don't be alarmed if the leaderboard shows 0 promoted — under the honest gates, that means nothing has proven a real edge yet, not that something is broken.
 
 ---
 
 ### 7. Model Center
 **What it shows:** The AI models that make predictions.
 
-AQRTI uses several machine learning models (CatBoost, LightGBM, XGBoost) trained on years of Indian market data.
+AQRTI uses an ensemble of machine learning models (CatBoost, NGBoost, and a custom regime-aware model called AQRTINet) trained on years of Indian market data.
 
 - **Direction Accuracy** — how often the model correctly predicts if a stock will go up or down
 - **AUC Score** — 0.5 means random guessing, 0.88 means very accurate
@@ -143,7 +153,7 @@ AQRTI uses several machine learning models (CatBoost, LightGBM, XGBoost) trained
 |-------|--------------|
 | Market Research | Analyses macro conditions |
 | Pattern Research | Finds recurring price patterns |
-| Strategy Research | Discovers and tests new trading strategies |
+| Algo Research | Discovers and tests new trading algos |
 | Model Research | Evaluates AI model performance |
 | News Research | Reads and scores news articles |
 | Risk Research | Assesses portfolio risk |
@@ -167,7 +177,7 @@ This is "paper trading" — real market data, fake money. It's how you test if A
 
 **How it works:**
 1. Every day after market close (3:30 PM IST), AQRTI runs its predictions
-2. It picks the best stocks based on the best-performing strategy
+2. It picks the best stocks based on the best-performing algo
 3. It decides how much to invest in each (based on confidence)
 4. It opens/closes positions automatically
 
@@ -191,7 +201,7 @@ This is "paper trading" — real market data, fake money. It's how you test if A
 ### 12. Intelligence Vault
 **What it shows:** AQRTI's memory — archived snapshots of past market states, portfolio values, research records.
 
-- **Replay** — enter any past date to see what AQRTI knew on that day: market regime, portfolio, active strategies
+- **Replay** — enter any past date to see what AQRTI knew on that day: market regime, portfolio, active algos
 - **Research Records** — all research AQRTI has ever conducted
 - **Backups** — daily backups of the entire database
 
@@ -205,7 +215,7 @@ This is "paper trading" — real market data, fake money. It's how you test if A
 - **Regime Datasets** — labelled market history used to train the AI
 - **Meta-Learning Insights** — patterns AQRTI found in its own failures
 - **Feature Proposals** — new market signals AQRTI wants to add
-- **Model/Strategy Memory** — what the AI has learned about each stock and strategy
+- **Model/Algo Memory** — what the AI has learned about each stock and algo
 - **Intelligence Pipeline** — the 12-step daily process (run manually or triggered automatically)
 
 > **What to do:** You mostly don't need to touch this. But if you want to force a full intelligence refresh, click "Run Intelligence Pipeline". It rebuilds datasets, retrains models, and updates all insights.
@@ -239,7 +249,7 @@ This is "paper trading" — real market data, fake money. It's how you test if A
 3. Learning Center → any new failures or lessons?
 
 **Weekly:**
-1. Strategy Lab → is the best strategy still performing well?
+1. Algo Lab → is the best algo still performing well?
 2. Model Center → is accuracy holding up?
 3. Risk Center → are circuit breakers safe?
 
@@ -256,7 +266,7 @@ AQRTI gives every prediction a confidence score. Here's how to interpret it:
 | **60–75%** | Moderate confidence. Worth watching. |
 | **Below 60%** | Low confidence. AQRTI won't trade these. |
 
-The minimum threshold for paper trading is set in the system (default: 60%). You'll only see trades above that level.
+The minimum threshold for paper trading is set in the system (`MIN_CONFIDENCE` in `backend/paper_trading/continuous_monitor.py` — currently 60%, but check that file for the live value since it can be tuned). You'll only see trades above that level.
 
 ---
 
@@ -264,7 +274,7 @@ The minimum threshold for paper trading is set in the system (default: 60%). You
 
 - **Regime = BEAR or VOLATILE** → AQRTI reduces position sizes automatically. Expect fewer trades.
 - **Intelligence Score dropping** → AQRTI's predictions are getting less reliable. Don't act aggressively.
-- **Win Rate below 45%** → Strategy may be failing. Check the Learning Center for recent failures.
+- **Win Rate below 45%** → Algo may be failing. Check the Learning Center for recent failures.
 - **Max Drawdown above 15%** → Portfolio is bleeding. Circuit breakers may trigger.
 - **VIX above 20** → High market fear. AQRTI will be more conservative.
 - **Circuit Breaker TRIGGERED** → Trading is automatically paused for safety.
@@ -285,22 +295,22 @@ The minimum threshold for paper trading is set in the system (default: 60%). You
 | Term | Definition |
 |------|-----------|
 | **AUC** | Area Under Curve — model accuracy metric (0.5 = random, 1.0 = perfect) |
-| **Backtest** | Testing a strategy on historical data to see how it would have performed |
+| **Backtest** | Testing an algo on historical data to see how it would have performed |
 | **Breakout** | When a stock moves above a resistance level — often signals a big move |
 | **CAGR** | Compound Annual Growth Rate — annualised return |
 | **Drawdown** | Drop from peak. 10% drawdown = portfolio fell 10% from its highest point |
 | **ECE** | Expected Calibration Error — how well confidence scores match actual outcomes |
 | **Equity Curve** | Chart showing portfolio value over time |
 | **FII** | Foreign Institutional Investors (e.g., hedge funds, sovereign wealth funds) |
-| **Fitness Score** | AQRTI's combined rating of a strategy: returns + consistency + risk |
-| **Graveyard** | Strategies that failed and were retired — studied to avoid repeat mistakes |
+| **Fitness Score** | AQRTI's combined rating of an algo: returns + consistency + risk |
+| **Graveyard** | Algos that failed and were retired — studied to avoid repeat mistakes |
 | **Mark to Market** | Updating position values to current market prices |
 | **P&L** | Profit & Loss |
 | **PCR** | Put-Call Ratio — above 1.2 = bearish sentiment, below 0.8 = bullish |
 | **Regime** | Market condition classification: BULL, BEAR, SIDEWAYS, VOLATILE, RECOVERY |
 | **Rebalance** | Adjusting the portfolio — closing some positions, opening others |
 | **Sharpe Ratio** | Return per unit of risk. Above 1.0 = good, above 2.0 = excellent |
-| **Stop Loss** | The price at which a position is automatically closed to limit losses (default: 8% below entry) |
+| **Stop Loss** | The price at which a position is automatically closed to limit losses. Set per-algo (each algo's own rules define its stop-loss %, so it varies — check the specific algo's DSL in Algo Lab rather than assuming one fixed number) |
 | **VaR** | Value at Risk — worst expected daily loss |
 | **Walk-Forward** | Testing a model by training on past data and testing on future data (more rigorous than simple backtest) |
 | **Win Rate** | % of trades that were profitable |
