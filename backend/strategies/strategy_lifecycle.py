@@ -203,6 +203,11 @@ def promote_strategy(
     _log_event(db, strategy_id, "strategy_promoted",
                f"Promoted from {old_status}. Fitness={row.fitness_score:.1f}. {reason}")
     log.info("Strategy %s promoted to 'promoted' (fitness=%.1f)", strategy_id, row.fitness_score)
+    try:
+        from aqrti.alerts.telegram_alerts import alert_algo_promoted
+        alert_algo_promoted(strategy_id, row.sharpe_ratio or 0.0, (row.win_rate or 0.0) * 100)
+    except Exception:
+        pass
     return {"success": True, "new_status": "promoted", "fitness": row.fitness_score}
 
 

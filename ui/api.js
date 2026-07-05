@@ -368,6 +368,14 @@ const Api = {
     return apiPost(`/universe/download?years=${years}&region=${region}&workers=${workers}`);
   },
   async universeDownloadStatus()      { return apiFetch('/universe/status'); },
+  async systemHealth()                { return apiFetch('/system-health'); },
+  async systemRestartLog()            { return apiFetch('/system/restart-log'); },
+
+  // ── Go/No-Go Scorecard ────────────────────────────────────────
+  async goNogo()          { return apiFetch('/go-nogo'); },
+  async goNogoUptimeLog() { return apiFetch('/go-nogo/uptime-log'); },
+  async goNogoRiskRails()     { return apiFetch('/go-nogo/risk-rails'); },
+  async goNogoMonthlyReview() { return apiFetch('/go-nogo/monthly-review'); },
 };
 
 // ── Legacy uppercase API shim (used in intelligence-lab + replay) ──

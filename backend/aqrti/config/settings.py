@@ -23,10 +23,15 @@ class Settings(BaseSettings):
     )
 
     # ── Server ──────────────────────────────────────────────────
-    host: str = Field(default="0.0.0.0")
+    host: str = Field(default="127.0.0.1")   # ARCH-8: localhost-only; override via AQRTI_HOST for LAN after enabling auth
     port: int = Field(default=8000)
     reload: bool = Field(default=False)
     log_level: str = Field(default="INFO")
+
+    # ── ARCH-8: Admin token (optional but required for any non-localhost access) ─
+    # Set AQRTI_ADMIN_TOKEN in .env. When empty, /admin/* routes accept all
+    # requests — localhost-only binding ensures this is safe without the token.
+    admin_token: str = Field(default="")
 
     # ── Database ─────────────────────────────────────────────────
     db_path: str = Field(default="./aqrti.db")
@@ -106,6 +111,12 @@ class Settings(BaseSettings):
     # when either is unset — no crash, no fake messages.
     telegram_bot_token: str = Field(default="")
     telegram_chat_id: str = Field(default="")
+
+    # ── Finnhub Real-Time Data ─────────────────────────────────────
+    # Set AQRTI_FINNHUB_API_KEY in .env for real-time NSE quotes and
+    # news feeds. Falls back to yfinance when unset or on error.
+    # Free tier: 60 API calls/minute — sufficient for the 5-min monitor loop.
+    finnhub_api_key: str = Field(default="")
 
 
 _settings: Settings | None = None

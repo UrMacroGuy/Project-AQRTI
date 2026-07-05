@@ -108,7 +108,7 @@ Source: `LessonLearned` (+ its `FailureRecord`). Frontmatter: `type: lesson, cat
 Source: `StrategyV2` — **promoted/active only** (a note per all 927 candidates would be graph noise). Frontmatter: `type: algo, family, status, fitness, sharpe, win_rate, oos_passed, promoted_at`. Body: plain-English rendering of the DSL entry rules, gate results, shadow-trade record. Retired algos get `status: retired` on next export rather than deletion (history preserved).
 
 ### 3.5 Home note — `Home.md`
-Regenerated each export: link to today's daily, knowledge score trend (last 7 values), currently promoted algos, 5 most recent lessons, portfolio month-checklist status (phase 2). Set as the vault's default landing page in Obsidian settings.
+Regenerated each export: link to today's daily, quick-jump links to all four index notes (§4.1), knowledge score trend (last 7 values, static + a live Dataview table of the last 10), currently promoted algos (or an honest "none yet" note explaining the gate chain when empty — never a blank section), 5 most recent lessons, portfolio month-checklist status (phase 2). Set as the vault's default landing page in Obsidian settings.
 
 ## 4. Frontmatter = Dataview database
 
@@ -120,7 +120,13 @@ TABLE severity, category FROM "Lessons" WHERE regime = "VOLATILE"
 TABLE fitness, sharpe, win_rate FROM "Algos" WHERE status = "promoted" SORT fitness DESC
 ```
 
-Tag scheme: everything under a single `aqrti/` namespace (`aqrti/daily`, `aqrti/lesson`, `aqrti/algo`, `aqrti/stock`) so AQRTI content is one click to isolate or filter out in the graph.
+Tag scheme: everything under a single `aqrti/` namespace (`aqrti/daily`, `aqrti/lesson`, `aqrti/algo`, `aqrti/stock`, `aqrti/report`, `aqrti/home`, `aqrti/index`) so AQRTI content is one click to isolate or filter out in the graph.
+
+### 4.1 Index notes — turning folders into sorted views
+Each of `Daily/`, `Stocks/`, `Lessons/`, `Algos/` gets a `_index.md` (underscore-prefixed to sort first in the file explorer) containing a Dataview `TABLE` query scoped to that folder — e.g. `Algos/_index.md` lists every algo sorted by fitness, `Lessons/_index.md` sorts by severity then date. These are pure organization: no new DB reads, just a saved query over frontmatter that already exists. `Home.md` links to all four and embeds a live 10-row knowledge-score trend table. If Dataview isn't installed, the query renders as an inert fenced code block — the page still reads fine, just without the live table.
+
+### 4.2 Presentation — Dataview install + visual theming
+Because the plugin isn't just config (Obsidian needs its actual `main.js`/`manifest.json` present), the exporter setup includes shipping Dataview directly into the vault's `.obsidian/plugins/dataview/` folder pre-enabled (DataviewJS explicitly left **off** — only declarative `TABLE`/`LIST` queries are used, no arbitrary code execution), plus a CSS snippet (`.obsidian/snippets/aqrti-theme.css`, enabled by default) that color-codes each `aqrti/*` tag (daily=blue, stock=grey, lesson=orange, algo=green, report=purple, home=gold) in tag pills, the file explorer, and the graph view's color groups (`graph.json`). This is a one-time setup written alongside the vault's first export, not something the exporter re-writes on every run — `.obsidian/` is Obsidian's own config, untouched by `vault_exporter.py`.
 
 ## 5. Exporter mechanics
 

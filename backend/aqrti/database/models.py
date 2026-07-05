@@ -156,6 +156,7 @@ class SentimentRecord(Base):
 # LAYER 6: DERIVATIVES / OPTIONS DATA
 # ══════════════════════════════════════════════════════════════
 class OptionsData(Base):
+    """DEPRECATED — superseded by OptionsChain (options_chain table). Zero active readers as of 2026-07-05. Do not write to this table; drop via migration after confirming zero readers via grep."""
     __tablename__ = "options_data"
     __table_args__ = (
         UniqueConstraint("symbol", "date", name="uq_options_symbol_date"),
@@ -205,6 +206,7 @@ class Prediction(Base):
 # PAPER TRADES
 # ══════════════════════════════════════════════════════════════
 class Trade(Base):
+    """DEPRECATED — superseded by PaperTrade (paper_trades table). The Risk page previously read this table and showed empty data because no rows exist. Do not write to this table; drop via migration after confirming zero readers via grep."""
     __tablename__ = "trades"
     __table_args__ = (
         Index("ix_trade_symbol",     "symbol"),
@@ -234,6 +236,7 @@ class Trade(Base):
 # FAILURES / MISTAKES
 # ══════════════════════════════════════════════════════════════
 class Mistake(Base):
+    """DEPRECATED — v1 mistake/failure tracking, unused since the algo engine replaced the manual trading workflow. Do not write to this table; drop via migration after confirming zero readers via grep."""
     __tablename__ = "mistakes"
     __table_args__ = (
         Index("ix_mistake_symbol", "symbol"),
@@ -257,6 +260,7 @@ class Mistake(Base):
 # STRATEGIES
 # ══════════════════════════════════════════════════════════════
 class Strategy(Base):
+    """DEPRECATED — v1 strategy table (strategies). Superseded by StrategyV2 (strategies_v2) which has full DSL, honest backtest gates, OOS, quarantine, and arena fields. Do not write to this table; drop via migration after confirming zero readers via grep."""
     __tablename__ = "strategies"
 
     id             = Column(Integer,    primary_key=True, autoincrement=True)
@@ -282,6 +286,7 @@ class Strategy(Base):
 # MODELS REGISTRY
 # ══════════════════════════════════════════════════════════════
 class ModelRecord(Base):
+    """DEPRECATED — v1 model registry (model_registry). Superseded by MLModel and MLModelVersion tables which track CatBoost/NGBoost/AQRTINet artifacts and training metadata. Do not write to this table; drop via migration after confirming zero readers via grep."""
     __tablename__ = "model_registry"
 
     id                = Column(Integer,    primary_key=True, autoincrement=True)
@@ -2426,3 +2431,24 @@ class IndexFuturesFeatureValue(Base):
     value        = Column(Float,      nullable=True)
     version      = Column(Integer,    nullable=False, default=1)
     computed_at  = Column(DateTime,   default=datetime.utcnow)
+
+
+class SystemHealthCheck(Base):
+    """
+    GO-3: Daily 16:30 IST self-check result. One row per check run.
+    The UI reads the latest row to show/hide the red failure banner.
+    """
+    __tablename__ = "system_health_checks"
+    __table_args__ = (
+        Index("ix_shc_checked_at", "checked_at"),
+    )
+
+    id              = Column(Integer,  primary_key=True, autoincrement=True)
+    checked_at      = Column(DateTime, nullable=False, default=datetime.utcnow)
+    prices_ok       = Column(Boolean,  nullable=False, default=False)
+    shadow_ok       = Column(Boolean,  nullable=False, default=False)
+    pipeline_ok     = Column(Boolean,  nullable=False, default=False)
+    overall_ok      = Column(Boolean,  nullable=False, default=False)
+    prices_count    = Column(Integer,  nullable=True)
+    shadow_count    = Column(Integer,  nullable=True)
+    failures        = Column(String(500), nullable=True)

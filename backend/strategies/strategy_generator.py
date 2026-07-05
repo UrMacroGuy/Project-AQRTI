@@ -60,6 +60,9 @@ PATTERN_FEATURES = [
 ]
 REGIME_FEATURES = [
     "regime_confidence", "breadth_pct", "nifty_trend_score",
+    # GO-5b cross-sectional / breadth features
+    "nifty_rs_21d", "sector_rs_21d", "relative_strength_nifty_21d",
+    "breadth_pct_above_ema50", "breadth_pct_above_ema200",
 ]
 
 # ── Regime groupings ──────────────────────────────────────────
@@ -454,33 +457,174 @@ def _generate_institutional_flow(rng: random.Random) -> StrategyDSL:
     )
 
 
+def _generate_relative_strength(rng: random.Random) -> StrategyDSL:
+    """
+    GO-5b: Cross-sectional relative strength — enter when a stock is outperforming
+    both NIFTY and its sector over the past 21 days. Cross-sectional signals are
+    harder for transaction costs to erase than absolute-level signals because the
+    spread being traded is the alpha vs the index, not the raw return.
+    Hold 20-40 days to amortize NSE's 0.28% round-trip cost (cost drag / hold_days
+    falls with longer hold; at 30d hold it's ~0.009%/day vs edge of ~0.05%+/day).
+    """
+    rs_nifty_th  = round(rng.uniform(1.5, 5.0), 2)   # stock outperforms NIFTY by X% over 21d
+    rs_sector_th = round(rng.uniform(0.5, 3.0), 2)   # stock outperforms sector by Y% over 21d
+    n_conds      = rng.randint(2, 4)
+
+    conds = [
+        _make_condition("nifty_rs_21d",  ">", rs_nifty_th,  weight=1.2),
+        _make_condition("sector_rs_21d", ">", rs_sector_th, weight=1.0),
+    ]
+    if n_conds >= 3:
+        # Confirm trend is intact — not entering on a dead-cat bounce
+        conds.append(_make_condition("price_above_ema50", "==", 1.0))
+    if n_conds >= 4:
+        # Volume confirms accumulation, not rotation out of sector
+        conds.append(_make_condition("volume_ratio_20d", ">", round(rng.uniform(1.1, 1.6), 2)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("nifty_rs_21d", "<", round(-rng.uniform(0.5, 2.0), 2)),  # RS turns negative
+        _make_condition("rsi_14", ">", round(rng.uniform(72, 82), 1)),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(7, 12), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "bull_only", "all_weather"])],
+        family           = "relative_strength",
+        name             = f"RS_N{rs_nifty_th}_S{rs_sector_th}",
+        min_confidence   = _rand_confidence(rng, 55.0, 70.0),
+        max_holding_days = rng.randint(20, 45),   # long hold to amortize cost
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_breadth_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    GO-5b: Market breadth + stock momentum. Only enter when the market is in
+    broad-based rally (many stocks above EMA50) AND this stock has momentum.
+    Avoids buying an individual leader into a deteriorating market — a major
+    source of failed trades in the current population (VOLATILE-only bias
+    concentrates entries into high-dispersion periods where breadth is low).
+    Hold 15-35 days — breadth signals are slow to turn, so holding is rewarded.
+    """
+    breadth_th = round(rng.uniform(55, 72), 1)   # >55-72% of universe above EMA50
+    mom_th     = round(rng.uniform(2.0, 6.0), 2)
+    n_conds    = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("breadth_pct_above_ema50", ">", breadth_th, weight=1.1),
+        _make_condition("return_21d", ">", mom_th),
+    ]
+    if n_conds >= 3:
+        conds.append(_make_condition("rsi_14", ">", round(rng.uniform(48, 60), 1)))
+    if n_conds >= 4:
+        conds.append(_make_condition("adx_14", ">", round(rng.uniform(20, 28), 1)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("breadth_pct_above_ema50", "<", round(rng.uniform(40, 52), 1)),
+        _make_condition("return_5d", "<", round(-rng.uniform(2.5, 5.0), 1)),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(7, 11), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "breadth_momentum",
+        name             = f"BreadthMom_B{breadth_th}_M{mom_th}",
+        min_confidence   = _rand_confidence(rng, 55.0, 70.0),
+        max_holding_days = rng.randint(15, 35),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_long_hold_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    GO-5b: Extended hold (30-60 days) amortizes NSE round-trip cost across more days.
+    At 0.28% round-trip over 45 days = 0.006%/day cost drag — an edge of only 0.01%/day
+    net of costs clears the bar. Short-hold families (3-8d) need 0.037%/day JUST to
+    break even. Inspired by the NSE delivery-market structure: delivery buyers are
+    committed capital, not noise, so momentum in high-delivery stocks persists longer.
+    Uses 3-month (63d) return as the signal — captures the medium-term momentum factor
+    that academic literature (Jegadeesh & Titman, Fama-French) consistently finds.
+    """
+    ret63_th   = round(rng.uniform(5.0, 15.0), 2)   # 3-month return > 5-15%
+    n_conds    = rng.randint(3, 4)
+
+    # 3-month momentum as primary; fall back to 21d if 63d not in feature set
+    mom_feat   = rng.choice(["return_21d", "momentum_20d", "relative_strength_nifty_21d"])
+    mom_th2    = round(rng.uniform(3.0, 8.0), 2)
+
+    conds = [
+        _make_condition(mom_feat, ">", mom_th2, weight=1.2),
+    ]
+    if n_conds >= 2:
+        conds.append(_make_condition("rsi_14", ">", round(rng.uniform(50, 62), 1)))
+    if n_conds >= 3:
+        # High delivery = genuine buying, not speculation
+        conds.append(_make_condition("delivery_pct", ">", round(rng.uniform(55, 72), 1)))
+    if n_conds >= 4:
+        conds.append(_make_condition("price_above_ema50", "==", 1.0))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition(mom_feat, "<", round(-rng.uniform(1.0, 3.0), 2)),   # momentum reversal
+        _make_condition("rsi_14", ">", round(rng.uniform(74, 84), 1)),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(10, 16), 1)   # wider SL for longer hold — normal retracement
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
+        family           = "long_hold_momentum",
+        name             = f"LongHold_{mom_feat[:8]}_{mom_th2}",
+        min_confidence   = _rand_confidence(rng, 56.0, 72.0),
+        max_holding_days = rng.randint(30, 60),   # 30-60 day delivery swing
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.2),   # min 2.2:1 R:R
+    )
+
+
 _GENERATORS = {
-    "momentum":           _generate_momentum,
-    "mean_reversion":     _generate_mean_reversion,
-    "breakout":           _generate_breakout,
-    "sentiment_driven":   _generate_sentiment_driven,
-    "regime_adaptive":    _generate_regime_adaptive,
-    "volume_surge":       _generate_volume_surge,
-    "volatility_play":    _generate_volatility_play,
-    "hybrid":             _generate_hybrid,
-    "quality_momentum":   _generate_quality_momentum,
-    "institutional_flow": _generate_institutional_flow,
-    "rl_momentum":        _generate_rl_momentum,
+    "momentum":            _generate_momentum,
+    "mean_reversion":      _generate_mean_reversion,
+    "breakout":            _generate_breakout,
+    "sentiment_driven":    _generate_sentiment_driven,
+    "regime_adaptive":     _generate_regime_adaptive,
+    "volume_surge":        _generate_volume_surge,
+    "volatility_play":     _generate_volatility_play,
+    "hybrid":              _generate_hybrid,
+    "quality_momentum":    _generate_quality_momentum,
+    "institutional_flow":  _generate_institutional_flow,
+    "rl_momentum":         _generate_rl_momentum,
+    # GO-5b: signal-quality upgrades per population diagnosis
+    "relative_strength":   _generate_relative_strength,
+    "breadth_momentum":    _generate_breadth_momentum,
+    "long_hold_momentum":  _generate_long_hold_momentum,
 }
 
 # Family weights for generation — bias toward historically stronger families
+# GO-5b families get high initial weights: diagnosis showed cost drag kills short-hold
+# families; cross-sectional RS and long-hold families are structurally cost-advantaged.
 _FAMILY_WEIGHTS = {
-    "momentum":           0.16,
-    "mean_reversion":     0.09,
-    "breakout":           0.11,
-    "sentiment_driven":   0.05,
-    "regime_adaptive":    0.07,
-    "volume_surge":       0.09,
-    "volatility_play":    0.07,
-    "hybrid":             0.07,
-    "quality_momentum":   0.11,   # strong Indian factor — weighted up
-    "institutional_flow": 0.07,
-    "rl_momentum":        0.11,   # RL-PPO inspired family — new, high weight to seed population
+    "momentum":            0.10,
+    "mean_reversion":      0.07,
+    "breakout":            0.08,
+    "sentiment_driven":    0.04,
+    "regime_adaptive":     0.05,
+    "volume_surge":        0.07,
+    "volatility_play":     0.05,
+    "hybrid":              0.05,
+    "quality_momentum":    0.09,
+    "institutional_flow":  0.06,
+    "rl_momentum":         0.09,
+    # GO-5b: cross-sectional and long-hold families weighted up per diagnosis
+    "relative_strength":   0.12,   # RS signal is cross-sectional — cost-advantaged
+    "breadth_momentum":    0.09,   # breadth filter avoids bad-market entries
+    "long_hold_momentum":  0.14,   # 30-60d hold: cost drag ~0.005-0.009%/day vs 0.037%/day at 3d
 }
 
 
@@ -490,7 +634,7 @@ _FAMILY_WEIGHTS = {
 
 MIN_RR_RATIO    = 1.5    # take_profit must be at least 1.5× |stop_loss|
 MIN_CONFIDENCE  = 52.0   # below this, the strategy fires on noise
-MAX_HOLDING     = 60     # longer than 60 days → not a swing strategy
+MAX_HOLDING     = 65     # GO-5b long-hold families go up to 60d; 65 gives headroom
 MIN_HOLDING     = 3      # below 3 days → cost drag kills the edge
 
 def _passes_prescreen(strategy: StrategyDSL, bad_features: set,

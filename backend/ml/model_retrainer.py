@@ -51,6 +51,14 @@ MODEL_STALE_DAYS      = 45     # retrain if model hasn't been updated in N days
 MIN_PREDICTIONS_EVAL  = 20     # need at least this many evaluated predictions
 MAX_RETRAIN_ATTEMPTS  = 5      # max retrain loops before giving up
 
+# P0-D: Rolling IC trigger — if 20-day rolling Spearman IC between predicted
+# P(UP) and actual outcome is below IC_FLOOR for 3 consecutive days, trigger
+# an emergency retrain. This fires earlier than the win-rate trigger because
+# IC degradation predicts accuracy degradation ~5 days ahead.
+ROLLING_IC_WINDOW_DAYS     = 20   # days of predictions to compute IC over
+ROLLING_IC_FLOOR           = 0.01 # IC threshold below which model is considered stale
+ROLLING_IC_CONSECUTIVE_DAYS = 3   # number of consecutive days below floor before trigger
+
 
 def _current_regime(db: Session) -> str:
     row = db.query(MarketRegime.regime).order_by(MarketRegime.date.desc()).first()
@@ -104,6 +112,96 @@ def _check_accuracy(db: Session) -> dict:
         "evaluated":        len(evaluated),
         "wins":             wins,
         "regime_win_rates": regime_wr,
+    }
+
+
+def _check_rolling_ic(db: Session) -> dict:
+    """
+    P0-D: Rolling IC trigger.
+    Compute 20-day rolling Spearman IC between the model's predicted P(UP)
+    (stored in Prediction.confidence) and the binary outcome (Prediction.success).
+
+    If IC < ROLLING_IC_FLOOR for ROLLING_IC_CONSECUTIVE_DAYS consecutive days,
+    flag for immediate retraining.
+
+    Returns:
+        {
+          "should_retrain": bool,
+          "reason": str,
+          "rolling_ic": float | None,
+          "consecutive_low_ic_days": int,
+        }
+    """
+    import numpy as np
+    from scipy.stats import spearmanr
+
+    cutoff = date.today() - timedelta(days=ROLLING_IC_WINDOW_DAYS + ROLLING_IC_CONSECUTIVE_DAYS + 5)
+    preds = (
+        db.query(Prediction)
+        .filter(
+            Prediction.date >= cutoff,
+            Prediction.success.isnot(None),
+            Prediction.confidence.isnot(None),
+        )
+        .order_by(Prediction.date.asc())
+        .all()
+    )
+
+    if len(preds) < ROLLING_IC_WINDOW_DAYS:
+        return {
+            "should_retrain":         False,
+            "reason":                 f"insufficient_predictions_for_ic ({len(preds)} < {ROLLING_IC_WINDOW_DAYS})",
+            "rolling_ic":             None,
+            "consecutive_low_ic_days": 0,
+        }
+
+    # Group by date for daily IC computation
+    from collections import defaultdict
+    by_date: dict[str, list[tuple]] = defaultdict(list)
+    for p in preds:
+        by_date[str(p.date)].append((float(p.confidence), int(p.success)))
+
+    sorted_dates = sorted(by_date.keys())
+    daily_ics: list[tuple[str, float]] = []
+    for d in sorted_dates:
+        day_preds = by_date[d]
+        if len(day_preds) < 5:
+            continue
+        confs, outcomes = zip(*day_preds)
+        try:
+            ic, _ = spearmanr(confs, outcomes)
+            if not np.isnan(ic):
+                daily_ics.append((d, float(ic)))
+        except Exception:
+            pass
+
+    if not daily_ics:
+        return {
+            "should_retrain":         False,
+            "reason":                 "insufficient_daily_ic_data",
+            "rolling_ic":             None,
+            "consecutive_low_ic_days": 0,
+        }
+
+    # Check if last ROLLING_IC_CONSECUTIVE_DAYS all have IC < floor
+    last_n = daily_ics[-ROLLING_IC_CONSECUTIVE_DAYS:]
+    recent_ic = np.mean([ic for _, ic in last_n]) if last_n else None
+    consecutive_low = sum(1 for _, ic in last_n if ic < ROLLING_IC_FLOOR)
+
+    should_retrain = (
+        len(last_n) >= ROLLING_IC_CONSECUTIVE_DAYS
+        and consecutive_low >= ROLLING_IC_CONSECUTIVE_DAYS
+    )
+
+    return {
+        "should_retrain":         should_retrain,
+        "reason":                 (
+            f"rolling_ic={recent_ic:.4f} < {ROLLING_IC_FLOOR} for {consecutive_low} consecutive days"
+            if should_retrain
+            else f"rolling_ic={recent_ic:.4f} acceptable"
+        ),
+        "rolling_ic":             round(recent_ic, 4) if recent_ic is not None else None,
+        "consecutive_low_ic_days": consecutive_low,
     }
 
 
@@ -404,7 +502,14 @@ def check_and_retrain(db: Session, force: bool = False) -> dict:
     accuracy = _check_accuracy(db)
     staleness = _check_model_staleness(db)
 
-    should_retrain = force or accuracy["should_retrain"] or staleness["stale"]
+    # P0-D: rolling IC check — fires earlier than win-rate trigger
+    try:
+        rolling_ic = _check_rolling_ic(db)
+    except Exception as exc:
+        log.warning("Rolling IC check failed (skipping): %s", exc)
+        rolling_ic = {"should_retrain": False, "reason": f"ic_check_error: {exc}"}
+
+    should_retrain = force or accuracy["should_retrain"] or staleness["stale"] or rolling_ic["should_retrain"]
     reason = []
     if force:
         reason.append("forced")
@@ -412,6 +517,8 @@ def check_and_retrain(db: Session, force: bool = False) -> dict:
         reason.append(accuracy["reason"])
     if staleness["stale"]:
         reason.append(staleness["reason"])
+    if rolling_ic["should_retrain"]:
+        reason.append(f"ic_trigger: {rolling_ic['reason']}")
 
     trigger_reason = "; ".join(reason) if reason else "scheduled_check"
 
@@ -495,10 +602,16 @@ def get_retraining_status(db: Session) -> dict:
         .first()
     )
 
+    try:
+        rolling_ic = _check_rolling_ic(db)
+    except Exception as exc:
+        rolling_ic = {"should_retrain": False, "reason": f"ic_check_error: {exc}"}
+
     return {
-        "needs_retraining":   accuracy["should_retrain"] or staleness["stale"],
+        "needs_retraining":   accuracy["should_retrain"] or staleness["stale"] or rolling_ic.get("should_retrain", False),
         "accuracy_check":     accuracy,
         "staleness_check":    staleness,
+        "rolling_ic_check":   rolling_ic,
         "last_retrained_at":  str(last_retrain.created_at) if last_retrain else None,
         "last_retrain_detail": json.loads(last_retrain.metadata_json or "{}") if last_retrain else None,
     }

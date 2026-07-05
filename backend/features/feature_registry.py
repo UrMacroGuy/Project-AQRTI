@@ -171,6 +171,28 @@ FEATURE_CATALOG: List[FeatureDef] = [
                "rank(rolling_vol_21d) within sector", ["close"], 22, output_type="int"),
     FeatureDef("relative_vol_vs_sector","market", "Stock 21d vol / sector avg 21d vol",
                "rolling_vol_21d / sector_avg_vol_21d", ["close"], 22),
+
+    # ── FII/DII FLOW FEATURES (P1-A) ─────────────────────────
+    FeatureDef("fii_net_1d",               "market", "FII net equity buy/sell today (crores)",
+               "fii_gross_buy - fii_gross_sell", ["fii_dii_flows"], 1),
+    FeatureDef("fii_net_5d",               "market", "5-day rolling FII net equity flow (crores)",
+               "sum(fii_net_investment, 5d)", ["fii_dii_flows"], 5),
+    FeatureDef("fii_net_20d",              "market", "20-day rolling FII net equity flow (crores)",
+               "sum(fii_net_investment, 20d)", ["fii_dii_flows"], 20),
+    FeatureDef("dii_net_1d",               "market", "DII net equity buy/sell today (crores)",
+               "dii_gross_buy - dii_gross_sell", ["fii_dii_flows"], 1),
+    FeatureDef("fii_dii_ratio",            "market", "5d FII net / |5d DII net| (signed, capped +-10)",
+               "fii_net_5d / abs(dii_net_5d)", ["fii_dii_flows"], 5),
+    FeatureDef("institutional_flow_signal","market", "Majority institutional signal: BULLISH=1, BEARISH=-1, NEUTRAL=0",
+               "majority_vote(fii_signal, dii_signal)", ["fii_dii_flows"], 1),
+
+    # ── PEER-MEAN PROPAGATION FEATURES (P2-A) ────────────────
+    FeatureDef("peer_mean_momentum_10d",   "market", "Mean 10d momentum of top-10 correlation peers",
+               "mean(peer_momentum_10d, top10_corr_peers)", ["close"], 11),
+    FeatureDef("peer_mean_rsi_14",         "market", "Mean RSI14 of top-10 correlation peers",
+               "mean(peer_rsi_14, top10_corr_peers)", ["close"], 15),
+    FeatureDef("peer_mean_vol_21d",        "market", "Mean 21d vol of top-10 correlation peers",
+               "mean(peer_rolling_vol_21d, top10_corr_peers)", ["close"], 22),
 ]
 
 # Fast lookup by name

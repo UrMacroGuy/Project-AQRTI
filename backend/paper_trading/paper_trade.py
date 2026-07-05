@@ -1,7 +1,7 @@
 """
 Paper Trade Manager
 Open, close, and query virtual positions + trades.
-Prices: DB daily_prices (EOD) with yfinance intraday fallback for open positions.
+Prices: Finnhub real-time (primary) → yfinance (fallback) → DB EOD close.
 """
 
 from __future__ import annotations
@@ -58,8 +58,18 @@ _price_cache: dict[str, tuple[float, float]] = {}
 _CACHE_TTL = 60  # seconds
 
 
+def _live_price_finnhub(symbol: str) -> Optional[float]:
+    """Fetch current price from Finnhub (primary real-time source, 60s cache)."""
+    try:
+        from aqrti.data.finnhub_client import get_quote
+        return get_quote(symbol)
+    except Exception as exc:
+        log.debug("Finnhub price fetch failed for %s: %s", symbol, exc)
+        return None
+
+
 def _live_price_yf(symbol: str) -> Optional[float]:
-    """Fetch current price from yfinance with 60s in-memory cache."""
+    """Fetch current price from yfinance (fallback, 60s in-memory cache)."""
     now = _time.time()
     cached = _price_cache.get(symbol)
     if cached and (now - cached[1]) < _CACHE_TTL:
@@ -107,10 +117,14 @@ def _latest_price(db: Session, symbol: str) -> Optional[float]:
 def _current_price(db: Session, symbol: str, entry_price: float) -> float:
     """
     Best available price for an open position:
-    1. Live yfinance (60s cache) during market hours
-    2. Latest EOD close from DB
-    3. Entry price as last resort
+    1. Finnhub real-time quote (primary — configured via AQRTI_FINNHUB_API_KEY)
+    2. yfinance live price (fallback, 60s cache)
+    3. Latest EOD close from DB
+    4. Entry price as last resort
     """
+    finnhub = _live_price_finnhub(symbol)
+    if finnhub and finnhub > 0:
+        return finnhub
     live = _live_price_yf(symbol)
     if live and live > 0:
         return live

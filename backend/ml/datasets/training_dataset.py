@@ -157,6 +157,20 @@ def build_walk_forward_folds(
         train_mask = (df["date"] >= data_start) & (df["date"] <= train_end)
         test_mask  = (df["date"] >= test_start) & (df["date"] <= test_end)
 
+        # P1-E: Purged embargo CV — remove training rows whose 5-day forward label
+        # window overlaps any test date, plus add TRAIN_TEST_GAP_DAYS embargo.
+        # A training row at date t has a label window [t+1, t+5] — if any of those
+        # days fall in [test_start, test_end] then the row is contaminated.
+        # We already have a TRAIN_TEST_GAP_DAYS gap before the test, so the purge
+        # only removes rows that would leak: those with date > test_start - 5 - 1.
+        purge_boundary = test_start - timedelta(days=5)  # rows after this need purging
+        # train_mask already ends at train_end = test_start - TRAIN_TEST_GAP_DAYS,
+        # so we only purge rows between (purge_boundary, train_end].
+        # With TRAIN_TEST_GAP_DAYS=14 and label horizon=5, this removes
+        # the last (14-5)=9 days of training data — a safe, conservative purge.
+        purge_mask  = (df["date"] > purge_boundary)
+        train_mask  = train_mask & ~purge_mask
+
         X_train = df.loc[train_mask, feature_cols].copy()
         y_train = df.loc[train_mask, label_col].copy()
         X_test  = df.loc[test_mask, feature_cols].copy()

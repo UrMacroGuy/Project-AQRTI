@@ -165,6 +165,10 @@
           <span class="nav-label">Algo Arena</span>
           <span class="nav-badge accent" id="badge-arena">AUTO</span>
         </li>
+        <li class="nav-item" data-page="gonogo">
+          <span class="nav-icon">&#x2705;</span>
+          <span class="nav-label">Go / No-Go</span>
+        </li>
       </ul>
 
       <div class="nav-group-label">CONTROL</div>
@@ -238,6 +242,10 @@
       <div class="regime-badge" id="regime-pill">
         <span class="regime-dot"></span>
         <span id="topbar-regime">—</span>
+      </div>
+      <div id="watchdog-restart-pill" style="display:none;align-items:center;gap:5px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.4);border-radius:4px;padding:2px 8px;font-size:0.68rem;color:#fbbf24;cursor:default" title="Watchdog restarted the backend">
+        <span style="font-size:0.75rem">↺</span>
+        <span id="watchdog-restart-label">restarted</span>
       </div>
       <div class="topbar-date" id="topbar-date">—</div>
     </div>
@@ -813,6 +821,14 @@
           <div>
             <strong style="color:#ef4444">MODEL ACCURACY BELOW THRESHOLD — DO NOT ACT ON SIGNALS TODAY</strong>
             <div style="color:var(--text-muted); font-size:0.82rem; margin-top:2px">7-day model accuracy has fallen below 52%. Signals may not have predictive edge. Wait for the model to retrain.</div>
+          </div>
+        </div>
+
+        <div id="pipeline-fail-banner" style="display:none; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.5); border-radius:6px; padding:10px 16px; margin-bottom:12px; align-items:center; gap:10px;">
+          <span style="font-size:1.1rem;color:#ef4444">⛔</span>
+          <div>
+            <strong style="color:#ef4444;font-size:0.78rem">PIPELINE FAILURE DETECTED</strong>
+            <div id="pipeline-fail-detail" style="color:var(--text-muted);font-size:0.72rem;margin-top:2px">Daily self-check failed. Check logs.</div>
           </div>
         </div>
 
@@ -1727,7 +1743,7 @@
       </div>
       <!-- Algo-specific paper trading -->
       <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;padding:9px 14px">
-        <span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">Trade on specific strategy:</span>
+        <span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap">Trade on specific algo:</span>
         <input id="pp-strategy-id-input" type="text" placeholder="AQRTI_STR_XXXXXXXX" style="flex:1;min-width:220px;max-width:380px;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:5px 10px;color:var(--text);font-size:0.8rem;font-family:monospace" oninput="this.value=this.value.toUpperCase()" />
         <button class="panel-action-btn" style="padding:6px 14px;font-size:0.78rem" onclick="triggerPaperCycleForStrategy()">▶ Run for Algo</button>
         <span id="pp-strategy-cycle-status" style="font-size:0.72rem;color:var(--text-muted)"></span>
@@ -1736,7 +1752,7 @@
       <!-- Historical backtest bar -->
       <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap;background:rgba(139,92,246,0.07);border:1px solid rgba(139,92,246,0.25);border-radius:6px;padding:9px 14px">
         <span style="font-size:0.72rem;color:rgba(139,92,246,0.9);white-space:nowrap;font-weight:600">⚡ HISTORICAL BACKTEST</span>
-        <span style="font-size:0.72rem;color:var(--text-muted)">Run 2 years of history on best strategy — completes in the background, results appear in Algo Arena tab</span>
+        <span style="font-size:0.72rem;color:var(--text-muted)">Run 2 years of history on best algo — completes in the background, results appear in Algo Arena tab</span>
         <button class="btn btn-secondary" style="font-size:11px;padding:4px 14px;margin-left:auto" onclick="triggerBacktest()">▶ Run Backtest</button>
         <div id="pp-backtest-status" style="font-size:0.72rem;color:var(--text-muted);min-width:200px"></div>
       </div>
@@ -2905,19 +2921,19 @@
         <div style="padding:12px 0;display:grid;grid-template-columns:1fr 1fr;gap:16px">
           <div>
             <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">AUTO-PROMOTION GATE</div>
-            Promoted strategies with fitness ≥ 60 and win rate ≥ 55% are automatically activated and given ₹1,00,000 in an isolated arena portfolio.
+            Promoted algos with fitness ≥ 60 and win rate ≥ 52% are activated and enter paper quarantine — ≥60 days + ≥20 shadow trades required before real capital.
           </div>
           <div>
-            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">2-YEAR REPLAY</div>
-            Each strategy is replayed over 2 years of real historical price data, trading with RSI + EMA signals, position sizing 10% per trade, max 8 open at once.
+            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">5-YEAR BACKTEST</div>
+            Each algo is backtested over 5 years of real NSE price data with honest costs (0.28% round-trip), intrabar stop-loss, and no ML look-ahead.
           </div>
           <div>
-            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">CHAMPION GATE</div>
-            To become a Champion: ≥ 120% total return, max drawdown ≥ −25%, win rate ≥ 52%. All three gates must pass.
+            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">PROMOTION GATES</div>
+            All must pass: ≥60 backtest trades, Sharpe ≥0.5, WR ≥52%, OOS holdout, 0.8× NIFTY benchmark, duplicate check.
           </div>
           <div>
-            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">SELF-LEARNING MERGE</div>
-            Failing strategies find a donor (strategy that profits on current's losing days). DSLs are merged — child must fix ≥ 50% of old losing days while retaining ≥ 70% of winning days. Repeats for 10 rounds.
+            <div style="color:var(--accent);font-size:0.72rem;letter-spacing:0.08em;margin-bottom:6px">SELF-LEARNING EVOLUTION</div>
+            Failing algos find donors (algos that profit on the loser's bad days). DSLs are merged — child must improve ≥50% of losing days while retaining ≥70% of winning days.
           </div>
         </div>
       </div>
@@ -3022,7 +3038,52 @@
     </div>
   </div>
 
-  <script src="api.js?v=20260626"></script>
-  <script src="app.js?v=20260626"></script>
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- GO-1 / GO-7 / GO-8: Go/No-Go Scorecard + Morning Decision     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <section class="page" id="page-gonogo">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Go / No-Go Scorecard</div>
+        <div class="page-subtitle">5 conditions before real capital — all must be green</div>
+      </div>
+    </div>
+
+    <!-- ── Overall status banner ──────────────────────────────── -->
+    <div id="gonogo-overall-banner" style="margin-bottom:20px;padding:12px 16px;border-radius:6px;font-size:0.8rem;letter-spacing:0.06em;display:none"></div>
+
+    <!-- ── 5-Condition scorecard grid ────────────────────────── -->
+    <div class="section-header"><span>Readiness Conditions</span></div>
+    <div id="gonogo-conditions" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
+      <div style="text-align:center;color:var(--text-muted);padding:32px;grid-column:1/-1">Loading scorecard…</div>
+    </div>
+
+    <!-- ── Quarantine progress ────────────────────────────────── -->
+    <div class="section-header" style="margin-top:8px"><span>Quarantine Progress</span></div>
+    <div id="gonogo-quarantine" style="color:var(--text-muted);padding:16px;font-size:0.8rem">
+      No promoted algos yet — quarantine clock hasn't started.
+    </div>
+
+    <!-- ── Today's actionable signals ────────────────────────── -->
+    <div class="section-header" style="margin-top:20px"><span>Today's Actionable Signals</span></div>
+    <div id="gonogo-signals" style="color:var(--text-muted);padding:16px;font-size:0.8rem">
+      No actionable signals — no promoted algos in paper trading yet.
+    </div>
+
+    <!-- ── 30-day pipeline uptime ─────────────────────────────── -->
+    <div class="section-header" style="margin-top:20px"><span>30-Day Pipeline Uptime</span></div>
+    <div id="gonogo-uptime" style="color:var(--text-muted);padding:16px;font-size:0.8rem">Loading…</div>
+
+    <!-- ── Monthly review (GO-11) ──────────────────────────────────── -->
+    <div class="section-header" style="margin-top:24px"><span>Monthly Review</span></div>
+    <div id="gonogo-monthly-review" style="color:var(--text-muted);padding:16px;font-size:0.8rem">Loading…</div>
+
+    <!-- ── Real-capital risk rails (GO-10) ──────────────────────────── -->
+    <div class="section-header" style="margin-top:24px"><span>Real-Capital Risk Rails</span></div>
+    <div id="gonogo-risk-rails" style="padding:8px 0"></div>
+  </section>
+
+  <script src="api.js?v=20260705"></script>
+  <script src="app.js?v=20260705b"></script>
 </body>
 </html>

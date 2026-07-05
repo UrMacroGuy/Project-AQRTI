@@ -15,6 +15,7 @@ DB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "
 
 def main():
     con = sqlite3.connect(DB)
+    con.execute("PRAGMA busy_timeout=30000")
     cur = con.cursor()
 
     # 1. OOS columns (idempotent via PRAGMA check)

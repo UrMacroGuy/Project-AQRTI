@@ -15,6 +15,9 @@ from aqrti.config.settings import get_settings
 from aqrti.database.models import Base
 from aqrti.utils.logger import db_logger
 
+# Import lazily inside init_db to avoid circular imports at module load time.
+# (migrations.py itself has no model imports, but belt-and-suspenders.)
+
 
 def _build_engine():
     settings = get_settings()
@@ -83,6 +86,8 @@ def checkpoint_wal() -> None:
 
 def init_db() -> None:
     """Create all tables if they don't exist. Skips if DB already has tables."""
+    from aqrti.database.migrations import ensure_migrations_table, run_pending
+
     engine = get_engine()
     with engine.connect() as conn:
         existing = conn.execute(
@@ -95,6 +100,10 @@ def init_db() -> None:
     else:
         Base.metadata.create_all(bind=engine)
         db_logger.info("Database initialized — all tables created.")
+
+    # Run lightweight schema migrations (idempotent; safe to call every boot).
+    ensure_migrations_table(engine)
+    run_pending(engine)
 
 
 def get_db_dependency():

@@ -481,6 +481,270 @@ document.addEventListener('DOMContentLoaded', () => {
 // ══════════════════════════════════════════════════════════════
 // NEWS TICKER STRIP — Bloomberg amber bar hydration
 // ══════════════════════════════════════════════════════════════
+async function hydratePipelineHealthBanner() {
+  const banner = el('pipeline-fail-banner');
+  const detail = el('pipeline-fail-detail');
+  if (!banner) return;
+  try {
+    const h = await Api.systemHealth();
+    if (!h) { banner.style.display = 'none'; return; }
+    if (h.overall_ok === false && !h.stale) {
+      const msgs = (h.failures || []).join(' · ') || 'unknown failure';
+      if (detail) detail.textContent = `Checked ${h.checked_at ? new Date(h.checked_at).toLocaleTimeString('en-IN') : '—'}: ${msgs}`;
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch (_) {
+    banner.style.display = 'none';
+  }
+}
+
+async function hydrateWatchdogRestartPill() {
+  const pill  = el('watchdog-restart-pill');
+  const label = el('watchdog-restart-label');
+  if (!pill) return;
+  try {
+    const r = await Api.systemRestartLog();
+    if (!r || r.total_restarts === 0 || r.age_minutes == null) {
+      pill.style.display = 'none';
+      return;
+    }
+    const ago = r.age_minutes < 60
+      ? `${r.age_minutes}m ago`
+      : `${Math.round(r.age_minutes / 60)}h ago`;
+    if (label) label.textContent = `restarted ${ago}`;
+    pill.style.display = 'flex';
+    pill.title = `Watchdog auto-restarted backend ${ago} (${r.total_restarts} total). Reason: ${r.last_restart?.reason || '—'}`;
+  } catch (_) {
+    pill.style.display = 'none';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// GO-1 / GO-7 / GO-8: Go/No-Go Scorecard hydration
+// ══════════════════════════════════════════════════════════════
+
+async function hydrateGoNogo() {
+  const condEl    = el('gonogo-conditions');
+  const quarEl    = el('gonogo-quarantine');
+  const sigEl     = el('gonogo-signals');
+  const bannerEl  = el('gonogo-overall-banner');
+  if (!condEl) return;
+
+  let data = null;
+  try { data = await Api.goNogo(); } catch (_) {}
+
+  if (!data) {
+    if (condEl) condEl.innerHTML = '<div style="grid-column:1/-1;color:var(--text-muted);padding:24px;text-align:center">Backend unavailable — start the backend server to see scorecard.</div>';
+    return;
+  }
+
+  // ── Overall banner ───────────────────────────────────────────
+  if (bannerEl) {
+    const overallColor = data.overall === 'green' ? '#22c55e' : data.overall === 'partial' ? '#f59e0b' : '#ef4444';
+    const overallIcon  = data.overall === 'green' ? '✅ ALL CLEAR' : data.overall === 'partial' ? '⚠️ PARTIAL' : '❌ NOT READY';
+    bannerEl.style.cssText = `margin-bottom:20px;padding:12px 16px;border-radius:6px;font-size:0.8rem;letter-spacing:0.06em;background:${overallColor}18;border:1px solid ${overallColor}40;color:${overallColor};font-weight:600`;
+    bannerEl.textContent = overallIcon + (data.overall === 'green' ? ' — All 5 conditions met. Ready for real capital.' : data.overall === 'partial' ? ' — Some conditions met. Not ready for real capital.' : ' — Conditions not met. Do NOT trade real capital.');
+    bannerEl.style.display = 'block';
+  }
+
+  // ── Condition cards ──────────────────────────────────────────
+  function condCard(c) {
+    const color = c.status === 'green' ? '#22c55e' : c.status === 'partial' ? '#f59e0b' : '#ef4444';
+    const icon  = c.status === 'green' ? '✅' : c.status === 'partial' ? '⚠️' : '❌';
+    return `<div style="background:var(--card-bg);border:1px solid ${color}40;border-left:3px solid ${color};border-radius:6px;padding:14px 16px">
+      <div style="font-size:1rem">${icon} <strong style="color:${color}">${c.label}</strong></div>
+      <div style="color:var(--text-muted);font-size:0.78rem;margin-top:6px">${c.detail}</div>
+    </div>`;
+  }
+  condEl.innerHTML = (data.conditions || []).map(condCard).join('');
+
+  // ── Quarantine progress ──────────────────────────────────────
+  if (quarEl) {
+    const algos = data.quarantine_algos || [];
+    if (algos.length === 0) {
+      quarEl.innerHTML = '<span style="color:var(--text-muted)">No promoted algos yet — quarantine clock hasn\'t started.</span>';
+    } else {
+      const rows = algos.map(a => {
+        const ok = a.quarantine_ok;
+        const rowColor = ok ? '#22c55e' : '#f59e0b';
+        const gates = a.gates || {};
+        const gateHtml = [
+          ['>=60d', gates.days_60],
+          ['>=20 trades', gates.trades_20],
+          ['>=50% WR', gates.wr_50pct],
+          ['+P&L', gates.positive_pnl],
+        ].map(([lbl, v]) =>
+          `<span style="margin-right:8px;color:${v ? '#22c55e' : '#6b7280'}">${v ? '✓' : '○'} ${lbl}</span>`
+        ).join('');
+        return `<tr style="border-bottom:1px solid var(--border-faint)">
+          <td style="padding:8px 6px;color:${rowColor};font-size:0.8rem">${ok ? '✅' : '⏳'} ${a.name}</td>
+          <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${a.strategy_id}</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.days_in_quarantine}d</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.shadow_trades}</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.shadow_wr}%</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:${a.net_pnl >= 0 ? '#22c55e' : '#ef4444'}">₹${a.net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
+          <td style="padding:8px 6px;font-size:0.72rem">${gateHtml}</td>
+        </tr>`;
+      }).join('');
+      quarEl.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.78rem">
+        <thead><tr style="border-bottom:1px solid var(--border-faint)">
+          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Algo</th>
+          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">ID</th>
+          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Days</th>
+          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Trades</th>
+          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">WR</th>
+          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Net P&L</th>
+          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Gates</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+  }
+
+  // ── Actionable signals ───────────────────────────────────────
+  if (sigEl) {
+    const sigs = data.actionable_signals || [];
+    if (sigs.length === 0) {
+      sigEl.innerHTML = '<span style="color:var(--text-muted)">No open positions from promoted algos — nothing actionable today.</span>';
+    } else {
+      const rows = sigs.map(s => {
+        const pnlColor = (s.current_pnl_pct || 0) >= 0 ? '#22c55e' : '#ef4444';
+        return `<tr style="border-bottom:1px solid var(--border-faint)">
+          <td style="padding:8px 6px;font-weight:600;font-size:0.82rem">${s.symbol}</td>
+          <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.algo_name}</td>
+          <td style="padding:8px 6px;font-size:0.78rem">${s.direction || '—'}</td>
+          <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.entry_date || '—'}</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">₹${(s.entry_price || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.82rem;color:${pnlColor}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
+        </tr>`;
+      }).join('');
+      sigEl.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.78rem">
+        <thead><tr style="border-bottom:1px solid var(--border-faint)">
+          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Symbol</th>
+          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Algo</th>
+          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Direction</th>
+          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Entry Date</th>
+          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Entry Price</th>
+          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">P&L %</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
+    }
+  }
+}
+
+async function hydrateGoNogoUptime() {
+  const el = id => document.getElementById(id);
+  const uptimeEl = el('gonogo-uptime');
+  if (!uptimeEl) return;
+
+  let rows = null;
+  try { rows = await Api.goNogoUptimeLog(); } catch (_) {}
+
+  if (!rows || !Array.isArray(rows) || rows.length === 0) {
+    uptimeEl.innerHTML = '<span style="color:var(--text-muted)">No health check records yet — pipeline watchdog not running.</span>';
+    return;
+  }
+
+  const greenCount = rows.filter(r => r.overall_ok).length;
+  const dots = rows.map(r => {
+    const color   = r.overall_ok ? '#22c55e' : '#ef4444';
+    const dt      = r.checked_at ? new Date(r.checked_at).toLocaleDateString('en-IN') : '—';
+    const tooltip = `${dt}: ${r.overall_ok ? 'OK' : 'FAILED'}${r.failures ? ' — ' + r.failures : ''}`;
+    return `<span title="${tooltip}" style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${color};margin:2px;cursor:default"></span>`;
+  }).join('');
+
+  uptimeEl.innerHTML = `
+    <div style="margin-bottom:8px;font-size:0.78rem;color:var(--text-muted)">${greenCount}/${rows.length} checks green (most recent on right)</div>
+    <div style="display:flex;flex-wrap:wrap;gap:2px">${dots}</div>
+    <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted)">
+      <span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;margin-right:4px"></span>Green = pipeline OK
+      <span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:4px;margin-left:12px"></span>Red = check failed
+    </div>`;
+}
+
+async function hydrateGoNogoMonthlyReview() {
+  const el = id => document.getElementById(id);
+  const mrEl = el('gonogo-monthly-review');
+  if (!mrEl) return;
+
+  let data = null;
+  try { data = await Api.goNogoMonthlyReview(); } catch (_) {}
+
+  if (!data) {
+    mrEl.innerHTML = '<span style="color:var(--text-muted)">Backend unavailable.</span>';
+    return;
+  }
+
+  if (data.no_data) {
+    mrEl.innerHTML = `<span style="color:var(--text-muted)">${data.empty_reason || 'No data yet.'}</span>`;
+    return;
+  }
+
+  const uptime = data.uptime || {};
+  const algos = data.algo_reviews || [];
+
+  let algoHtml = '';
+  if (algos.length > 0) {
+    const rows = algos.map(a => {
+      const wrDiff = a.wr_vs_backtest_pp;
+      const wrColor = wrDiff == null ? '#888' : wrDiff >= 0 ? '#22c55e' : '#ef4444';
+      return `<tr style="border-bottom:1px solid var(--border-faint)">
+        <td style="padding:7px 6px;font-size:0.8rem;font-weight:500">${a.name}</td>
+        <td style="padding:7px 6px;text-align:right;font-size:0.78rem">${a.backtest_win_rate != null ? (a.backtest_win_rate * 100).toFixed(1) + '%' : '—'}</td>
+        <td style="padding:7px 6px;text-align:right;font-size:0.78rem">${a.live_30d_win_rate != null ? a.live_30d_win_rate + '%' : '—'}</td>
+        <td style="padding:7px 6px;text-align:right;font-size:0.78rem;color:${wrColor}">${wrDiff != null ? (wrDiff >= 0 ? '+' : '') + wrDiff + 'pp' : '—'}</td>
+        <td style="padding:7px 6px;text-align:right;font-size:0.78rem">${a.live_30d_trades}</td>
+        <td style="padding:7px 6px;text-align:right;font-size:0.78rem;color:${a.live_30d_net_pnl >= 0 ? '#22c55e' : '#ef4444'}">Rs ${a.live_30d_net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
+      </tr>`;
+    }).join('');
+    algoHtml = `<div style="overflow-x:auto;margin-bottom:16px"><table style="width:100%;border-collapse:collapse;font-size:0.78rem">
+      <thead><tr style="border-bottom:1px solid var(--border-faint)">
+        <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Algo</th>
+        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">BT WR%</th>
+        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Live WR%</th>
+        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Diff</th>
+        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Trades</th>
+        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Net P&L</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  }
+
+  const cr = data.cost_reconciliation || {};
+  mrEl.innerHTML = `
+    <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:12px">Period: ${data.month_start} to ${data.report_date} &nbsp;|&nbsp; Uptime: ${uptime.checks_green ?? '—'}/${uptime.checks_total ?? '—'} checks (${uptime.uptime_pct ?? '—'}%)</div>
+    ${algoHtml}
+    <div style="font-size:0.74rem;color:var(--text-muted);padding:8px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px">
+      <strong style="color:var(--text-primary)">Cost reconciliation:</strong> ${cr.note || '—'}
+      ${cr.real_cost_pct != null ? ` | Real cost: <strong>${cr.real_cost_pct}%</strong> vs modeled ${cr.modeled_cost_pct}%` : ''}
+    </div>`;
+}
+
+async function hydrateGoNogoRiskRails() {
+  const el = id => document.getElementById(id);
+  const railsEl = el('gonogo-risk-rails');
+  if (!railsEl) return;
+
+  let data = null;
+  try { data = await Api.goNogoRiskRails(); } catch (_) {}
+
+  if (!data || !data.rules) {
+    railsEl.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem">Could not load risk rails.</span>';
+    return;
+  }
+
+  const rows = data.rules.map(r => `
+    <div style="border:1px solid var(--border-faint);border-left:3px solid #f59e0b;border-radius:5px;padding:10px 14px;margin-bottom:8px">
+      <div style="font-size:0.8rem;font-weight:600;color:#f59e0b">Rule ${r.id}: ${r.rule}</div>
+      <div style="font-size:0.76rem;color:var(--text-muted);margin-top:4px">${r.detail}</div>
+    </div>`).join('');
+
+  railsEl.innerHTML = rows + `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;padding:8px 12px;background:var(--card-bg);border-radius:4px;border:1px solid var(--border-faint)">${data.note || ''}</div>`;
+}
+
 async function hydrateNewsStrip() {
   const inner = document.getElementById('news-strip-inner');
   if (!inner) return;
@@ -1403,6 +1667,10 @@ window.addEventListener('DOMContentLoaded', () => {
   startTopbarLivePolling(); // overwrites with real-time yfinance prices, refreshes every 30s
   hydrateNewsStrip();       // amber news ticker bar
   refreshNavBadges();       // update sidebar counts from live data
+  hydratePipelineHealthBanner(); // GO-3: show red banner if pipeline silently failed
+  setInterval(hydratePipelineHealthBanner, 30 * 60 * 1000); // re-check every 30 min
+  hydrateWatchdogRestartPill();  // GO-2: amber pill when watchdog restarted backend
+  setInterval(hydrateWatchdogRestartPill, 15 * 60 * 1000);
 
   // Session restore — sidebar button is always visible, toast appears after 500ms
   _updateSidebarSessionBtn(prevSession);
@@ -3587,6 +3855,7 @@ function renderPage(pageId) {
   if (pageId === 'screener')         hydrateScreener();
   if (pageId === 'analytics')        hydrateAnalytics();
   if (pageId === 'arena')            hydrateArena();
+  if (pageId === 'gonogo')           { hydrateGoNogo(); hydrateGoNogoUptime(); hydrateGoNogoRiskRails(); hydrateGoNogoMonthlyReview(); }
 }
 
 // ── Nav Badges — live counts from backend ────────────────────

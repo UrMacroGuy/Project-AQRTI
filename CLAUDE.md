@@ -29,9 +29,10 @@ Call the evolved trading strategies **"algos"** in all user-facing text, docs, a
 Run this sequence at the start of EVERY session, before doing anything else:
 
 1. **`CHANGELOG.md` (top 2-3 entries)** — what happened most recently; other sessions may have worked since you last did (same-day entries get letters: `[YYYY-MM-DD]`, `b`, `c`…).
-2. **`IMPROVEMENTS.md`** — the task queue. If the user hasn't given a specific task, work the highest-priority unchecked item (P0 placeholder-data items first, then P1 docs, P-PF portfolio build, P-ARCH architecture, P2/P3). Follow its "How to work this file" rules: verify with evidence, check off with date, changelog, diary sync.
-3. **Active build specs** live in `docs/` — read the spec before touching its items: `PERSONAL_PORTFOLIO_PLAN.md` (My Portfolio module → P-PF items), `OBSIDIAN_INTEGRATION_PLAN.md` (vault exporter → P-OBS items).
-4. Deeper context when needed: `PROJECT_DIARY.md` (whole system), `DATABASE_AND_TRAINING.md` (schema/ML).
+2. **`docs/ROAD_TO_REAL.md`** — the master roadmap to real capital. It orders the entire backlog into stages with exit criteria (Stage 1 reliability → Stage 2 edge → Stage 3 cockpit UI → Stage 4 real-money bridge). Pick work in stage order.
+3. **`IMPROVEMENTS.md`** — the task queue itself. If the user hasn't given a specific task, work the highest-priority unchecked item per the roadmap's stage order (any remaining P0/P1 first, then Stage-1 items: GO-2/3/4 + ARCH-2/4/7/9, then GO-5 before any new algo families). Follow its "How to work this file" rules: verify with evidence, check off with date, changelog, diary sync.
+4. **Active build specs** live in `docs/` — read the spec before touching its items: `ROAD_TO_REAL.md` (money-readiness → P-GO items), `PERSONAL_PORTFOLIO_PLAN.md` (My Portfolio module → P-PF items), `OBSIDIAN_INTEGRATION_PLAN.md` (vault exporter → P-OBS items).
+5. Deeper context when needed: `PROJECT_DIARY.md` (whole system), `DATABASE_AND_TRAINING.md` (schema/ML).
 
 ## Session workflow
 

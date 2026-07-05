@@ -27,7 +27,7 @@ log = get_logger("paper_monitor")
 
 PORTFOLIO_NAME    = "default"
 MAX_POSITIONS     = 12
-MIN_CONFIDENCE    = 60.0
+MIN_CONFIDENCE    = 60.0   # floor applied to all paper trades — GO-12: verified correct (60, not 50)
 MAX_HOLD_DAYS     = 20
 CAPITAL_PER_TRADE = 0.07   # 7% of portfolio per new position
 MIN_TRADE_CAPITAL = 500.0

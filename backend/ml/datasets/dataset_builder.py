@@ -36,17 +36,21 @@ MIN_ROWS_PER_SYMBOL = 50
 
 
 def _load_price_data(db: Session, symbol: str, days: int = 2000) -> pd.DataFrame:
-    """Load daily close prices for a symbol, sorted ascending."""
+    """Load daily OHLC prices for a symbol, sorted ascending."""
     cutoff = date.today() - timedelta(days=days)
     rows = (
-        db.query(DailyPrice.date, DailyPrice.close)
+        db.query(DailyPrice.date, DailyPrice.close, DailyPrice.high, DailyPrice.low)
         .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff)
         .order_by(DailyPrice.date.asc())
         .all()
     )
     if not rows:
-        return pd.DataFrame(columns=["date", "close"])
-    return pd.DataFrame(rows, columns=["date", "close"])
+        return pd.DataFrame(columns=["date", "close", "high", "low"])
+    df = pd.DataFrame(rows, columns=["date", "close", "high", "low"])
+    # Fill missing high/low with close (some older rows may lack them)
+    df["high"] = df["high"].fillna(df["close"])
+    df["low"]  = df["low"].fillna(df["close"])
+    return df
 
 
 def _load_nifty_data(db: Session, days: int = 2000) -> pd.DataFrame:

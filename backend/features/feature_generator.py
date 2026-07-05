@@ -25,6 +25,7 @@ from features.volume_features     import compute_volume_features
 from features.volatility_features import compute_volatility_features
 from features.trend_features      import compute_trend_features
 from features.market_features     import compute_market_features
+from features.fii_features        import compute_fii_dii_features, load_fii_dii_cache, FIIDIICache
 from features.feature_store       import save_feature_vector, get_last_computed_date
 from features.feature_registry    import seed_feature_metadata
 
@@ -180,11 +181,18 @@ def _compute_all_features(
     universe_dfs: dict[str, pd.DataFrame],
     sector_map: dict[str, str],
     breadth_snapshot: Optional[dict[str, tuple]] = None,
+    fii_dii_cache: Optional[FIIDIICache] = None,
+    peer_mean_snapshot: Optional[dict[str, dict]] = None,
 ) -> dict[str, Optional[float]]:
     """Merge all feature category outputs into one flat dict. Callers must
     pass already-numeric-coerced DataFrames (see _coerce_numeric) — this
     function no longer mutates its inputs, since slices may be read-only
-    views into a larger, shared, pre-sliced frame."""
+    views into a larger, shared, pre-sliced frame.
+
+    Optional:
+      fii_dii_cache:     FIIDIICache instance pre-loaded for this run
+      peer_mean_snapshot: {symbol: {"peer_mean_momentum_10d": val, ...}} for P2-A
+    """
     features: dict[str, Optional[float]] = {}
 
     features.update(compute_price_features(stock_df, nifty_df))
@@ -193,6 +201,19 @@ def _compute_all_features(
     features.update(compute_trend_features(stock_df))
     features.update(compute_market_features(symbol, stock_df, nifty_df, universe_dfs, sector_map,
                                             breadth_snapshot=breadth_snapshot))
+
+    # P1-A: FII/DII flow features (market-level, same for all stocks on date)
+    if not stock_df.empty:
+        as_of = stock_df["date"].iloc[-1]
+        features.update(compute_fii_dii_features(as_of, fii_dii_cache))
+
+    # P2-A: Sector peer-mean propagation features
+    if peer_mean_snapshot is not None and symbol in peer_mean_snapshot:
+        features.update(peer_mean_snapshot[symbol])
+    else:
+        features.setdefault("peer_mean_momentum_10d", None)
+        features.setdefault("peer_mean_rsi_14",       None)
+        features.setdefault("peer_mean_vol_21d",      None)
 
     return features
 
@@ -212,6 +233,59 @@ def _normalize_dates(df: pd.DataFrame) -> pd.DataFrame:
     if len(df) and isinstance(df["date"].iloc[0], pd.Timestamp):
         df = df.assign(date=df["date"].dt.date)
     return _coerce_numeric(df)
+
+
+def _compute_peer_mean_snapshot(
+    feat_date,
+    sector_map: dict[str, str],
+    slice_universe: dict[str, pd.DataFrame],
+    price_features_cache: dict[str, dict],
+) -> dict[str, dict]:
+    """
+    P2-A: Compute sector peer-mean features for all symbols on feat_date.
+    For each symbol, take up to 10 same-sector peers and average their
+    momentum_10d, rsi_14, and rolling_vol_21d computed earlier today.
+
+    Uses price_features_cache {symbol: {feature: val}} already computed
+    this date so we don't re-run full feature computation.
+    Returns {symbol: {"peer_mean_momentum_10d": v, "peer_mean_rsi_14": v, "peer_mean_vol_21d": v}}
+    """
+    import numpy as np
+
+    # Build sector peer groups from today's active symbols
+    sector_to_symbols: dict[str, list[str]] = {}
+    for sym, sec in sector_map.items():
+        if sym in price_features_cache:
+            sector_to_symbols.setdefault(sec or "Unknown", []).append(sym)
+
+    result: dict[str, dict] = {}
+    for sym in price_features_cache:
+        own_sector = sector_map.get(sym, "Unknown")
+        peers = [s for s in sector_to_symbols.get(own_sector, []) if s != sym]
+
+        peer_momentum = [
+            price_features_cache[p].get("momentum_10d")
+            for p in peers[:10]
+            if price_features_cache[p].get("momentum_10d") is not None
+        ]
+        peer_rsi = [
+            price_features_cache[p].get("rsi_14")
+            for p in peers[:10]
+            if price_features_cache[p].get("rsi_14") is not None
+        ]
+        peer_vol = [
+            price_features_cache[p].get("rolling_vol_21d")
+            for p in peers[:10]
+            if price_features_cache[p].get("rolling_vol_21d") is not None
+        ]
+
+        result[sym] = {
+            "peer_mean_momentum_10d": round(float(np.mean(peer_momentum)), 4) if peer_momentum else None,
+            "peer_mean_rsi_14":       round(float(np.mean(peer_rsi)),      4) if peer_rsi      else None,
+            "peer_mean_vol_21d":      round(float(np.mean(peer_vol)),      4) if peer_vol      else None,
+        }
+
+    return result
 
 
 def _generate_all(
@@ -239,6 +313,11 @@ def _generate_all(
     total_rows   = 0
     symbols_done = 0
     errors       = []
+
+    # P1-A: Load FII/DII cache once for the whole run
+    fii_cache = load_fii_dii_cache()
+    if fii_cache is None:
+        log.info("FII/DII cache empty — fii_* features will be None for this run")
 
     # Normalize once — avoids repeated Timestamp→date coercion in every slice
     universe_dfs = {s: _normalize_dates(df) for s, df in universe_dfs.items()}
@@ -303,6 +382,9 @@ def _generate_all(
         else:
             slice_nifty = nifty_df
 
+        # P2-A: First pass — compute price+trend features for all symbols on this date
+        # so peer-mean snapshot can be built from them (O(n) not O(n^2)).
+        base_features_cache: dict[str, dict] = {}
         for symbol in target_symbols:
             if not has_date_today.get(symbol):
                 continue
@@ -310,9 +392,36 @@ def _generate_all(
             if slice_stock is None or len(slice_stock) < MIN_HISTORY_ROWS:
                 continue
             try:
-                features = _compute_all_features(symbol, slice_stock, slice_nifty,
-                                                 slice_universe, sector_map,
-                                                 breadth_snapshot=breadth_snapshot)
+                from features.price_features  import compute_price_features
+                from features.trend_features  import compute_trend_features
+                from features.volatility_features import compute_volatility_features
+                base = {}
+                base.update(compute_price_features(slice_stock, slice_nifty))
+                base.update(compute_trend_features(slice_stock))
+                base.update(compute_volatility_features(slice_stock, slice_nifty))
+                base_features_cache[symbol] = base
+            except Exception:
+                pass
+
+        # Build peer-mean snapshot from base features
+        peer_mean_snapshot = _compute_peer_mean_snapshot(
+            feat_date, sector_map, slice_universe, base_features_cache
+        )
+
+        for symbol in target_symbols:
+            if not has_date_today.get(symbol):
+                continue
+            slice_stock = slice_universe.get(symbol)
+            if slice_stock is None or len(slice_stock) < MIN_HISTORY_ROWS:
+                continue
+            try:
+                features = _compute_all_features(
+                    symbol, slice_stock, slice_nifty,
+                    slice_universe, sector_map,
+                    breadth_snapshot=breadth_snapshot,
+                    fii_dii_cache=fii_cache,
+                    peer_mean_snapshot=peer_mean_snapshot,
+                )
                 # commit=False: one commit per DATE (below) covers all symbols
                 # processed on that date, instead of one commit per symbol —
                 # cuts commit count from ~435k to ~1236 for a full backfill.
@@ -354,6 +463,9 @@ def _generate_incremental(
     symbols_done = 0
     skipped      = 0
     errors       = []
+
+    # P1-A: load FII cache once
+    fii_cache = load_fii_dii_cache()
 
     # Normalize once (sort, coerce dates, coerce numerics) — same contract as
     # _generate_all; _compute_all_features no longer coerces its inputs.
@@ -397,7 +509,8 @@ def _generate_incremental(
                 continue
 
             features = _compute_all_features(symbol, slice_stock, slice_nifty,
-                                             slice_universe, sector_map)
+                                             slice_universe, sector_map,
+                                             fii_dii_cache=fii_cache)
             rows = save_feature_vector(db, symbol, latest_price, features, version)
             total_rows += rows
             symbols_done += 1

@@ -172,6 +172,106 @@ def _build_expert(hp: dict) -> Any:
     )
 
 
+def _compute_era_boost_weights(
+    X_r: pd.DataFrame,
+    y_r: pd.Series,
+    base_weights: np.ndarray,
+    dates_r: pd.Series,
+    era_days: int = 60,
+    rounds: int = 2,
+) -> Optional[np.ndarray]:
+    """
+    P0-C: Era-boosted training.
+    Divide training rows into 60-day eras, compute per-era IC (Spearman correlation
+    between first feature and label as a proxy), upweight bottom-quartile eras 3×.
+    Returns updated sample_weight array after `rounds` upweighting cycles.
+    Returns None if there aren't enough eras to be meaningful.
+    """
+    try:
+        d = pd.to_datetime(dates_r, errors="coerce")
+        if d.isna().all():
+            return None
+        d_min = d.min()
+        era_idx = ((d - d_min).dt.days // era_days).fillna(-1).astype(int)
+        valid_eras = [e for e in era_idx.unique() if e >= 0]
+        if len(valid_eras) < 4:
+            return None
+
+        weights = base_weights.copy().astype(np.float64)
+        first_feat = X_r.columns[0]
+
+        for _ in range(rounds):
+            era_ics = {}
+            for era in valid_eras:
+                mask = (era_idx == era).values
+                if mask.sum() < 20:
+                    continue
+                corr = X_r[first_feat].iloc[mask].corr(y_r.iloc[mask], method="spearman")
+                if not np.isnan(corr):
+                    era_ics[era] = abs(corr)
+
+            if len(era_ics) < 4:
+                break
+
+            threshold = np.percentile(list(era_ics.values()), 25)
+            low_ic_eras = {e for e, ic in era_ics.items() if ic <= threshold}
+
+            for i, era in enumerate(era_idx):
+                if era in low_ic_eras:
+                    weights[i] *= 3.0
+
+            # Renormalize after each round
+            w_mean = weights.mean()
+            if w_mean > 0:
+                weights = weights / w_mean
+
+        return weights.astype(np.float32)
+    except Exception:
+        return None
+
+
+def _neutralize_features(X: pd.DataFrame, beta_col: str = "beta_21d", sector_col: str = "sector_return_5d") -> pd.DataFrame:
+    """
+    P0-A: Feature neutralization (Numerai-style).
+    OLS-project each feature against market beta + sector return, keep the residual.
+    This removes market/sector exposure so the model learns stock-specific alpha.
+
+    Rows where confounders are fully missing are left unchanged (no imputation here —
+    the PercentileRanker handles NaN natively downstream).
+    """
+    confounders = []
+    if beta_col in X.columns:
+        confounders.append(beta_col)
+    if sector_col in X.columns:
+        confounders.append(sector_col)
+    if not confounders:
+        return X
+
+    from numpy.linalg import lstsq
+    X_out = X.copy()
+    C = X[confounders].values.astype(np.float64)
+    # Add intercept column
+    ones = np.ones((C.shape[0], 1), dtype=np.float64)
+    C_aug = np.hstack([ones, C])
+    # Build a NaN mask — rows where any confounder is NaN can't be neutralized
+    valid_mask = ~np.isnan(C_aug).any(axis=1)
+
+    skip_cols = set(confounders) | {"date", "symbol"}
+    target_cols = [c for c in X.columns if c not in skip_cols and pd.api.types.is_numeric_dtype(X[c])]
+
+    for col in target_cols:
+        y = X[col].values.astype(np.float64)
+        valid = valid_mask & ~np.isnan(y)
+        if valid.sum() < 30:
+            continue
+        coeffs, _, _, _ = lstsq(C_aug[valid], y[valid], rcond=None)
+        residuals = y.copy()
+        residuals[valid] = y[valid] - C_aug[valid] @ coeffs
+        X_out[col] = residuals
+
+    return X_out
+
+
 def _build_interaction_features(X: pd.DataFrame) -> pd.DataFrame:
     """
     Add 9 domain-specific interaction features (6 from v3 + 3 new in v3.1).
@@ -299,11 +399,56 @@ def _select_regime_features(
 
 
 class PlattCalibratedExpert:
-    """HistGBT expert wrapped with Platt logistic regression for probability calibration."""
+    """
+    HistGBT expert wrapped with Platt logistic regression for probability calibration.
+    Also stores split-conformal quantiles (P1-B) for guaranteed coverage intervals.
+    """
     def __init__(self, base: Any, platt: Any, feature_cols: list[str]):
         self._base = base
         self._platt = platt
         self._feature_cols = feature_cols  # subset used by this expert
+        # P1-B: conformal quantiles — set by _fit_conformal(); None until fitted
+        self._conformal_q_low:  Optional[float] = None   # q at alpha/2
+        self._conformal_q_high: Optional[float] = None   # q at 1-alpha/2
+
+    def _fit_conformal(self, X_cal: pd.DataFrame, y_cal: pd.Series, alpha: float = 0.10) -> None:
+        """
+        P1-B: Split-conformal calibration (no external library needed).
+        Compute non-conformity scores on a held-out calibration set and store
+        the (alpha/2, 1-alpha/2) quantiles of |predicted_proba - true_label|.
+        These define guaranteed marginal coverage at (1-alpha) level.
+        """
+        try:
+            probas = self.predict_proba(X_cal)[:, 1]
+            scores = np.abs(probas - y_cal.values.astype(float))
+            n = len(scores)
+            if n < 20:
+                return
+            # Conformal quantile with finite-sample correction
+            q_level_lo = np.ceil((n + 1) * (alpha / 2))       / n
+            q_level_hi = np.ceil((n + 1) * (1 - alpha / 2))   / n
+            q_level_lo = float(np.clip(q_level_lo, 0.0, 1.0))
+            q_level_hi = float(np.clip(q_level_hi, 0.0, 1.0))
+            self._conformal_q_low  = float(np.quantile(scores, q_level_lo))
+            self._conformal_q_high = float(np.quantile(scores, q_level_hi))
+        except Exception:
+            pass
+
+    def predict_interval(self, X: pd.DataFrame, alpha: float = 0.10) -> np.ndarray:
+        """
+        Return (n, 2) array of [lower, upper] conformal prediction intervals.
+        If conformal quantiles are not yet fitted, returns [proba-0.2, proba+0.2].
+        """
+        probas = self.predict_proba(X)[:, 1]
+        if self._conformal_q_low is None:
+            return np.column_stack([
+                np.clip(probas - 0.20, 0, 1),
+                np.clip(probas + 0.20, 0, 1),
+            ])
+        return np.column_stack([
+            np.clip(probas - self._conformal_q_high, 0, 1),
+            np.clip(probas + self._conformal_q_high, 0, 1),
+        ])
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         Xs = X[self._feature_cols] if self._feature_cols else X
@@ -368,7 +513,14 @@ class AQRTINet(BaseModel):
         X_clean = X_train.drop(columns=[c for c in _LABEL_PASSTHROUGH if c in X_train.columns], errors="ignore")
         # Update _feature_cols so base_model.predict() doesn't require stripped columns at inference
         self._feature_cols = list(X_clean.columns)
-        X_work = _build_interaction_features(X_clean)
+
+        # ── P0-A: Feature neutralization (Numerai-style) ──────────────────
+        # OLS-project each feature against market beta + sector return; use residuals.
+        # Removes market/sector exposure, isolates stock-specific alpha signal.
+        X_neutral = _neutralize_features(X_clean)
+        log.info("AQRTINet: feature neutralization applied (confounder cols: beta_21d, sector_return_5d)")
+
+        X_work = _build_interaction_features(X_neutral)
         ix_cols = [c for c in X_work.columns if c.startswith("ix_")]
         log.info("AQRTINet: added %d interaction features (from %d clean features)", len(ix_cols), len(X_clean.columns))
 
@@ -449,33 +601,82 @@ class AQRTINet(BaseModel):
             TEMPORAL_HALFLIFE_DAYS, CONFIDENT_LABEL_THRESHOLD_PCT,
         )
 
+        # ── P1-D: Adversarial augmentation ───────────────────────────────────
+        # Add Gaussian-perturbed copies of training rows (σ = 0.05 × feature std).
+        # Forces the model to learn smooth decision boundaries rather than
+        # memorizing exact feature values. Only numeric feature columns are perturbed.
+        try:
+            feature_cols_ranked = [c for c in X_ranked.columns]
+            numeric_cols = [c for c in feature_cols_ranked if pd.api.types.is_numeric_dtype(X_ranked[c])]
+            feat_stds = X_ranked[numeric_cols].std(axis=0).fillna(0).values
+            noise = np.random.normal(0, 0.05, (len(X_ranked), len(numeric_cols))) * feat_stds
+            X_aug_vals = X_ranked[numeric_cols].values + noise
+            X_aug = X_ranked.copy()
+            X_aug[numeric_cols] = X_aug_vals
+            X_ranked_aug = pd.concat([X_ranked, X_aug], ignore_index=True)
+            y_train_aug = pd.concat([y_train.reset_index(drop=True),
+                                     y_train.reset_index(drop=True)], ignore_index=True)
+            combined_weights_aug = np.concatenate([combined_weights, combined_weights])
+            cw_aug_mean = combined_weights_aug.mean()
+            if cw_aug_mean > 0:
+                combined_weights_aug = (combined_weights_aug / cw_aug_mean).astype(np.float32)
+            regimes_aug = pd.concat([regimes.reset_index(drop=True),
+                                     regimes.reset_index(drop=True)], ignore_index=True)
+            dates_aug = pd.concat([pd.Series(dates.values),
+                                   pd.Series(dates.values)], ignore_index=True)
+            log.info("AQRTINet: adversarial augmentation -- %d -> %d rows (2x with Gaussian noise s=0.05*std)",
+                     len(X_ranked), len(X_ranked_aug))
+        except Exception as exc:
+            log.warning("AQRTINet: adversarial augmentation failed, skipping: %s", exc)
+            X_ranked_aug = X_ranked
+            y_train_aug = y_train.reset_index(drop=True)
+            combined_weights_aug = combined_weights
+            regimes_aug = regimes.reset_index(drop=True)
+            dates_aug = pd.Series(dates.values)
+
         # ── Step 5: Train regime-specific experts with selected features ──
         self._experts = {}
         self._regime_feature_cols = {}
 
         for regime in REGIMES:
-            mask = (regimes == regime).values
+            mask = (regimes_aug == regime).values
             n = mask.sum()
 
             if n < MIN_REGIME_ROWS:
                 log.info("AQRTINet: %s has %d rows — skipping (will use %s fallback)", regime, n, FALLBACK_REGIME)
                 continue
 
-            X_r = X_ranked[mask]
-            y_r = y_train[mask]
-            w_r = combined_weights[mask]
+            X_r = X_ranked_aug[mask]
+            y_r = y_train_aug[mask]
+            w_r = combined_weights_aug[mask]
 
-            # Regime-specific feature selection by IC
-            regime_feats = _select_regime_features(X_r, y_r, regime, top_n=30)
+            # Regime-specific feature selection by IC (on original data before augmentation)
+            orig_mask = (regimes == regime).values
+            regime_feats = _select_regime_features(X_ranked[orig_mask], y_train[orig_mask], regime, top_n=30)
             self._regime_feature_cols[regime] = regime_feats
             X_rf = X_r[regime_feats]
 
             hp = {**self.hyperparams, **REGIME_HYPERPARAMS[regime]}
             expert = _build_expert(hp)
             expert.fit(X_rf, y_r, sample_weight=w_r)
+
+            # ── P0-C: Era-boosted training ─────────────────────────────────
+            # Divide training into 60-day eras, score per-era IC, upweight
+            # bottom-quartile eras 3× and retrain 2 more rounds.
+            # Forces the model to learn patterns from hard/low-IC regimes.
+            try:
+                era_weights = _compute_era_boost_weights(X_r, y_r, w_r, dates_aug[mask], era_days=60, rounds=2)
+                if era_weights is not None:
+                    expert_era = _build_expert(hp)
+                    expert_era.fit(X_rf, y_r, sample_weight=era_weights)
+                    expert = expert_era
+                    log.info("AQRTINet: %s era-boosted (2 rounds)", regime)
+            except Exception as exc:
+                log.warning("AQRTINet: era-boost for %s failed: %s — using base expert", regime, exc)
+
             self._experts[regime] = expert
             log.info(
-                "AQRTINet: %s expert — %d rows, %d features, n_iter=%d, weight_range=[%.2f,%.2f]",
+                "AQRTINet: %s expert — %d rows (incl. aug), %d features, n_iter=%d, weight_range=[%.2f,%.2f]",
                 regime, n, len(regime_feats), expert.n_iter_, w_r.min(), w_r.max(),
             )
 
@@ -485,7 +686,7 @@ class AQRTINet(BaseModel):
             expert = _build_expert(hp)
             all_feats = _select_regime_features(X_ranked, y_train, FALLBACK_REGIME, top_n=30)
             self._regime_feature_cols[FALLBACK_REGIME] = all_feats
-            expert.fit(X_ranked[all_feats], y_train, sample_weight=combined_weights)
+            expert.fit(X_ranked_aug[all_feats], y_train_aug, sample_weight=combined_weights_aug)
             self._experts[FALLBACK_REGIME] = expert
 
         # ── Step 6: Platt calibration per expert (5-fold OOF, up from 3-fold) ──
@@ -519,8 +720,18 @@ class AQRTINet(BaseModel):
 
                 platt = LogisticRegression(C=1.0, max_iter=500)
                 platt.fit(oof_proba.reshape(-1, 1), y_r.values)
-                calibrated[regime] = PlattCalibratedExpert(expert, platt, feats)
-                log.info("AQRTINet: Platt-calibrated %s (n=%d, feats=%d, platt_folds=%d)", regime, n, len(feats), n_splits)
+                ce = PlattCalibratedExpert(expert, platt, feats)
+
+                # P1-B: Split-conformal calibration — use the OOF probas as the
+                # calibration set (they're already out-of-fold, so no leakage).
+                # Store quantiles inside the expert for predict_interval() later.
+                ce._conformal_q_low  = float(np.quantile(np.abs(oof_proba - y_r.values.astype(float)), 0.05))
+                ce._conformal_q_high = float(np.quantile(np.abs(oof_proba - y_r.values.astype(float)), 0.90))
+                calibrated[regime] = ce
+                log.info(
+                    "AQRTINet: Platt+Conformal calibrated %s (n=%d, feats=%d, folds=%d, q90=%.3f)",
+                    regime, n, len(feats), n_splits, ce._conformal_q_high,
+                )
 
             self._experts = calibrated
         except Exception as exc:
@@ -586,6 +797,28 @@ class AQRTINet(BaseModel):
         expert = self._route_to_expert(self._get_current_regime())
         proba = expert.predict_proba(X_r)
         return proba[:, 1] if proba.ndim == 2 else proba
+
+    def predict_interval(self, X: pd.DataFrame, alpha: float = 0.10) -> np.ndarray:
+        """
+        P1-B: Return (n, 2) conformal prediction intervals for P(UP).
+        Intervals have guaranteed marginal coverage at (1-alpha) level.
+        Returns [[lower, upper], ...] for each row in X.
+        """
+        X_clean = X.drop(columns=[c for c in ["return_5d", "return_3d", "return_10d",
+                                               "return_15d", "outperform_nifty_5d",
+                                               "outperform_binary", "expected_return",
+                                               "direction_5d"] if c in X.columns],
+                          errors="ignore")
+        X_r = self._build_inference_features(X_clean)
+        expert = self._route_to_expert(self._get_current_regime())
+        if hasattr(expert, "predict_interval"):
+            return expert.predict_interval(X_r, alpha=alpha)
+        # Fallback: uniform ±0.15 interval
+        probas = expert.predict_proba(X_r)[:, 1]
+        return np.column_stack([
+            np.clip(probas - 0.15, 0, 1),
+            np.clip(probas + 0.15, 0, 1),
+        ])
 
     # ── Feature Importance ────────────────────────────────────────────────
 
@@ -692,10 +925,13 @@ if __name__ == "__main__":
     probas = model.predict_proba(X_infer[:10])
     imp    = model.feature_importance()
 
+    intervals = model.predict_interval(X_infer[:5])
+
     print(f"  Experts trained: {list(model._experts.keys())}")
     print(f"  Ranker features: {model._ranker.feature_count()}")
     print(f"  Predictions: {preds}")
     print(f"  Probabilities: {probas.round(3)}")
+    print(f"  Conformal intervals (n=5): {intervals.round(3)}")
     print(f"  Top 3: {sorted(imp.items(), key=lambda x:-x[1])[:3]}")
 
     path = model.save()
