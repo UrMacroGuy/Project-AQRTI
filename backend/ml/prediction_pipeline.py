@@ -180,9 +180,14 @@ def run_prediction_pipeline(version: int = 1) -> dict:
     skipped  = 0
 
     # ── Load models ─────────────────────────────────────────────
+    # Always reload (not get_ensemble_engine's cache-if-loaded) — training
+    # now runs in a separate process (scripts/train_models.py, launched via
+    # /admin/train) rather than in-thread, so this process's cached engine
+    # has no way to know new models were registered. The reload cost (DB
+    # read + a few pickle loads) is cheap relative to a full prediction run.
     try:
-        from ml.ensemble.ensemble_engine import get_ensemble_engine
-        engine = get_ensemble_engine(version=version)
+        from ml.ensemble.ensemble_engine import reload_ensemble
+        engine = reload_ensemble(version=version)
     except Exception as exc:
         log.error("Failed to load ensemble engine: %s", exc)
         return {"status": "error", "error": str(exc)}

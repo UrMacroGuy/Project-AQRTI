@@ -154,7 +154,13 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 7A — Live Validation failed: %s", exc)
 
-    # Step 7A2: Drift-triggered retraining — if drift flagged in 30d window, trigger retrain
+    # Step 7A2: Drift detection — flags when retraining is warranted, but
+    # NEVER trains in-process. Training used to run as a daemon thread
+    # inside this same backend process (model_retrainer.check_and_retrain),
+    # which meant heavy ML training and live API serving fought over the
+    # same RAM/CPU with no way to run one without the other. Now this step
+    # only logs a clear signal; run `python scripts/train_models.py` (a
+    # fully separate process) yourself whenever you want to act on it.
     try:
         from aqrti.database.engine import get_db as _get_db
         from aqrti.database.models import ModelDriftHistory
@@ -168,20 +174,15 @@ def _daily_job():
             ).count()
         if recent_flags > 0:
             scheduler_logger.warning(
-                "Step 7A2 — Drift detected (%d flagged models in 30d window) — triggering retrain",
+                "Step 7A2 — Drift detected (%d flagged models in 30d window). "
+                "Training NOT auto-triggered (moved out of the live backend "
+                "process) — run `python scripts/train_models.py` to retrain.",
                 recent_flags,
             )
-            import threading as _threading
-            from ml.model_retrainer import check_and_retrain
-            def _drift_retrain():
-                from aqrti.database.engine import get_db as _g
-                with _g() as _db:
-                    check_and_retrain(_db, force=True)
-            _threading.Thread(target=_drift_retrain, daemon=True).start()
         else:
-            scheduler_logger.info("Step 7A2 — No drift flags in last 3 days — skipping retrain")
+            scheduler_logger.info("Step 7A2 — No drift flags in last 3 days — no retrain needed")
     except Exception as exc:
-        scheduler_logger.error("Step 7A2 — Drift-triggered retrain check failed: %s", exc)
+        scheduler_logger.error("Step 7A2 — Drift check failed: %s", exc)
 
     # Step 7B: Regime Discovery (K-Means unsupervised)
     try:
@@ -352,6 +353,17 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 12 — Historical Intelligence pipeline failed: %s", exc)
 
+    # Step 13: Obsidian vault export — one-way, derived-view render of the day's
+    # knowledge. No-op if settings.obsidian_vault_path is unset. Never raises
+    # (see obsidian/vault_exporter.py's own try/except), but wrapped here too
+    # since this step must never be able to take down the pipeline.
+    try:
+        from obsidian.vault_exporter import export_vault
+        oreport = export_vault(full=False)
+        scheduler_logger.info("Step 13 — Obsidian Export: %s", oreport)
+    except Exception as exc:
+        scheduler_logger.error("Step 13 — Obsidian export failed: %s", exc)
+
     scheduler_logger.info("=== DAILY PIPELINE COMPLETE ===")
 
 
@@ -459,6 +471,11 @@ def _alert_check_job():
             ks = db.query(KnowledgeScore).order_by(KnowledgeScore.date.desc()).first()
             if eq and eq.drawdown_pct and eq.drawdown_pct < -15:
                 scheduler_logger.warning("ALERT: Portfolio drawdown %.1f%% exceeded -15%% threshold", eq.drawdown_pct)
+                try:
+                    from aqrti.alerts.telegram_alerts import alert_drawdown
+                    alert_drawdown(eq.drawdown_pct, eq.portfolio_value or 0)
+                except Exception as _ae:
+                    scheduler_logger.warning("GO-4 drawdown alert failed: %s", _ae)
             if ks and ks.overall_score and ks.overall_score < 35:
                 scheduler_logger.warning("ALERT: Knowledge score %.1f below 35 — system degrading", ks.overall_score)
     except Exception as exc:
@@ -476,6 +493,90 @@ def _arena_job():
         run_arena_cycle()
     except Exception as exc:
         scheduler_logger.error("Arena job failed: %s", exc)
+
+
+def _pipeline_health_check_job():
+    """
+    GO-3: Daily 16:30 IST pipeline self-check.
+    Checks: prices ingested today? shadow trades updated? strategies scored?
+    Result stored in SystemHealthCheck table — UI reads it for red banner.
+    """
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+
+    try:
+        from aqrti.database.engine import get_db
+        from aqrti.api.routes.system_health import _do_health_check
+        with get_db() as db:
+            result = _do_health_check(db)
+        if result["overall_ok"]:
+            scheduler_logger.info("GO-3 Health check: ALL OK — prices=%d shadow=%d",
+                                  result.get("prices_count", 0), result.get("shadow_count", 0))
+        else:
+            failures = result.get("failures", [])
+            scheduler_logger.error("GO-3 Health check FAILED: %s", failures)
+            try:
+                from aqrti.alerts.telegram_alerts import alert_pipeline_failure
+                alert_pipeline_failure(failures)
+            except Exception as _ae:
+                scheduler_logger.warning("GO-4 alert send failed: %s", _ae)
+    except Exception as exc:
+        scheduler_logger.error("GO-3 Pipeline health check job failed: %s", exc)
+
+
+def _weekly_backup_job():
+    """
+    ARCH-9: Weekly automated DB backup — every Saturday at 08:00 IST.
+    Uses SQLite online backup API (safe while backend is running), verifies
+    integrity, keeps last 7 copies. Logs result + warns if integrity fails.
+    """
+    import os, sqlite3, glob
+    from datetime import date as _date
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    src_path    = os.path.join(backend_dir, "aqrti.db")
+    backup_dir  = os.path.join(backend_dir, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+
+    stamp       = _date.today().strftime("%Y%m%d")
+    dst_path    = os.path.join(backup_dir, f"aqrti.db.bak-{stamp}")
+
+    try:
+        # Online backup — safe with concurrent readers/writers
+        src = sqlite3.connect(src_path)
+        src.execute("PRAGMA busy_timeout=30000")
+        dst = sqlite3.connect(dst_path)
+        with dst:
+            src.backup(dst)
+        src.close()
+        dst.close()
+
+        # Integrity check on the copy
+        chk = sqlite3.connect(dst_path)
+        result = chk.execute("PRAGMA integrity_check").fetchone()
+        chk.close()
+        ok = result[0] == "ok" if result else False
+
+        if ok:
+            size_mb = os.path.getsize(dst_path) / 1_048_576
+            scheduler_logger.info(
+                "ARCH-9 Backup: wrote %s (%.0f MB) — integrity OK", dst_path, size_mb
+            )
+        else:
+            scheduler_logger.error(
+                "ARCH-9 Backup: integrity_check FAILED on %s — result: %s", dst_path, result
+            )
+
+        # Prune: keep last 7 backups
+        all_backups = sorted(glob.glob(os.path.join(backup_dir, "aqrti.db.bak-*")))
+        for old in all_backups[:-7]:
+            os.remove(old)
+            scheduler_logger.info("ARCH-9 Backup: pruned old backup %s", old)
+
+    except Exception as exc:
+        scheduler_logger.error("ARCH-9 Weekly backup failed: %s", exc)
 
 
 def _integrity_sweep_job():
@@ -613,9 +714,7 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
-    # Weekly price integrity sweep — Saturday 10:00 IST (off-market, avoids
-    # colliding with daily ingestion). Detects and heals split-adjustment
-    # drift caused by incremental fetch + auto_adjust.
+    # Weekly price integrity sweep — Saturday 10:00 IST
     _scheduler.add_job(
         _integrity_sweep_job,
         trigger=CronTrigger(day_of_week="sat", hour=10, minute=0, timezone="Asia/Kolkata"),
@@ -623,6 +722,28 @@ def start_scheduler() -> BackgroundScheduler:
         name="Weekly Price Integrity Sweep",
         replace_existing=True,
         misfire_grace_time=7200,
+        max_instances=1,
+    )
+
+    # ARCH-9: Weekly DB backup — Saturday 08:00 IST (before integrity sweep)
+    _scheduler.add_job(
+        _weekly_backup_job,
+        trigger=CronTrigger(day_of_week="sat", hour=8, minute=0, timezone="Asia/Kolkata"),
+        id="weekly_backup",
+        name="Weekly DB Backup",
+        replace_existing=True,
+        misfire_grace_time=3600,
+        max_instances=1,
+    )
+
+    # GO-3: Pipeline self-check — 16:30 IST weekdays (30 min after daily pipeline start)
+    _scheduler.add_job(
+        _pipeline_health_check_job,
+        trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=30, timezone="Asia/Kolkata"),
+        id="pipeline_health_check",
+        name="GO-3 Pipeline Self-Check",
+        replace_existing=True,
+        misfire_grace_time=1800,
         max_instances=1,
     )
 

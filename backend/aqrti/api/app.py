@@ -1,11 +1,11 @@
-"""
+﻿"""
 AQRTI FastAPI Application
 Main entry point for the backend API server.
 """
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 # Only import what's needed at module level — everything else is lazy-loaded
@@ -14,8 +14,36 @@ from aqrti.config.settings import get_settings
 from aqrti.database.engine import init_db, checkpoint_wal
 from aqrti.data.scheduler import start_scheduler, stop_scheduler
 from aqrti.utils.logger import api_logger
+import os
 import threading
 import time as _time
+
+# ── External scheduler detection ─────────────────────────────────────────────
+
+def _scheduler_pid_file() -> str:
+    """Absolute path to the external scheduler PID file."""
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(backend_dir, "scheduler.pid")
+
+
+def _external_scheduler_pid() -> int | None:
+    """Return the PID from scheduler.pid if the process is alive, else None."""
+    pid_path = _scheduler_pid_file()
+    if not os.path.exists(pid_path):
+        return None
+    try:
+        with open(pid_path) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    # Probe liveness without sending a real signal (signal 0 = existence check).
+    try:
+        os.kill(pid, 0)
+        return pid
+    except OSError:
+        # Process not found or permission denied — treat as stale PID.
+        return None
+
 
 # ── Boot progress state (shared across threads, read by /system/status) ──────
 _BOOT_STATUS = {
@@ -261,7 +289,14 @@ def create_app() -> FastAPI:
         api_logger.info("AQRTI Backend starting up …")
         init_db()
         checkpoint_wal()
-        start_scheduler()
+        ext_pid = _external_scheduler_pid()
+        if ext_pid is not None:
+            api_logger.info(
+                "External scheduler detected (PID=%d) — not starting embedded scheduler.",
+                ext_pid,
+            )
+        else:
+            start_scheduler()
         api_logger.info("AQRTI Backend ready — boot pipeline starting in background")
         # Defer boot sequence by 1s so uvicorn fully binds and /health responds first
         def _deferred_boot():
@@ -272,7 +307,9 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def on_shutdown():
-        stop_scheduler()
+        if _external_scheduler_pid() is None:
+            # Only stop the embedded scheduler; the external process manages itself.
+            stop_scheduler()
         checkpoint_wal()
         api_logger.info("AQRTI Backend shut down.")
 
@@ -400,6 +437,14 @@ def create_app() -> FastAPI:
     # ── Phase 10: Strategy Arena — autonomous self-learning loop ──
     app.include_router(arena_router.router,               prefix=f"{PREFIX}/arena",               tags=["Arena"])
 
+    # ── GO-3: System Health (pipeline self-check) ─────────────────
+    from aqrti.api.routes import system_health as system_health_router
+    app.include_router(system_health_router.router, prefix=PREFIX, tags=["System Health"])
+
+    # ── GO-1 / GO-7 / GO-8: Go/No-Go Scorecard ───────────────────
+    from aqrti.api.routes import go_nogo as go_nogo_router
+    app.include_router(go_nogo_router.router, prefix=PREFIX, tags=["Go/No-Go"])
+
     # ── System Status (boot progress) ────────────────────────────
     @app.get("/api/v1/system/status", tags=["System"])
     async def system_status():
@@ -407,8 +452,53 @@ def create_app() -> FastAPI:
         with _BOOT_LOCK:
             return dict(_BOOT_STATUS)
 
+    @app.get("/api/v1/system/scheduler-status", tags=["System"])
+    async def scheduler_status():
+        """
+        Report whether the scheduler is running as an external process or embedded
+        inside this API process, or not running at all.
+
+        Returns:
+          mode: "external" | "embedded" | "none"
+          pid:  integer PID of the external scheduler process, or null
+          pid_file_exists: whether scheduler.pid is present on disk (even if stale)
+        """
+        pid_path = _scheduler_pid_file()
+        pid_file_exists = os.path.exists(pid_path)
+        ext_pid = _external_scheduler_pid()
+
+        if ext_pid is not None:
+            mode = "external"
+            pid = ext_pid
+        else:
+            # Determine whether the embedded scheduler is running by checking the
+            # module-level _scheduler object in aqrti.data.scheduler.
+            try:
+                from aqrti.data import scheduler as _sched_mod
+                embedded_running = (
+                    _sched_mod._scheduler is not None
+                    and _sched_mod._scheduler.running
+                )
+            except Exception:
+                embedded_running = False
+            mode = "embedded" if embedded_running else "none"
+            pid = None
+
+        return {"mode": mode, "pid": pid, "pid_file_exists": pid_file_exists}
+
+    # ── ARCH-8: Admin token auth ─────────────────────────────────
+    # When AQRTI_ADMIN_TOKEN is set in .env, every /admin/* route requires
+    # the caller to pass "X-Admin-Token: <token>" header. When the env var
+    # is empty (default, localhost-only), the check is skipped entirely —
+    # the localhost binding is the security boundary in that case.
+    _admin_token_cfg = settings.admin_token
+
+    def _require_admin_token(x_admin_token: str = Header(default="")):
+        if _admin_token_cfg and x_admin_token != _admin_token_cfg:
+            raise HTTPException(status_code=401, detail="Invalid or missing X-Admin-Token header")
+
     # ── Admin Endpoints ──────────────────────────────────────────
-    @app.post("/admin/ingest", tags=["Admin"])
+    @app.post("/admin/ingest", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_ingestion():
         """Manually trigger full market data ingestion."""
         import asyncio
@@ -422,7 +512,7 @@ def create_app() -> FastAPI:
             api_logger.error("Admin ingest failed: %s", exc)
             return JSONResponse(status_code=500, content={"error": str(exc), "status": "failed"})
 
-    @app.post("/admin/backfill", tags=["Admin"])
+    @app.post("/admin/backfill", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_backfill(years: int = 3):
         """
         Pull historical price data going back `years` years (default 3).
@@ -447,7 +537,7 @@ def create_app() -> FastAPI:
             api_logger.error("Admin backfill failed: %s", exc)
             return JSONResponse(status_code=500, content={"error": str(exc), "status": "failed"})
 
-    @app.get("/admin/data-status", tags=["Admin"])
+    @app.get("/admin/data-status", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def data_status():
         """Show how many rows of price/feature data exist per symbol."""
         from aqrti.database.engine import get_db_dependency
@@ -485,7 +575,7 @@ def create_app() -> FastAPI:
             "total_feature_rows": sum(feat_map.values()),
         }
 
-    @app.post("/admin/features", tags=["Admin"])
+    @app.post("/admin/features", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_features():
         """Manually trigger incremental feature generation (latest date only per symbol)."""
         import sys, os
@@ -495,7 +585,7 @@ def create_app() -> FastAPI:
         api_logger.info("Manual feature generation triggered.")
         return await asyncio.to_thread(run_incremental_feature_generation)
 
-    @app.post("/admin/features-full", tags=["Admin"])
+    @app.post("/admin/features-full", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_features_full():
         """
         Compute features for ALL historical dates per symbol (not just latest).
@@ -509,7 +599,7 @@ def create_app() -> FastAPI:
         api_logger.info("Full historical feature generation triggered.")
         return await asyncio.to_thread(run_full_feature_generation)
 
-    @app.post("/admin/shadow-paper", tags=["Admin"])
+    @app.post("/admin/shadow-paper", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_shadow_paper():
         """
         Run one shadow paper-trading cycle: forward-tests every promoted/
@@ -523,7 +613,7 @@ def create_app() -> FastAPI:
         api_logger.info("Shadow paper cycle triggered.")
         return await asyncio.to_thread(run_shadow_paper_cycle)
 
-    @app.post("/admin/integrity-sweep", tags=["Admin"])
+    @app.post("/admin/integrity-sweep", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_integrity_sweep():
         """
         Run the price integrity sweep: detect split-adjustment drift per
@@ -538,7 +628,7 @@ def create_app() -> FastAPI:
         api_logger.info("Price integrity sweep triggered.")
         return await asyncio.to_thread(run_integrity_sweep)
 
-    @app.post("/admin/news", tags=["Admin"])
+    @app.post("/admin/news", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_news():
         """Manually trigger news collection pipeline."""
         import sys, os
@@ -548,7 +638,7 @@ def create_app() -> FastAPI:
         api_logger.info("Manual news pipeline triggered.")
         return await asyncio.to_thread(run_news_pipeline)
 
-    @app.post("/admin/sentiment", tags=["Admin"])
+    @app.post("/admin/sentiment", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_sentiment():
         """Manually trigger sentiment computation pipeline."""
         import sys, os
@@ -558,21 +648,35 @@ def create_app() -> FastAPI:
         api_logger.info("Manual sentiment pipeline triggered.")
         return await asyncio.to_thread(run_sentiment_pipeline)
 
-    @app.post("/admin/train", tags=["Admin"])
+    @app.post("/admin/train", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_training():
-        """Run full model training pipeline (walk-forward + final models)."""
-        import sys, os
-        backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
-        sys.path.insert(0, backend_dir)
-        from ml.validation.backtest_validator import run_full_training
-        from ml.ensemble.ensemble_engine import reload_ensemble
-        import asyncio
-        api_logger.info("Manual model training triggered.")
-        result = await asyncio.to_thread(run_full_training)
-        reload_ensemble()
-        return result
+        """
+        Launch model training as a SEPARATE PROCESS (scripts/train_models.py),
+        not in-thread. Training (esp. AQRTINet's 7-fold stacking + 4 regime
+        experts) is heavy enough that running it in-process — even on a
+        thread via asyncio.to_thread — meant it fought the live backend for
+        the same RAM/CPU with no way to isolate one from the other. This
+        endpoint now just spawns the standalone script and returns
+        immediately; check the returned log_file or model_versions for new
+        rows to see when it's done.
+        """
+        import sys, os, subprocess
+        backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        script_path = os.path.join(backend_dir, "scripts", "train_models.py")
+        python_exe  = sys.executable
+        log_path    = os.path.join(backend_dir, "scripts", "train_models_log.txt")
 
-    @app.post("/admin/predict", tags=["Admin"])
+        with open(log_path, "w") as log_file:
+            proc = subprocess.Popen(
+                [python_exe, script_path],
+                cwd=backend_dir,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+        api_logger.info("Manual model training launched as separate process (pid=%d), log=%s", proc.pid, log_path)
+        return {"status": "started", "pid": proc.pid, "log_file": log_path}
+
+    @app.post("/admin/predict", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_predictions():
         """Run prediction pipeline using current trained models."""
         import sys, os
@@ -583,7 +687,7 @@ def create_app() -> FastAPI:
         api_logger.info("Manual prediction pipeline triggered.")
         return await asyncio.to_thread(run_prediction_pipeline)
 
-    @app.post("/admin/paper-trade", tags=["Admin"])
+    @app.post("/admin/paper-trade", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_paper_trade():
         """Run a full paper trading cycle using the best promoted strategy."""
         import sys, os, importlib
@@ -598,7 +702,7 @@ def create_app() -> FastAPI:
         api_logger.info("Manual paper trading cycle triggered.")
         return await asyncio.to_thread(run_paper_trading_cycle)
 
-    @app.post("/admin/paper-trade-strategy", tags=["Admin"])
+    @app.post("/admin/paper-trade-strategy", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_paper_trade_strategy(body: dict = None):
         """Run a paper trading cycle using a specific strategy ID.
 
@@ -619,7 +723,7 @@ def create_app() -> FastAPI:
         api_logger.info("Paper trading cycle triggered for strategy %s.", strategy_id)
         return await asyncio.to_thread(run_paper_trading_cycle, 1, strategy_id)
 
-    @app.post("/admin/paper-mtm", tags=["Admin"])
+    @app.post("/admin/paper-mtm", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_paper_mtm():
         """Intraday mark-to-market: check SL/TP/expiry on open positions, update NAV. No rebalance."""
         import sys, os
@@ -636,7 +740,7 @@ def create_app() -> FastAPI:
         api_logger.info("Intraday mark-to-market triggered.")
         return await asyncio.to_thread(_run_mtm)
 
-    @app.post("/admin/lifecycle", tags=["Admin"])
+    @app.post("/admin/lifecycle", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_lifecycle():
         """Run strategy lifecycle sweep: promote/retire based on fitness scores."""
         import sys, os
@@ -653,7 +757,7 @@ def create_app() -> FastAPI:
             return result
         return await asyncio.to_thread(_run_lc)
 
-    @app.post("/admin/retrain-loop", tags=["Admin"])
+    @app.post("/admin/retrain-loop", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_retrain_loop(force: bool = False):
         """
         Check paper trading win rate. If below 70%, auto-retrain ML models,
@@ -665,7 +769,7 @@ def create_app() -> FastAPI:
         api_logger.info("Retrain loop triggered (force=%s).", force)
         return await asyncio.to_thread(run_retrain_loop, force)
 
-    @app.post("/admin/learning", tags=["Admin"])
+    @app.post("/admin/learning", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_learning():
         """Manually trigger the daily learning loop."""
         import sys, os
@@ -676,7 +780,7 @@ def create_app() -> FastAPI:
         api_logger.info("Manual learning loop triggered.")
         return await asyncio.to_thread(run_daily_learning, 7)
 
-    @app.post("/admin/strategy-research", tags=["Admin"])
+    @app.post("/admin/strategy-research", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_strategy_research():
         """Manually trigger the full strategy research loop (all 8 steps)."""
         import sys, os
@@ -688,7 +792,7 @@ def create_app() -> FastAPI:
         import functools
         return await asyncio.to_thread(functools.partial(run_daily_strategy_research, generate_n=50, evolve_n=20))
 
-    @app.post("/admin/agent-pipeline", tags=["Admin"])
+    @app.post("/admin/agent-pipeline", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_agent_pipeline():
         """Manually trigger the full daily agent research pipeline."""
         import sys, os
@@ -708,7 +812,7 @@ def create_app() -> FastAPI:
                 db.close()
         return await asyncio.to_thread(_run_ap)
 
-    @app.post("/admin/vault", tags=["Admin"])
+    @app.post("/admin/vault", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_vault():
         """Manually trigger the full vault archival for today."""
         import sys, os
@@ -719,7 +823,7 @@ def create_app() -> FastAPI:
         api_logger.info("Manual vault archive triggered.")
         return await asyncio.to_thread(run_daily_vault)
 
-    @app.post("/admin/intelligence", tags=["Admin"])
+    @app.post("/admin/intelligence", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_intelligence_pipeline():
         """Manually trigger the full Historical Intelligence Training pipeline."""
         import asyncio, sys, os
@@ -729,7 +833,7 @@ def create_app() -> FastAPI:
         api_logger.info("Manual historical intelligence pipeline triggered.")
         return await asyncio.to_thread(run_historical_intelligence_pipeline)
 
-    @app.post("/admin/data-supremacy", tags=["Admin"])
+    @app.post("/admin/data-supremacy", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
     async def trigger_data_supremacy():
         """Manually trigger the full Phase 8 Data Supremacy pipeline."""
         import sys, os
@@ -739,6 +843,21 @@ def create_app() -> FastAPI:
         import asyncio
         api_logger.info("Manual data supremacy pipeline triggered.")
         return await asyncio.to_thread(run_data_supremacy_pipeline)
+
+    @app.post("/admin/obsidian-export", tags=["Admin"], dependencies=[Depends(_require_admin_token)])
+    async def trigger_obsidian_export(full: bool = False):
+        """
+        Manually trigger the Obsidian vault export.
+        full=true regenerates all history; default exports today + last 7 days touched.
+        No-op (returns {"skipped": "vault_path_unset"}) if settings.obsidian_vault_path is unset.
+        """
+        import sys, os
+        backend_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+        sys.path.insert(0, backend_dir)
+        from obsidian.vault_exporter import export_vault
+        import asyncio
+        api_logger.info("Manual Obsidian export triggered (full=%s).", full)
+        return await asyncio.to_thread(export_vault, full)
 
     @app.get("/health", tags=["Admin"])
     async def health():
