@@ -98,14 +98,17 @@ class BaseModel(ABC):
         y_train: pd.Series,
         X_val: Optional[pd.DataFrame] = None,
         y_val: Optional[pd.Series] = None,
+        sample_weight: Optional[np.ndarray] = None,
     ) -> "BaseModel":
         """
         Train the model.
         If X_val/y_val provided, uses early stopping.
+        sample_weight, if given, up/down-weights individual training rows
+        (e.g. failure-record-driven upweighting from model_retrainer.py).
         """
         self._feature_cols = list(X_train.columns)
         self._model = self._build_model()
-        self._fit_impl(X_train, y_train, X_val, y_val)
+        self._fit_impl(X_train, y_train, X_val, y_val, sample_weight=sample_weight)
         return self
 
     @abstractmethod
@@ -115,6 +118,7 @@ class BaseModel(ABC):
         y_train: pd.Series,
         X_val: Optional[pd.DataFrame],
         y_val: Optional[pd.Series],
+        sample_weight: Optional[np.ndarray] = None,
     ) -> None:
         """Model-specific training logic."""
         ...

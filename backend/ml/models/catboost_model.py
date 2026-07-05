@@ -63,6 +63,7 @@ class CatBoostModel(BaseModel):
         y_train: pd.Series,
         X_val: Optional[pd.DataFrame],
         y_val: Optional[pd.Series],
+        sample_weight: Optional[np.ndarray] = None,
     ) -> None:
         early_rounds = self.hyperparams.get("early_stopping_rounds", 50)
 
@@ -74,6 +75,8 @@ class CatBoostModel(BaseModel):
                 fit_kwargs["early_stopping_rounds"] = early_rounds
             except Exception:
                 fit_kwargs["eval_set"] = (X_val, y_val)
+        if sample_weight is not None:
+            fit_kwargs["sample_weight"] = sample_weight
 
         self._model.fit(X_train, y_train, **fit_kwargs)
         log.info(

@@ -93,7 +93,12 @@ def load_dynamic_weights(task: str, version: int = 1) -> dict[str, float]:
         primary = "auc_roc" if task == "direction" else "ic"
 
         with get_db() as db:
-            model_names = ["lightgbm", "xgboost", "catboost"]
+            # LightGBM/XGBoost were removed from the active ensemble 2026-06-27
+            # (sub-coin-flip accuracy) — the training loop only ever produces
+            # catboost/ngboost/aqrtinet versions now (model_retrainer.py), so
+            # computing weights for the retired two was always a no-op that
+            # produced misleading log output.
+            model_names = ["catboost", "ngboost", "aqrtinet"]
             scores = {}
             for model_name in model_names:
                 # Most recent test-fold metric

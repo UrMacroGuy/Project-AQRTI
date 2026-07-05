@@ -356,6 +356,7 @@ class AQRTINet(BaseModel):
         y_train: pd.Series,
         X_val: Optional[pd.DataFrame],
         y_val: Optional[pd.Series],
+        sample_weight: Optional[np.ndarray] = None,
     ) -> None:
 
         # ── Step 0: Add engineered interaction features ───────────────────
@@ -431,6 +432,17 @@ class AQRTINet(BaseModel):
             combined_weights = (combined_weights / cw_mean).astype(np.float32)
         else:
             combined_weights = np.ones(len(combined_weights), dtype=np.float32)
+
+        # Compose with an externally-supplied sample_weight (e.g. failure-
+        # record-driven upweighting from model_retrainer.py) rather than
+        # letting one silently override the other — multiply, then
+        # renormalize so mean=1 again for a stable effective learning rate.
+        if sample_weight is not None and len(sample_weight) == len(combined_weights):
+            combined_weights = combined_weights * np.asarray(sample_weight, dtype=np.float32)
+            cw_mean2 = combined_weights.mean()
+            if cw_mean2 > 0 and not np.isnan(cw_mean2):
+                combined_weights = (combined_weights / cw_mean2).astype(np.float32)
+
         log.info(
             "AQRTINet: combined weights — min=%.3f max=%.3f mean=%.3f (halflife=%dd, confident_thresh=%.1f%%)",
             combined_weights.min(), combined_weights.max(), combined_weights.mean(),

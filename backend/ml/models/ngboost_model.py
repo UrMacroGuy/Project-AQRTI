@@ -68,12 +68,15 @@ class NGBoostModel(BaseModel):
         y_train: pd.Series,
         X_val: Optional[pd.DataFrame],
         y_val: Optional[pd.Series],
+        sample_weight: Optional[np.ndarray] = None,
     ) -> None:
         fit_kwargs: dict = {}
         if X_val is not None and y_val is not None:
             fit_kwargs["X_val"] = X_val
             fit_kwargs["Y_val"] = y_val.values
             fit_kwargs["early_stopping_rounds"] = 50
+        if sample_weight is not None:
+            fit_kwargs["sample_weight"] = sample_weight
 
         self._model.fit(X_train, y_train.values, **fit_kwargs)
         best_iter = getattr(self._model, "best_val_loss_itr", None)

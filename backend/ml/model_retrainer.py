@@ -219,55 +219,79 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         if not trained_models:
             return {"status": "error", "reason": "all_model_training_failed"}
 
-        # Register the best model as new active version
+        # Activate every model that clears the quality bar (WIN_RATE_TARGET on
+        # accuracy), not just the single best one — EnsembleEngine is designed
+        # to combine multiple active models (see ensemble_engine.py), so
+        # winner-take-all here silently starved it down to whichever model
+        # happened to win the most recent retrain's accuracy comparison
+        # (found 2026-07-05: AQRTINet trained successfully but had been
+        # inactive since 2026-06-28 because CatBoost won that comparison).
+        # Always activate the single best model regardless of the bar, so a
+        # bad retrain across the board never leaves zero active models.
         best_model, best_metrics = max(
             trained_models,
             key=lambda x: x[1].get("accuracy", 0),
         )
+        to_activate = [
+            (m, metrics) for m, metrics in trained_models
+            if metrics.get("accuracy", 0) * 100 >= WIN_RATE_TARGET
+        ]
+        if best_model.model_type not in {m.model_type for m, _ in to_activate}:
+            to_activate.append((best_model, best_metrics))
 
-        # Save artifact first — only retire old models after this succeeds to avoid
-        # leaving the system with no active model if the save fails
-        artifact_path = best_model.save()
+        # Retire current active models for this task — only after every
+        # artifact below has saved successfully, so a save failure never
+        # leaves the system with no active model at all.
+        saved = []
+        for model, metrics in to_activate:
+            artifact_path = model.save()
+            saved.append((model, metrics, artifact_path))
 
-        # Retire current active models
-        current_active = db.query(ModelVersion).filter(ModelVersion.is_active == True).all()
+        current_active = db.query(ModelVersion).filter(
+            ModelVersion.task == "direction", ModelVersion.is_active == True
+        ).all()
         for m in current_active:
             m.is_active = False
 
-        # Register in DB — delete ALL records for this version (any model name) to avoid UNIQUE collision
         db.query(ModelVersion).filter(
             ModelVersion.task == "direction",
             ModelVersion.version == next_version,
         ).delete(synchronize_session=False)
         db.flush()
-        new_mv = ModelVersion(
-            model_name    = best_model.model_type,
-            task          = "direction",
-            label_col     = "direction_5d",
-            version       = next_version,
-            artifact_path = str(artifact_path),
-            primary_metric = best_metrics.get("accuracy"),
-            metrics_json  = json.dumps(best_metrics),
-            importance_json = json.dumps(best_model.feature_importance() if hasattr(best_model, "feature_importance") else {}),
-            train_rows    = len(X_train),
-            is_active     = True,
-            trained_at    = datetime.utcnow(),
-        )
-        db.add(new_mv)
+
+        for model, metrics, artifact_path in saved:
+            new_mv = ModelVersion(
+                model_name    = model.model_type,
+                task          = "direction",
+                label_col     = "direction_5d",
+                version       = next_version,
+                artifact_path = str(artifact_path),
+                primary_metric = metrics.get("accuracy"),
+                metrics_json  = json.dumps(metrics),
+                importance_json = json.dumps(model.feature_importance() if hasattr(model, "feature_importance") else {}),
+                train_rows    = len(X_train),
+                is_active     = True,
+                trained_at    = datetime.utcnow(),
+            )
+            db.add(new_mv)
 
         elapsed = round(time.time() - start, 1)
+        activated_names = [m.model_type for m, _, _ in saved]
         log.info(
-            "Retraining complete in %.1fs: model=%s v%d accuracy=%.3f",
-            elapsed, best_model.model_type, next_version, best_metrics.get("accuracy", 0),
+            "Retraining complete in %.1fs: activated=%s v%d (best=%s accuracy=%.3f)",
+            elapsed, activated_names, next_version, best_model.model_type, best_metrics.get("accuracy", 0),
         )
 
-        # win_rate on test set (% of correctly predicted directions)
+        # win_rate on test set (% of correctly predicted directions), for the
+        # best model — kept as the headline metric for backward compatibility
+        # with callers that read result["accuracy"]/["win_rate"].
         accuracy = best_metrics.get("accuracy", 0.0)
         win_rate_pct = round(accuracy * 100, 2)
 
         return {
             "status":      "ok",
             "model":       best_model.model_type,
+            "activated":   activated_names,
             "version":     next_version,
             "accuracy":    accuracy,
             "win_rate":    win_rate_pct,
