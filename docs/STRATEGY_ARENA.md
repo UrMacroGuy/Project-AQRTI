@@ -182,8 +182,8 @@ All backtests for strategy evaluation use the NSE cost model.
 
 | Setting | Value | Rationale |
 |---|---|---|
-| Backtest period | 3 years (1095 days) | Matches data available; enough for 60–100+ trades |
-| Universe | All active stocks with ≥50 price rows | DB-dynamic; auto-includes new stocks |
+| Backtest period | 5 years (1825 days) — widened from 3yr/1095 days as of the 2026-07-02 Trust Overhaul | Matches the full 5yr price history now available |
+| Universe | All active stocks with ≥50 price rows, restricted to symbols with average daily turnover ≥ ₹5cr (2026-07-02b) | DB-dynamic; excludes illiquid names that give fills a real order could never get |
 | Position size | 5% of portfolio per trade | Limits single-stock risk |
 | Max open trades | 8 concurrent | Limits total exposure to 40% |
 | Confidence gate | Per-strategy `min_confidence` (45–85%) | ML must agree before entry |
@@ -267,6 +267,12 @@ fitness = 0.28 × Profitability
 
 ## 7. Lifecycle Manager
 
+> ⚠️ **Gate constants live in `backend/strategies/promotion_config.py` — that
+> file is the single source of truth. If this document ever disagrees with
+> it, the config wins.** (This section was found out of sync with the code
+> during the 2026-07-05 docs review — see `IMPROVEMENTS.md` P1-7 — and has
+> been corrected below.)
+
 **File:** `backend/strategies/strategy_lifecycle.py`
 
 ### State Machine
@@ -277,7 +283,8 @@ candidate ──▶ shadow ──▶ promoted ──▶ [active]* ──▶ reti
                 └───────────────────────────────────────┘
                          (fitness drops below gate)
 
-* active requires human approval — AQRTI auto-stops at 'promoted'
+* active requires human approval AND a paper-trading quarantine period
+  (see Quarantine Gate below) — AQRTI never auto-promotes to 'active'.
 ```
 
 ### Promotion Gates (ALL must pass)
@@ -285,9 +292,12 @@ candidate ──▶ shadow ──▶ promoted ──▶ [active]* ──▶ reti
 | Gate | Threshold | Notes |
 |---|---|---|
 | `fitness_score` | ≥ 50.0 | Composite 0-100 score |
-| `trade_count` | ≥ 300 | Statistical significance |
-| `win_rate` | ≥ 52% | Must beat random with margin |
-| `sharpe` | ≥ 0.3 | Must show risk-adjusted edge |
+| `trade_count` | ≥ 60 | Was 300 (unreachable — empirical max ~430, average ~52 over the in-sample window) and briefly 10 (statistical noise) before settling at 60, which gives a ±6pp 95% CI on win-rate |
+| `win_rate` | ≥ 52% | Must beat coin-flip with margin |
+| `sharpe` | ≥ 0.5 | Honest daily mark-to-market Sharpe (post-2026-07 backtester fix) — NOT the old inflated per-trade-repeat scale; recalibrate against the population distribution after each full re-score |
+| OOS pass | required | Must pass a hard out-of-sample gate on a held-out, embargoed 6-month walk-forward window (`MIN_OOS_SHARPE=0.2`) — added 2026-07-02, this is what actually proves a strategy generalizes rather than curve-fits |
+| Benchmark gate | Sharpe ≥ 0.8× buy-and-hold NIFTY50 Sharpe (same window) | A strategy that can't beat "do nothing" isn't worth capital |
+| Duplicate gate | backtest-trade overlap with any already-promoted strategy ≤ 60% Jaccard on (symbol, entry_date) | Near-clones add concentration risk, not diversification |
 
 ### Retirement Triggers
 
@@ -295,8 +305,20 @@ candidate ──▶ shadow ──▶ promoted ──▶ [active]* ──▶ reti
 |---|---|
 | `fitness_score` | < 15.0 |
 | `win_rate` (promoted only) | < 52% |
+| `max_drawdown` | < −35% on the honest daily mark-to-market series (added 2026-07-03 — the previous limit was a hardcoded `-100.0`, effectively unreachable, meaning a strategy could carry a catastrophic real drawdown and never be retired for it as long as fitness/win-rate/Sharpe still looked fine) |
 
 Retired strategies are **never deleted** — they go to `StrategyGraveyard` with lessons extracted. The graveyard feeds the Meta-Learner.
+
+### Quarantine Gate on `promoted → active` (added 2026-07-02b)
+Even after clearing every promotion gate above, human approval to `active`
+status is **blocked** until the strategy has been sitting in `promoted`
+status for at least `QUARANTINE_MIN_DAYS=60` calendar days **and** has
+produced at least `QUARANTINE_MIN_TRADES=20` closed forward-paper (shadow)
+trades with a win rate ≥ `QUARANTINE_MIN_WIN_RATE=50%` and positive net P&L
+on those trades. This is forward performance on data that genuinely did not
+exist when the strategy was created — the one validation step that cannot
+be overfit by construction. `force=true` can override it on the `/activate`
+endpoint, but the override is logged.
 
 ### Live Performance Adjustment
 
@@ -327,8 +349,9 @@ After live adjustment:
 | `CROSSOVER_RATE` | 35% | 35% combine two parents |
 | `MIN_PARENT_FITNESS` | 40.0 | Only breed from fit strategies |
 | `MIN_PARENT_SHARPE` | 0.20 | Parent must show real edge |
-| `BACKTEST_DAYS` | 1095 | 3-year backtest per offspring |
+| `BACKTEST_DAYS` | 1825 (5yr, widened from 1095/3yr 2026-07-02 — must match the population re-backtest window or offspring get scored on different data than their parents) | 5-year backtest per offspring |
 | `offspring/cycle` | 30 | Raised from 20 post-universe expansion |
+| Bootstrap parent tier (2026-07-03) | if even the positive-Sharpe fallback yields 0 parents, breed from the best-fitness strategies that still clear the trade-count floor, regardless of Sharpe sign | Prevents evolution from stalling entirely right after an honest-metrics reset, when the ENTIRE population can legitimately have negative Sharpe — self-limiting, better tiers take over the moment a real positive-Sharpe strategy appears |
 
 ### Tournament Selection
 
@@ -557,6 +580,10 @@ New model must achieve ≥55% win_rate on test set before being promoted to acti
 
 ## 13. Key Constants Reference
 
+> ⚠️ **Gate constants live in `backend/strategies/promotion_config.py` — that
+> file is the single source of truth; if this doc disagrees, the config
+> wins.**
+
 ### Fitness Engine (`fitness_engine.py`)
 
 | Constant | Value | Description |
@@ -570,15 +597,20 @@ New model must achieve ≥55% win_rate on test set before being promoted to acti
 | `MIN_EXPECTANCY_NET` | 0.10% | Net per-trade expectancy floor |
 | `LIVE_BUFFER_PCT` | 0.05% | Additional live-vs-backtest variance buffer |
 
-### Lifecycle Manager (`strategy_lifecycle.py`)
+### Lifecycle Manager — gates live in `backend/strategies/promotion_config.py` (single source of truth)
 
 | Constant | Value |
 |---|---|
 | `PROMOTE_THRESHOLD` | 50.0 |
 | `RETIRE_THRESHOLD` | 15.0 |
-| `MIN_TRADES` | 300 |
+| `MAX_DRAWDOWN_LIMIT` | −35.0% (honest daily MTM drawdown; was an unreachable −100.0 before 2026-07-03) |
+| `MIN_BACKTEST_TRADES` | 60 (was 300, found unreachable) |
 | `MIN_WIN_RATE` | 52.0% |
-| `MIN_SHARPE` | 0.3 |
+| `MIN_SHARPE` | 0.5 (honest daily-series scale; was 0.3 on the old inflated scale) |
+| `REQUIRE_OOS_PASS` / `MIN_OOS_SHARPE` | True / 0.2 |
+| `BENCHMARK_SHARPE_FACTOR` | 0.8 (× buy-and-hold NIFTY50 Sharpe) |
+| `MAX_TRADE_OVERLAP` | 0.60 (Jaccard, duplicate gate) |
+| `QUARANTINE_MIN_DAYS` / `_MIN_TRADES` / `_MIN_WIN_RATE` | 60 days / 20 trades / 50.0% (promoted→active gate) |
 
 ### Evolution Engine (`evolution_engine.py`)
 
@@ -588,7 +620,7 @@ New model must achieve ≥55% win_rate on test set before being promoted to acti
 | `MUTATION_RATE` | 65% |
 | `MIN_PARENT_FITNESS` | 40.0 |
 | `MIN_PARENT_SHARPE` | 0.20 |
-| `BACKTEST_DAYS` | 1095 (3 years) |
+| `BACKTEST_DAYS` | 1825 (5 years, widened from 1095/3yr on 2026-07-02) |
 
 ### ML Retrainer (`model_retrainer.py`)
 
