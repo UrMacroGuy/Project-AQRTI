@@ -54,11 +54,11 @@ All 16 files in `plans/` are Version-1.0 aspirational design documents from the 
 
 ## P3 — Consistency & polish
 
-- [ ] **P3-1 — Universe-number consistency.** Docs variously claim 779 / 641 / 639 / 608 symbols while backtests run on 352 active symbols. Pick the convention (total tracked vs. active-with-features vs. backtest-eligible-liquid) and state it once in PROJECT_DIARY §4; other docs reference the definition, not a raw number.
-- [ ] **P3-2 — Stop hardcoding live stats in markdown.** Any doc that quotes population counts, fitness scores, or Intelligence Score must date-stamp them ("as of YYYY-MM-DD") or link to the dashboard. This review found five docs contradicting each other purely because each froze a different day's numbers.
-- [ ] **P3-3 — `aqrtinet/README.md` (public repo) accuracy check** against the v3.1 push — public-facing claims should match the shipped model.
-- [ ] **P3-4 — `docs/` vs `plans/` purpose statement.** Add a one-line README or note: `docs/` = current technical ground truth, `plans/` = historical design. New ground-truth docs go in `docs/` (or root, like the diary).
-- [ ] **P3-5 — UI DNA-viewer input** (`index.html:1315`, `:1758`) still says "Enter strategy ID…" — rename to "algo ID" for consistency with the `ee57c8f` UI rename.
+- [x] **P3-1 — Universe-number consistency.** (done 2026-07-05) Verified the precise current numbers directly (884 total tracked, 393 active, 352 backtest-eligible) and documented all three as a stated convention in `PROJECT_DIARY.md` §4, explaining which one to use for which question, rather than picking a single number to enforce everywhere.
+- [x] **P3-2 — Stop hardcoding live stats in markdown.** (done 2026-07-05) Verified: no un-dated hardcoded population/fitness/Intelligence-Score claims remain outside CHANGELOG/diary/IMPROVEMENTS (which correctly record dated historical facts) and the now-banner-labeled `plans/` docs. `docs/ROAD_TO_REAL.md` already dates its population claim correctly.
+- [x] **P3-3 — `aqrtinet/README.md` accuracy check.** (done 2026-07-05) Fixed the stale "7,600+ strategies" claim (pointed at the live dashboard instead). Added a version-note banner flagging that the doc describes an earlier architecture snapshot (5-fold stacking/42 features) vs the current v3.1 (7-fold/9 interaction features/252d half-life) — chose to flag the drift rather than rewrite the whole architecture section, since that's a bigger call about whether this public repo should track internal dev exactly.
+- [x] **P3-4 — `docs/` vs `plans/` purpose statement.** (done 2026-07-05) Added `docs/README.md`.
+- [x] **P3-5 — UI DNA-viewer input.** (done 2026-07-05) Fixed both the placeholder text and the empty-state hint text (line numbers had shifted since the original note due to the earlier UI rename pass, but both occurrences found via grep and fixed).
 
 ---
 
@@ -104,6 +104,27 @@ Whole-architecture review; these are structural, not cosmetic:
 - [ ] **ARCH-10 — Legacy dead tables.** `Trade`, `Mistake`, `Strategy` (v1), `ModelRecord`, `OptionsData` are superseded but still in the schema, inviting wrong queries (the Risk page once read empty `Trade`). Mark deprecated in `models.py` docstrings now; drop after confirming zero readers (grep) in a migration later.
 - [ ] **ARCH-11 — Electron desktop build is stale.** Installers were built 2026-06-22, before the Bloomberg redesign, algo rename, and every subsequent UI change. Either rebuild on a cadence/after UI milestones, or de-emphasize the desktop app in docs until rebuilt (README currently presents it as current).
 - [ ] **ARCH-12 — `FeatureValue` long-format scale.** 16.7M rows and growing ~150 rows per symbol-day; every dataset build pays a pivot. Not urgent (bulk upsert + shared cache already mitigate), but note the eventual path: wide per-(symbol,date) table or columnar sidecar (Parquet) for training reads, keeping SQLite as source of record. Decide only when training-build time actually hurts.
+
+---
+
+## P-GO — Money-readiness items (roadmap: `docs/ROAD_TO_REAL.md`)
+
+The gap between "working research platform" and "ready for real capital." Stage ordering, exit criteria, and full definitions live in the roadmap — read it before picking these up. **None of these may touch `promotion_config.py` gates.**
+
+- [ ] **GO-1 — Go/No-Go scorecard, live in the UI.** The 5 real-money preconditions (≥1 algo through all gates; quarantine complete; 30 days pipeline uptime; morning workflow rehearsed 2 weeks; ₹5,000 cap) rendered green/red from actual DB state. Real money only on all-green.
+- [ ] **GO-2 — Watchdog + auto-restart.** Backend as Windows Scheduled Task/NSSM service (on-boot + on-failure restart); watchdog pings `/health` every 15 min, restarts after 3 fails; restarts logged + shown in UI header.
+- [ ] **GO-3 — Silent-failure alarm.** 16:30 IST self-check: pipeline completed? prices ingested? shadow trades updated? Any "no" → GO-4 alert + red UI banner. (Motivated by the 2026-07-03e crash running undetected.)
+- [ ] **GO-4 — Alert channel outside the dashboard.** Telegram bot (preferred, free) or email: pipeline failure, circuit breaker, promotion, quarantine completion, drawdown < −15%.
+- [ ] **GO-5 — Population diagnosis report (do FIRST in the edge track).** One-time evidence-backed analysis of why all 927 algos fail (cost-dominated? regime-concentrated? weak feature pool? holding-period structure?) → written verdict directing GO-5b. No new families before this exists.
+- [ ] **GO-5b — Search-space upgrades per GO-5 verdict.** Candidates: 20-60-day-hold families (amortize NSE delivery costs), cross-sectional relative-strength entries, FII/DII + breadth features in the DSL pool.
+- [ ] **GO-5c — Evolution honesty audit.** Verify population-level selection can't overfit rotated OOS windows; test once against a never-touched held-out year.
+- [ ] **GO-6 — Paper-vs-real reconciliation.** From first real fill: auto-compare real price/costs/slippage vs backtester assumptions; if real costs exceed modeled by >20%, correct the cost model and regrade the population.
+- [ ] **GO-7 — Morning Decision Screen.** One page: today's actionable signals (algo, symbol, size ₹, SL/TP, why, live record) + regime/risk posture + explicit "NO ACTION TODAY" empty state + act/skip logging. Depends on ARCH-5 (split app.js first).
+- [ ] **GO-8 — Quarantine progress board.** Per promoted algo: day countdown, shadow trades, live WR vs 50% bar, net P&L — edge being proven, visibly.
+- [ ] **GO-9 — UI truth-and-polish pass.** Timestamp+source on every number (hover), verified empty/error states on all 14 pages, P3-5 rename leftovers, no stale-cache renders.
+- [ ] **GO-10 — Real-capital risk rails (documented process).** ₹5,000 start · one algo · ₹1,000/position cap · −10% real drawdown = halt + post-mortem + back to paper. Rendered on the decision screen.
+- [ ] **GO-11 — Monthly review ritual.** Auto-generated monthly report (UI + Obsidian note): live-vs-backtest per algo, cost reconciliation, lessons.
+- [ ] **GO-12 — Resolve the P1-5 confidence discrepancy.** `continuous_monitor.MIN_CONFIDENCE` is 60.0 in code; the 2026-06-27 changelog claimed default 50. Decide intended value, fix code or docs, one source of truth.
 
 ---
 

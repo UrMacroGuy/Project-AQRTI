@@ -1261,7 +1261,7 @@
             <span class="panel-tag" id="src-inspector-label">Click Trades button →</span>
           </div>
           <div class="panel-body" id="src-inspector-body" style="min-height:200px">
-            <div style="color:var(--text-muted);font-size:0.8rem;padding:1rem">Select a strategy from the leaderboard to view its backtest trades.</div>
+            <div style="color:var(--text-muted);font-size:0.8rem;padding:1rem">Select an algo from the leaderboard to view its backtest trades.</div>
           </div>
         </div>
       </div>
@@ -1285,13 +1285,13 @@
         <div class="panel-header">
           <span class="panel-title">◈ Algo DNA Viewer</span>
           <span class="panel-tag">How Was This Built?</span>
-          <input id="dna-search-input" type="text" placeholder="Enter strategy ID or click Inspect from leaderboard…"
+          <input id="dna-search-input" type="text" placeholder="Enter algo ID or click Inspect from leaderboard…"
             style="margin-left:auto;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:4px;padding:4px 10px;color:var(--text-primary);font-family:var(--font-mono);font-size:0.72rem;width:300px"
             onkeydown="if(event.key==='Enter')loadStrategyDna(this.value.trim())" />
           <button class="panel-action-btn" onclick="loadStrategyDna(document.getElementById('dna-search-input').value.trim())" style="margin-left:6px">Inspect</button>
         </div>
         <div id="dna-content" style="padding:1rem">
-          <div style="color:var(--text-muted);font-size:0.8rem">Enter a strategy ID above, or click <strong>DNA</strong> in the leaderboard to explore any strategy.</div>
+          <div style="color:var(--text-muted);font-size:0.8rem">Enter an algo ID above, or click <strong>DNA</strong> in the leaderboard to explore any algo.</div>
         </div>
       </div>
 

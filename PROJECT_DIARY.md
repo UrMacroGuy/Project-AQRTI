@@ -8,7 +8,7 @@
 
 **Companion document:** `DATABASE_AND_TRAINING.md` goes much deeper on the database schema and exactly how stored data becomes a trained model or a scored algo — read that alongside §6 and §12 of this file.
 
-Last synced with project state: **2026-07-05** (through CHANGELOG entry `2026-07-05c`, plus this session's own placeholder-data-purge work — see Timeline phase I below and the newest CHANGELOG entry).
+Last synced with project state: **2026-07-05** (through CHANGELOG entry `2026-07-05g` — placeholder-data purge, docs fixes, and the Obsidian vault exporter build + scheduler/API wiring — see Timeline phase I below).
 
 ---
 
@@ -148,12 +148,32 @@ api.js       → API Layer            apiFetch / apiPost → http://localhost:80
 4. Every prediction must be traceable back to the source data that produced it.
 5. Historical data is a competitive asset, not disposable cache.
 
-### Universe coverage (current)
-- **779 global symbols** total.
-- **309 Indian symbols**: 137 NSE (top NIFTY-50-class names) + 172 BSE (Sensex 30, PSU/private banks, insurance, new-age tech, defence, railways).
-- Plus US, UK, EU, Japan, Hong Kong, Korea, Australia, Canada coverage for cross-market features.
-- **5 years of price history** per symbol where available: 820,261+ rows, 2021-01-03 → 2026-06-26.
-- **Feature store**: 148 engineered features per symbol per day, ~18.5M+ feature rows total (this is the single largest table in the database).
+### Universe coverage — three different numbers, on purpose (verified 2026-07-05)
+Different docs have quoted 779 / 641 / 639 / 608 / 352 symbols at different
+times — this isn't drift, it's three genuinely different counts that answer
+different questions. **Use this convention going forward: always name which
+one you mean, don't just say "the universe."**
+
+1. **Total tracked** (`Stock` table row count) — every symbol AQRTI has ever
+   registered, active or not. Currently **884**. This is a ceiling, not a
+   claim that all of them have usable data.
+2. **Active** (`Stock.active == True`) — symbols the system is currently
+   trying to keep data flowing for. Currently **393**.
+3. **Backtest-eligible** (`get_backtest_universe()` in
+   `strategy_backtester.py` — has both price AND feature data, meets the
+   liquidity filter) — the ONLY number that matters for "how many symbols
+   can an algo actually be tested against right now." Currently **352**
+   (verified directly: `DailyPrice` and `FeatureValue` both cover exactly
+   352 distinct symbols as of 2026-07-05).
+
+The historical "779 global symbols · 309 Indian (137 NSE + 172 BSE)" figure
+below describes the *original* global-expansion target from 2026-06-26 —
+kept for historical continuity, but it is the "total tracked" flavor of the
+number, not the backtest-eligible one, and the two have diverged since.
+
+- **779 global symbols** (2026-06-26 expansion target) — **309 Indian**: 137 NSE (top NIFTY-50-class names) + 172 BSE (Sensex 30, PSU/private banks, insurance, new-age tech, defence, railways), plus US, UK, EU, Japan, Hong Kong, Korea, Australia, Canada coverage for cross-market features.
+- **5 years of price history** per symbol where available: 820,261+ rows as of 2026-06-26 (see §14 phase H for the 2026-07-03 feature-coverage fix that widened this further).
+- **Feature store**: 62 engineered features per symbol per day (verified via `feature_registry.py`'s catalog — the number has changed since the original 148-feature design, likely a scope difference between "features described in early design docs" and "features actually implemented," not a regression), 16.7M+ feature rows total as of 2026-07-03 (the single largest table in the database).
 
 ### The 7 conceptual data layers
 1. **Market data** — OHLCV, adjusted close, VWAP, delivery volume, trade count, market cap, 52-week hi/lo.
@@ -544,7 +564,7 @@ The SQLite database (`backend/aqrti.db`, several GB, WAL mode) has **93 tables**
 | **F. Self-Learning Loop Closed** | 2026-06-28 | AQRTINet v2 (stacking + Platt calibration); self-learning loop fully wired end-to-end; strategy generation cut 100→30/day for quality; fixed a drawdown-limit bug that was retiring every single strategy |
 | **G. Trust Overhaul** | 2026-07-01 – 07-02b | **The most consequential phase.** Discovered Sharpe/Sortino were fabricated system-wide (see below); rebuilt the backtester for honesty; added realism gates and forward-paper quarantine; found only ~12% of strategies have genuine positive Sharpe once measured honestly |
 | **H. Feature Coverage Fix, Arena Rigor, Index Futures** | 2026-07-03 | Found and fixed a live bug: feature generation was capped to a trailing 1200-day (3.3yr) window while price history covers 5yr, silently blocking thousands of DSL entries per strategy — widened to 2000 days and re-backfilled (16.7M+ feature rows). Added OOS + regime-robustness gates and `arena_status` isolation to the arena (§6). Added meta-learner shrinkage estimators so small-sample deaths/wins can't swing family weights at full strength. Shipped AQRTINet v3.1 (§5). Cleaned the strategy population (deleted 1,229 zero-trade strategies, reset 926 with real trade history to honestly re-earn scores) — produced the current honest baseline of **927 population / 0 promoted**: no strategy has yet proven a genuine edge under the fully-fixed pipeline, which is the correct and expected state, not a bug. Fixed a real crash (orphaned paper positions from the population cleanup poisoning the DB session on every close — see `strategies/live_validator.py`). Added the evolution bootstrap parent tier (§6) so evolution doesn't stall when literally every strategy in the population has negative Sharpe. Built the Index Futures segment foundation (§12) — separate asset class, isolated from the stock population end-to-end. |
-| **I. Docs Audit + Placeholder-Data Purge** | 2026-07-05 | Full documentation review produced `IMPROVEMENTS.md`, a prioritized backlog (P0 placeholder-data violations, P1 stale/wrong docs, P2 historical-doc labeling, P3 polish). Working that backlog found and fixed three real fabricated-data violations beyond the ones already catalogued: `backend/seed_missing_data.py` (deleted — had written invented earnings actuals and `random.uniform()` options data into the DB as if real), a matching pattern in `fii_dii_scraper.py`'s history-backfill (deleted — wrote randomized FII/DII crore flows indistinguishable from real scraped rows), and a hardcoded fake "Today's Alerts" panel on the Overview page (`index.html`, never wired to JS at all — now hydrated from the real research-findings API). Removed `MOCK_AGENT_DATA`/`MOCK_VAULT_DATA`/dead `USE_MOCK` plumbing from the UI. README/USER_GUIDE corrected to match current code (model stack, family/mutation-op/fitness-dimension counts, algo naming). |
+| **I. Docs Audit + Placeholder-Data Purge + Obsidian Exporter** | 2026-07-05 | Full documentation review produced `IMPROVEMENTS.md`, a prioritized backlog (P0 placeholder-data violations, P1 stale/wrong docs, P2 historical-doc labeling, P3 polish). Working that backlog found and fixed three real fabricated-data violations beyond the ones already catalogued: `backend/seed_missing_data.py` (deleted — had written invented earnings actuals and `random.uniform()` options data into the DB as if real), a matching pattern in `fii_dii_scraper.py`'s history-backfill (deleted — wrote randomized FII/DII crore flows indistinguishable from real scraped rows), and a hardcoded fake "Today's Alerts" panel on the Overview page (`index.html`, never wired to JS at all — now hydrated from the real research-findings API). Removed `MOCK_AGENT_DATA`/`MOCK_VAULT_DATA`/dead `USE_MOCK` plumbing from the UI. README/USER_GUIDE corrected to match current code (model stack, family/mutation-op/fitness-dimension counts, algo naming). Also planned and built the Obsidian vault integration (`docs/OBSIDIAN_INTEGRATION_PLAN.md`): OBS-1 built `backend/obsidian/` (`vault_exporter.py`, `renderers.py`, `vault_writer.py`) rendering Daily/Stock/Lesson/Home notes from the DB into a one-way, idempotent, ownership-checked markdown vault — verified against the live DB (1044 notes on first run, 100% unchanged on re-run). OBS-2 then wired it in: Step 13 added to the daily scheduler pipeline (`aqrti/data/scheduler.py`, failure-isolated like every other step) and `POST /admin/obsidian-export?full=true` added to the API, both verified live. Still untouched: Algo/Portfolio notes (OBS-3/4), and the exporter has never been pointed at the real `AQRTI Vault/` OneDrive folder (only scratch paths in testing). |
 
 ### The Trust Overhaul in detail (2026-07-01 to 2026-07-02b)
 
