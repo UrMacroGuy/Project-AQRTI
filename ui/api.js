@@ -5,7 +5,6 @@
  */
 
 const API_CONFIG = {
-  USE_MOCK: false,
   BASE:     'http://localhost:8000/api/v1',
   ADMIN:    'http://localhost:8000/admin',
   TIMEOUT:  10000,

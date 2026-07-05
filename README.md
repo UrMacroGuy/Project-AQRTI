@@ -6,7 +6,7 @@
 
 ## What is AQRTI?
 
-AQRTI is a full-stack intelligence terminal that acts like a team of analysts working around the clock. It reads live news, scores sentiment, trains ML models, discovers trading strategies through evolution, manages a paper portfolio, and summarises everything into a clean dashboard — all autonomously.
+AQRTI is a full-stack intelligence terminal that acts like a team of analysts working around the clock. It reads live news, scores sentiment, trains ML models, discovers trading algos through evolution, manages a paper portfolio, and summarises everything into a clean dashboard — all autonomously.
 
 It is **not** a trading bot with real money. It is a research and validation platform: everything runs on paper capital (₹1,00,000 virtual) so you can validate an edge before committing real funds.
 
@@ -16,7 +16,7 @@ It is **not** a trading bot with real money. It is a research and validation pla
 
 > Terminal runs as a desktop Electron app or in-browser via `npm run dev`.
 
-| Overview | Opportunity Rankings | Strategy Lab |
+| Overview | Opportunity Rankings | Algo Lab |
 |---|---|---|
 | Portfolio value, regime, top predictions | Ranked signals with confidence bars | Leaderboard, evolution tree, replay |
 
@@ -26,18 +26,24 @@ It is **not** a trading bot with real money. It is a research and validation pla
 
 ---
 
-## Current Stats (2026-07-03)
+## Current State
 
-| Metric | Value |
-|---|---|
-| Feature history coverage | 2021-08-10 → present, 5yr, matches full price history (previously capped at 3.3yr — fixed 2026-07-03) |
-| Strategy population | ~927 candidates re-earning honest scores + 1 promoted (post-cleanup) |
-| Promotion gates | Fitness, win-rate, Sharpe, OOS (held-out 6mo), benchmark vs NIFTY50, duplicate-overlap, max drawdown |
-| Arena | Champion grading now requires OOS pass + ≥30 trades + regime robustness, not just in-sample return |
-| Market regime | SIDEWAYS |
-| Agent pipeline | 7 agents · 100% success |
-| Stock universe | 779 global symbols · 309 Indian (137 NSE + 172 BSE) |
-| Strategy Arena | Autonomous self-learning loop — refines losing strategies daily under human-approval gate |
+AQRTI went through a **Trust Overhaul** in July 2026: the backtester, feature
+pipeline, arena, and promotion gates were rebuilt to eliminate several
+sources of inflated/dishonest metrics (lookahead bias, unrealistic costs,
+a truncated feature window, ungated arena promotion). The honest baseline
+this produced is intentionally strict — as of the overhaul, **no algo has
+yet re-proven an edge** under the fixed gates, and the population is
+rebuilding from scratch under real conditions.
+
+Live population size, promotion counts, fitness scores, and Intelligence
+Score change by the hour as evolution runs — this README does not
+hardcode them. **See the live dashboard (Overview + Algo Lab pages) for
+current numbers**, or `GET /overview` / `GET /strategies` via the API.
+
+Gate logic (fitness/win-rate/Sharpe/OOS/benchmark/duplicate-overlap/
+drawdown thresholds) lives in `backend/strategies/promotion_config.py` —
+that file is the single source of truth if any doc disagrees with it.
 
 ---
 
@@ -45,14 +51,14 @@ It is **not** a trading bot with real money. It is a research and validation pla
 
 | Feature | Description |
 |---|---|
-| **14-page Intelligence Terminal** | Full dashboard: Overview, Market, Opportunities, News, Sentiment, Strategy Lab, Model Center, Learning, Agents, Paper Trading, Risk, Vault, Intelligence Lab, Data Intelligence |
+| **14-page Intelligence Terminal** | Full dashboard: Overview, Market, Opportunities, News, Sentiment, Algo Lab, Model Center, Learning, Agents, Paper Trading, Risk, Vault, Intelligence Lab, Data Intelligence |
 | **Live Market Data** | NIFTY 50, BANKNIFTY, sector strength, top movers via yfinance |
-| **Global Universe** | 779 stocks: 309 Indian (137 NSE + 172 BSE), plus US, UK, EU, JP, HK, KR, AU, CA |
-| **ML Prediction Engine** | CatBoost + NGBoost ensemble — trained on 148 features across all active symbols |
-| **Strategy Evolution** | Genetic algorithm: 8 families, 11 mutation ops, 5-dimension fitness scoring, runs every 5 min |
-| **7 Research Agents** | Market, Pattern, Strategy, Model, News, Risk agents + CRO daily brief · all at 100% success |
-| **Paper Trading Engine** | Fully automated open/close positions based on best strategy + confidence threshold |
-| **Self-Learning System** | Tracks failures, extracts lessons, adapts confidence calibration, knowledge score 71.5 |
+| **Global Universe** | 779 stocks tracked: 309 Indian (137 NSE + 172 BSE), plus US, UK, EU, JP, HK, KR, AU, CA — see PROJECT_DIARY.md §4 for the tracked-vs-active-vs-backtest-eligible distinction |
+| **ML Prediction Engine** | CatBoost + NGBoost ensemble + AQRTINet v3.1 — trained on features across all active symbols |
+| **Strategy (Algo) Evolution** | Genetic algorithm: 11 families, 9 mutation ops, 6-dimension fitness scoring, runs every 5 min |
+| **7 Research Agents** | Market, Pattern, Algo, Model, News, Risk agents + CRO daily brief |
+| **Paper Trading Engine** | Fully automated open/close positions based on best algo + confidence threshold |
+| **Self-Learning System** | Tracks failures, extracts lessons, adapts confidence calibration — see dashboard for current knowledge score |
 | **Intelligence Vault** | Full date-replay: see exactly what AQRTI knew and held on any past date |
 | **Data Intelligence** | FII/DII flows, options PCR, market breadth, earnings calendar, corporate filings |
 | **Risk Engine** | VaR, Sharpe, drawdown history, sector exposure limits, circuit breakers |
@@ -72,13 +78,13 @@ Project AQRTI/
 ├── backend/
 │   ├── main.py             ← FastAPI app entry point + APScheduler jobs
 │   ├── aqrti/
-│   │   ├── api/routes/     ← 45+ REST API endpoints
+│   │   ├── api/routes/     ← REST API endpoints across 59 route files (see /docs for the full live list)
 │   │   ├── database/       ← SQLAlchemy models + SQLite engine
 │   │   └── data/           ← Market data fetchers, portfolio helpers
 │   ├── ml/                 ← Model training, feature engineering, walk-forward
 │   ├── intelligence_training/ ← Regime datasets, meta-learning, model memory
 │   ├── paper_trading/      ← Paper engine, execution, performance tracking
-│   ├── strategies/         ← Strategy evolution engine (genetic algorithm)
+│   ├── strategies/         ← Algo evolution engine (genetic algorithm)
 │   ├── learning/           ← Failure analysis, lessons, knowledge scoring
 │   ├── sentiment/          ← News NLP, sentiment scoring, velocity tracking
 │   ├── data_supremacy/     ← FII/DII, breadth, sector rotation, options
@@ -99,10 +105,9 @@ Project AQRTI/
 index.html   →  Structure Layer      (semantic HTML, all page sections)
 style.css    →  Presentation Layer   (CSS tokens — swap entire theme in :root {})
 app.js       →  Logic Layer
-               ├── DataStore         → Fallback mock data (mirrors API schemas)
                ├── ChartRegistry     → Owns all Chart.js instances, prevents canvas errors
                ├── Page Renderers    → One function per page, fully independent
-               ├── Hydration Layer   → Async live-data fetchers called on page visit
+               ├── Hydration Layer   → Async live-data fetchers called on page visit — no mock/fallback data; empty states render explicitly when the API has nothing
                └── Navigation        → Re-hydrates on every visit (no stale cache)
 api.js       →  API Layer            → apiFetch / apiPost → localhost:8000/api/v1
 ```
@@ -119,7 +124,7 @@ api.js       →  API Layer            → apiFetch / apiPost → localhost:8000
 | **Desktop** | Electron (AQRTI Setup.exe / AQRTI Portable.exe) |
 | **API** | Python FastAPI + Uvicorn |
 | **Database** | SQLite via SQLAlchemy ORM |
-| **ML Models** | CatBoost, LightGBM, XGBoost, scikit-learn |
+| **ML Models** | CatBoost, NGBoost, AQRTINet v3.1 (custom regime-mixture-of-experts), scikit-learn |
 | **Data** | yfinance, feedparser (RSS), httpx |
 | **Scheduler** | APScheduler (daily pipeline automation) |
 
@@ -170,7 +175,7 @@ All endpoints live under `http://localhost:8000/api/v1/`. Selected endpoints:
 | `GET /predictions` | Ranked prediction signals |
 | `GET /news` | Scored news articles |
 | `GET /sentiment` | Company + sector sentiment scores |
-| `GET /strategies` | Strategy leaderboard |
+| `GET /strategies` | Algo leaderboard |
 | `GET /models` | ML model registry |
 | `GET /risk` | VaR, drawdown, circuit breakers, positions |
 | `GET /paper-portfolio` | Paper trading state |
@@ -197,7 +202,7 @@ AQRTI runs a 12-step intelligence pipeline daily after market close:
 5. Build feature vectors
 6. Run ML predictions (ensemble)
 7. Execute paper trades
-8. Run strategy evolution (genetic algo)
+8. Run algo evolution (genetic algorithm)
 9. Score failures + extract lessons
 10. Update knowledge score
 11. Run research agents + generate daily brief
@@ -217,7 +222,7 @@ Trigger manually: `POST /admin/intelligence`
 | 3 | **Opportunity Rankings** | All predictions ranked by confidence + expected return |
 | 4 | **News Intelligence** | High-impact events, sentiment trend, full news feed |
 | 5 | **Sentiment Center** | Company + sector sentiment scores, velocity, fear/greed |
-| 6 | **Strategy Lab** | Leaderboard, evolution tree, regime affinity, graveyard, replay |
+| 6 | **Algo Lab** | Leaderboard, evolution tree, regime affinity, graveyard, replay |
 | 7 | **Model Center** | ML model registry, accuracy, calibration curve, walk-forward |
 | 8 | **Learning Center** | Knowledge score, failures, lessons, drift, feature intelligence |
 | 9 | **Research Ops** | 7 research agents, daily brief, agent health, pipeline status |
@@ -246,7 +251,7 @@ Trigger manually: `POST /admin/intelligence`
 |---|---|---|
 | Intelligence Score | 70+ | Below 60: predictions unreliable |
 | Model Direction Accuracy | 65%+ | Below 60%: use caution |
-| Paper Win Rate | 55%+ | Below 45%: strategy failing |
+| Paper Win Rate | 55%+ | Below 45%: algo failing |
 | Sharpe Ratio | 1.0+ | Below 0.5: poor risk-adjusted return |
 | Max Drawdown | < 10% | Above 15%: circuit breakers risk |
 | VIX | < 15 | Above 20: high fear, reduce exposure |
@@ -274,7 +279,7 @@ When triggered: status shows `TRIGGERED` on Risk Center and Overview.
 |---|---|
 | Market Research | Analyses macro conditions, breadth, regime |
 | Pattern Research | Finds recurring price patterns in NSE universe |
-| Strategy Research | Discovers and tests new trading strategies |
+| Algo Research | Discovers and tests new trading algos |
 | Model Research | Evaluates ML model performance and drift |
 | News Research | Reads and scores news for market impact |
 | Risk Research | Assesses portfolio concentration and tail risk |
@@ -287,14 +292,14 @@ When triggered: status shows `TRIGGERED` on Risk Center and Overview.
 | Term | Definition |
 |---|---|
 | **AUC** | Area Under Curve — model accuracy (0.5 = random, 1.0 = perfect) |
-| **Backtest** | Testing a strategy on historical data |
+| **Backtest** | Testing an algo on historical data |
 | **Circuit Breaker** | Auto-stop trading if loss exceeds threshold |
 | **Drawdown** | Drop from portfolio peak |
 | **ECE** | Expected Calibration Error — confidence vs actual accuracy gap |
 | **Equity Curve** | Portfolio value over time chart |
 | **FII/DII** | Foreign/Domestic Institutional Investors |
-| **Fitness Score** | AQRTI's combined strategy rating (returns + Sharpe + drawdown) |
-| **Graveyard** | Retired failed strategies — studied to prevent repeat mistakes |
+| **Fitness Score** | AQRTI's combined algo rating (returns + Sharpe + drawdown) |
+| **Graveyard** | Retired failed algos — studied to prevent repeat mistakes |
 | **P&L** | Profit & Loss |
 | **PCR** | Put-Call Ratio — >1.2 bearish, <0.8 bullish |
 | **Regime** | Market condition: BULL, BEAR, SIDEWAYS, VOLATILE, RECOVERY |
@@ -307,8 +312,8 @@ When triggered: status shows `TRIGGERED` on Risk Center and Overview.
 
 ## Disclaimer
 
-AQRTI is a research and paper-trading tool. It does not execute real trades or manage real money. Nothing in this system constitutes financial advice. Past performance of paper strategies does not guarantee future results.
+AQRTI is a research and paper-trading tool. It does not execute real trades or manage real money. Nothing in this system constitutes financial advice. Past performance of paper algos does not guarantee future results.
 
 ---
 
-*Built for the Indian market (NSE/BSE). Powered by FastAPI + SQLite + CatBoost/LightGBM/XGBoost + Chart.js.*
+*Built for the Indian market (NSE/BSE). Powered by FastAPI + SQLite + CatBoost/NGBoost/AQRTINet + Chart.js.*

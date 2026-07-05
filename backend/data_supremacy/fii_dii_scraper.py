@@ -14,7 +14,6 @@ if backend_dir not in sys.path:
 
 import json
 import time
-import random
 import logging
 from datetime import date, datetime, timedelta
 
@@ -161,9 +160,6 @@ def scrape_fii_dii(db: Session, target_date: date | None = None) -> dict:
 
     db.commit()
 
-    # Backfill synthetic history if DB has fewer than 5 days
-    _maybe_backfill_history(db)
-
     _update_rolling_signals(db)
     db.commit()
 
@@ -172,95 +168,6 @@ def scrape_fii_dii(db: Session, target_date: date | None = None) -> dict:
     db.commit()
 
     return {"status": "ok", "stored": stored, "skipped": skipped, "date": str(target)}
-
-
-def _maybe_backfill_history(db: Session, min_days: int = 5, backfill_days: int = 30) -> None:
-    """
-    If we have fewer than min_days of data, seed historical rows using
-    randomised-but-realistic values based on today's actual data.
-    This ensures the chart renders immediately on first scrape.
-    Synthetic rows are not overwritten once real rows arrive.
-    """
-    cutoff = date.today() - timedelta(days=backfill_days)
-    count = db.query(FIIDIIFlow).filter(FIIDIIFlow.flow_date >= cutoff).count()
-    if count >= min_days * 2:  # *2 because FII + DII
-        return
-
-    # Anchor to latest real values
-    latest_fii = (
-        db.query(FIIDIIFlow)
-        .filter(FIIDIIFlow.category == "FII")
-        .order_by(FIIDIIFlow.flow_date.desc())
-        .first()
-    )
-    latest_dii = (
-        db.query(FIIDIIFlow)
-        .filter(FIIDIIFlow.category == "DII")
-        .order_by(FIIDIIFlow.flow_date.desc())
-        .first()
-    )
-
-    # Use realistic market-scale anchors; clamp live data to plausible range
-    # NSE FII flows: gross ₹8000–25000 cr/day, net ±₹3000 cr typical range
-    raw_fii_net = latest_fii.net_investment if latest_fii else None
-    raw_dii_net = latest_dii.net_investment if latest_dii else None
-    raw_fii_buy = latest_fii.gross_buy if latest_fii else None
-    raw_dii_buy = latest_dii.gross_buy if latest_dii else None
-
-    # If scraped value looks like it came in lakhs (< 500), scale up to crores
-    def _scale_to_crore(v, threshold=500, scale=100):
-        if v is None:
-            return None
-        return v * scale if abs(v) < threshold else v
-
-    fii_anchor = _scale_to_crore(raw_fii_net) if raw_fii_net is not None else 800.0
-    dii_anchor = _scale_to_crore(raw_dii_net) if raw_dii_net is not None else 500.0
-    fii_volume = _scale_to_crore(raw_fii_buy, threshold=5000, scale=100) if raw_fii_buy is not None else 15000.0
-    dii_volume = _scale_to_crore(raw_dii_buy, threshold=5000, scale=100) if raw_dii_buy is not None else 14000.0
-
-    # Clamp to realistic bounds (₹200–5000 cr net, ₹5000–30000 cr gross)
-    fii_anchor = max(-5000.0, min(5000.0, fii_anchor)) if fii_anchor else 800.0
-    dii_anchor = max(-5000.0, min(5000.0, dii_anchor)) if dii_anchor else 500.0
-    fii_volume = max(5000.0, min(30000.0, fii_volume)) if fii_volume else 15000.0
-    dii_volume = max(5000.0, min(30000.0, dii_volume)) if dii_volume else 14000.0
-
-    random.seed(42)  # Deterministic so repeated calls produce the same rows
-
-    today = date.today()
-    for d_back in range(1, backfill_days + 1):
-        day = today - timedelta(days=d_back)
-        # Skip weekends
-        if day.weekday() >= 5:
-            continue
-
-        for category, anchor, vol in [
-            ("FII", fii_anchor, fii_volume or 15000),
-            ("DII", dii_anchor, dii_volume or 14000),
-        ]:
-            existing = db.query(FIIDIIFlow).filter(
-                FIIDIIFlow.flow_date == day,
-                FIIDIIFlow.category  == category,
-            ).first()
-            if existing:
-                continue
-
-            # Randomise around anchor with ±30% variance
-            net  = anchor * (1 + random.uniform(-0.30, 0.30))
-            buy  = vol   * (1 + random.uniform(-0.10, 0.10))
-            sell = buy - net
-
-            flow = FIIDIIFlow(
-                flow_date      = day,
-                category       = category,
-                gross_buy      = round(buy,  2),
-                gross_sell     = round(sell, 2),
-                net_investment = round(net,  2),
-                segment        = "equity",
-            )
-            db.add(flow)
-
-    db.commit()
-    logger.info("FII/DII: backfilled synthetic history for %d days", backfill_days)
 
 
 def _update_rolling_signals(db: Session, days_back: int = 30) -> None:

@@ -1,9 +1,9 @@
 /**
  * AQRTI Intelligence Terminal — app.js
- * Phase 1: Complete UI Shell with Realistic Mock Data
+ * UI shell hydrated entirely from the live backend API — no mock data.
  *
- * Architecture: Module pattern with a central DataStore,
- * page renderers, and a Chart registry to prevent canvas reuse errors.
+ * Architecture: page renderers plus a Chart registry to prevent canvas
+ * reuse errors.
  */
 
 // ═══════════════════════════════════════════════════════════════
@@ -1005,7 +1005,6 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
 // ═══════════════════════════════════════════════════════════════
 // LIVE DATA INTEGRATION
 // These functions hydrate rendered pages with real backend data.
-// They are no-ops when USE_MOCK = true (Api methods return null).
 // ═══════════════════════════════════════════════════════════════
 
 // ── News Intelligence — live hydration ───────────────────────
@@ -1285,7 +1284,6 @@ async function hydrateMarketRegime() {
 // (Extends api.js Api object — safe to call even if api.js already loaded)
 if (typeof Api !== 'undefined' && !Api.marketRegime) {
   Api.marketRegime = async function() {
-    if (API_CONFIG.USE_MOCK) return null;
     return apiFetch('/market-regime');
   };
 }
@@ -1655,49 +1653,41 @@ async function hydrateOverviewPredictions() {
 if (typeof Api !== 'undefined') {
   if (!Api.predictions) {
     Api.predictions = async function(params = {}) {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/predictions', params);
     };
   }
   if (!Api.predictionSummary) {
     Api.predictionSummary = async function() {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/predictions/summary');
     };
   }
   if (!Api.todaySignals) {
     Api.todaySignals = async function() {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/predictions/today');
     };
   }
   if (!Api.modelHealth) {
     Api.modelHealth = async function() {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/predictions/model-health');
     };
   }
   if (!Api.models) {
     Api.models = async function(params = {}) {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/models', params);
     };
   }
   if (!Api.modelStats) {
     Api.modelStats = async function() {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/models/stats');
     };
   }
   if (!Api.confidence) {
     Api.confidence = async function(params = {}) {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/confidence', params);
     };
   }
   if (!Api.patterns) {
     Api.patterns = async function(params = {}) {
-      if (API_CONFIG.USE_MOCK) return null;
       return apiFetch('/patterns', params);
     };
   }
@@ -2816,41 +2806,6 @@ async function loadTradeRecommendations() {
 // RESEARCH OPERATIONS CENTER — Phase 7
 // ═══════════════════════════════════════════════════════════════
 
-const MOCK_AGENT_DATA = {
-  agents: [
-    { agent_id: 'market_research',   name: 'Market Research Agent',   agent_type: 'market',   status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
-    { agent_id: 'news_research',     name: 'News Research Agent',     agent_type: 'news',     status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 1 },
-    { agent_id: 'pattern_research',  name: 'Pattern Research Agent',  agent_type: 'pattern',  status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
-    { agent_id: 'model_research',    name: 'Model Research Agent',    agent_type: 'model',    status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
-    { agent_id: 'strategy_research', name: 'Algo Research Agent', agent_type: 'strategy', status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
-    { agent_id: 'risk_research',     name: 'Risk Research Agent',     agent_type: 'risk',     status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
-    { agent_id: 'cro',               name: 'Chief Research Officer',  agent_type: 'cro',      status: 'idle',    last_run_at: new Date(Date.now()-3600000).toISOString(), last_run_status: 'success', run_count: 14, error_count: 0 },
-  ],
-  findings: [
-    { agent_id: 'market_research',   urgency: 'high',   title: 'Regime Change: SIDEWAYS → BULL',        implication: 'Review strategy allocations.', date: new Date().toISOString().split('T')[0] },
-    { agent_id: 'risk_research',     urgency: 'high',   title: 'Sector Concentration: BANKING 48%',     implication: 'Diversify sector exposure.',   date: new Date().toISOString().split('T')[0] },
-    { agent_id: 'model_research',    urgency: 'normal', title: 'Model Drift: LightGBM drift=12.4%',     implication: 'Request retraining approval.',  date: new Date().toISOString().split('T')[0] },
-    { agent_id: 'strategy_research', urgency: 'normal', title: 'Leading Family: momentum (avg 71.3)',   implication: 'Prioritize in next evolution.',  date: new Date().toISOString().split('T')[0] },
-    { agent_id: 'news_research',     urgency: 'normal', title: 'Sentiment Shift: improving (+18.2)',    implication: 'Sentiment-driven signals positive.', date: new Date().toISOString().split('T')[0] },
-  ],
-  brief: {
-    brief_date: new Date().toISOString().split('T')[0],
-    regime_at: 'BULL',
-    knowledge_score: 67.4,
-    market_summary: 'BULL regime (conf=88%). Regime shifted from SIDEWAYS. Sector rotation into BANKING and IT.',
-    top_opportunities: ['momentum: MOM_GEN3_001 fitness=84.2', 'Sector leader: BANKING avg_sent=72'],
-    major_risks: ['[HIGH] risk_research: Sector Concentration: BANKING 48%', '[HIGH] market_research: Regime Change detected'],
-    model_insights: ['LightGBM showing 12.4% drift — retraining recommended', 'Calibration quality: 58/100'],
-    strategy_insights: ['86 strategies in population. Avg fitness 51.3', '2 resurrection candidates in BULL regime'],
-    action_items: ['🔴 URGENT: Sector Concentration requires human review', '🟡 REVIEW: Model drift LightGBM'],
-  },
-  messages: [
-    { from_agent: 'market_research', to_agent: 'cro',     message_type: 'finding', subject: 'Regime change detected', body: 'Market shifted SIDEWAYS→BULL.', priority: 2, created_at: new Date().toISOString() },
-    { from_agent: 'risk_research',   to_agent: 'all',      message_type: 'alert',   subject: 'Sector concentration alert', body: 'BANKING at 48%.', priority: 2, created_at: new Date().toISOString() },
-    { from_agent: 'cro',             to_agent: 'all',      message_type: 'broadcast', subject: 'Daily brief issued', body: '2 critical, 3 high findings.', priority: 3, created_at: new Date().toISOString() },
-  ],
-};
-
 async function hydrateResearchOps() {
   const el = id => document.getElementById(id);
   const _set = (id, v) => { const e = el(id); if (e) e.textContent = v; };
@@ -2861,13 +2816,9 @@ async function hydrateResearchOps() {
   let msgData      = await Api.agentMessages(2);
   let perfData     = await Api.agentPerformance(30);
 
-  const useMock = !agentData;
-  if (useMock) {
-    agentData    = { agents: MOCK_AGENT_DATA.agents };
-    briefData    = MOCK_AGENT_DATA.brief;
-    findingsData = { total: 5, critical: [], high: MOCK_AGENT_DATA.findings.filter(f => f.urgency === 'high'), by_urgency: { high: 2, normal: 3 } };
-    msgData      = { messages: MOCK_AGENT_DATA.messages };
-    perfData     = MOCK_AGENT_DATA.agents.map(a => ({ agent_id: a.agent_id, total_tasks: a.run_count, completed: a.run_count - a.error_count, failed: a.error_count, success_rate: 100 - (a.error_count / a.run_count * 100) }));
+  if (!agentData) {
+    agentData = { agents: [] };
+    _set('roc-kpi-agent-status', 'BACKEND OFFLINE');
   }
 
   // ── KPIs ──────────────────────────────────────────────────────
@@ -2946,8 +2897,7 @@ async function hydrateResearchOps() {
   const findingsBody = el('roc-findings-body');
   if (findingsBody) {
     const allFindings = [...(findingsData?.critical || []), ...(findingsData?.high || [])];
-    const mockFindings = useMock ? MOCK_AGENT_DATA.findings : [];
-    const displayFindings = allFindings.length ? allFindings : mockFindings;
+    const displayFindings = allFindings;
     const URGENCY_CLASS = { critical: 'negative', high: 'negative', normal: 'neutral', low: '' };
     findingsBody.innerHTML = displayFindings.slice(0, 15).map(f => `<tr>
       <td><span class="chip">${f.agent_id?.replace('_research','') || '—'}</span></td>
@@ -3160,36 +3110,6 @@ function startNewsFeedAutoRefresh() {
 // HISTORICAL INTELLIGENCE VAULT — Phase 7.5
 // ═══════════════════════════════════════════════════════════════
 
-const MOCK_VAULT_DATA = {
-  summary: {
-    market_snapshots: 45, prediction_records: 2340, portfolio_records: 45,
-    strategy_records: 1820, knowledge_records: 45, research_records: 312,
-    oldest_snapshot: '2026-05-09', newest_snapshot: new Date().toISOString().split('T')[0],
-  },
-  snapshots: Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (13 - i));
-    return { snapshot_date: d.toISOString().split('T')[0], regime: i % 7 < 4 ? 'BULL' : 'SIDEWAYS',
-      nifty_close: 24000 + i * 30, nifty_return_1d: (i % 3 - 1) * 0.6,
-      market_sentiment: 55 + i * 1.2, knowledge_score: 57 + i * 0.5 };
-  }),
-  knowledge: Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (13 - i));
-    return { archive_date: d.toISOString().split('T')[0], knowledge_score: 57 + i * 0.5 };
-  }),
-  portfolio: Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (13 - i));
-    return { archive_date: d.toISOString().split('T')[0], total_value: 100000 + i * 250, total_pnl: i * 250 };
-  }),
-  research: [
-    { archive_date: new Date().toISOString().split('T')[0], archive_type: 'brief',   agent_id: null,             title: 'Daily Brief — BULL',            urgency: null   },
-    { archive_date: new Date().toISOString().split('T')[0], archive_type: 'finding', agent_id: 'risk_research',  title: 'Sector Concentration: 48%',     urgency: 'high' },
-    { archive_date: new Date().toISOString().split('T')[0], archive_type: 'finding', agent_id: 'market_research',title: 'Regime shift detected',          urgency: 'high' },
-  ],
-  backups: [
-    { backup_timestamp: '20260623_153000', backup_size_bytes: 2048000, vault_counts: { market_snapshots: 45, prediction_archive: 2340 } },
-  ],
-};
-
 async function hydrateVault() {
   const _set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
 
@@ -3202,12 +3122,12 @@ async function hydrateVault() {
   let briefData  = await Api.vaultBriefs();
 
   if (!summary) {
-    summary    = MOCK_VAULT_DATA.summary;
-    snapData   = { snapshots: MOCK_VAULT_DATA.snapshots };
-    knowData   = { records: MOCK_VAULT_DATA.knowledge };
-    portData   = { records: MOCK_VAULT_DATA.portfolio };
-    resData    = { records: MOCK_VAULT_DATA.research };
-    backupData = { backups: MOCK_VAULT_DATA.backups };
+    summary    = {};
+    snapData   = { snapshots: [] };
+    knowData   = { records: [] };
+    portData   = { records: [] };
+    resData    = { records: [] };
+    backupData = { backups: [] };
     briefData  = { briefs: [] };
   }
 
@@ -4046,8 +3966,30 @@ async function hydrateLearnCenter() {
 }
 
 // ── Overview — full live hydration ───────────────────────────
+async function hydrateOverviewAlerts() {
+  const body = el('alerts-body');
+  if (!body) return;
+  const data = await Api.findingsSummary(3);
+  const items = [...(data?.critical || []), ...(data?.high || [])].slice(0, 6);
+  const ICONS = { critical: '▲', high: '◎', normal: '◆', low: '◇' };
+  const CLASS = { critical: 'critical', high: 'warning' };
+  if (!items.length) {
+    body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:12px 0">No alerts today</div>';
+    return;
+  }
+  body.innerHTML = items.map(f => `
+    <div class="alert-item ${CLASS[f.urgency] || 'info'}">
+      <div class="alert-icon">${ICONS[f.urgency] || '◆'}</div>
+      <div class="alert-content">
+        <div class="alert-title">${f.title || '—'}</div>
+        <div class="alert-sub">${f.implication || f.description || ''}</div>
+      </div>
+    </div>`).join('');
+}
+
 async function hydrateOverview() {
   const [ov, curve] = await Promise.all([Api.overview(), Api.equityCurve(30)]);
+  hydrateOverviewAlerts();
   if (!ov) return;
 
   const _set = (id, val) => { const e = el(id); if (e) e.textContent = val; };
