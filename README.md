@@ -13,7 +13,7 @@
 [![Promoted Algos](https://img.shields.io/badge/promoted%20algos-0%2F927%20(honestly)-critical.svg)](#the-honesty-gate)
 [![No Real Money](https://img.shields.io/badge/real%20money%20traded-%E2%82%B90-lightgrey.svg)](#what-it-is)
 
-**[The pitch](#the-pitch)** · **[See it running](#see-it-running)** · **[Proof, not promises](#proof-not-promises)** · **[How it's built](#how-its-built)** · **[Run it yourself](#run-it-yourself)**
+**[The pitch](#the-pitch)** · **[Proof, not promises](#proof-not-promises)** · **[How it's built](#how-its-built)** · **[Run it yourself](#run-it-yourself)**
 
 </div>
 
@@ -26,22 +26,6 @@ Every night after the NSE closes, AQRTI wakes up alone and does the work of a sm
 It was built on one rule that overrides everything else: **it is never allowed to look good by accident.** No mocked data, no cherry-picked backtests, no metric that's secretly cheating. If it has nothing real to show, it says `NO DATA` instead of making something up.
 
 That rule is the whole point. Anyone can build a backtest that shows a 90% win rate — that's a bug, not a feature. AQRTI is the harder, less flattering project: a system that tells you the truth about whether it actually has an edge, even when the truth is **currently, 0 out of 927 trading algorithms have earned the right to go live.**
-
----
-
-## See It Running
-
-<div align="center">
-
-*Dashboard screenshots go here — Overview, Algo Lab leaderboard, and Model Center calibration curve, captured from a live run.*
-
-`[ screenshot: Overview page — portfolio, regime, top predictions ]`
-`[ screenshot: Algo Lab — leaderboard + evolution tree ]`
-`[ screenshot: Model Center — walk-forward accuracy + calibration curve ]`
-
-</div>
-
-> These are placeholders on purpose, not filler. Consistent with the honesty rule above, a screenshot only goes in this README once it's captured from a real run showing real numbers — see [Proof, Not Promises](#proof-not-promises) for why that standard matters more here than in most projects.
 
 ---
 
