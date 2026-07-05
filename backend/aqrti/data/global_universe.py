@@ -1045,30 +1045,51 @@ def ticker_to_symbol(ticker: str) -> str:
 
 
 def seed_global_universe(db: Session) -> dict:
-    """Upsert all GLOBAL_UNIVERSE entries into Stock table."""
+    """
+    Upsert all GLOBAL_UNIVERSE entries into Stock table.
+
+    GLOBAL_UNIVERSE has some duplicate underlying-company entries under
+    different exchange-suffixed keys (e.g. "DELHIVERY.NS" and
+    "DELHIVERY.BO" both collapse to symbol="DELHIVERY" via
+    ticker_to_symbol) -- track symbols added within this same call so the
+    second one updates in-memory instead of hitting the DB's UNIQUE
+    constraint before the first insert has even committed (found 2026-07-05:
+    this crashed the whole seed on every run once GLOBAL_UNIVERSE grew to
+    include cross-listed tickers).
+    """
     added = 0
     updated = 0
+    seen_this_call: dict[str, Stock] = {}
     for ticker, meta in GLOBAL_UNIVERSE.items():
         symbol   = ticker_to_symbol(ticker)
         exchange = meta.get("exchange", "")
         region   = meta.get("region", "")
         industry = f"{meta['industry']} [{exchange}/{region}]"
+
+        if symbol in seen_this_call:
+            # Duplicate underlying company under a different exchange suffix
+            # — keep the first entry as-is, don't insert/update again.
+            continue
+
         existing = db.query(Stock).filter_by(symbol=symbol).first()
         if existing:
             existing.name     = meta["name"]
             existing.sector   = meta["sector"]
             existing.industry = industry
             existing.active   = True
+            seen_this_call[symbol] = existing
             updated += 1
         else:
-            db.add(Stock(
+            new_stock = Stock(
                 symbol       = symbol,
                 name         = meta["name"],
                 sector       = meta["sector"],
                 industry     = industry,
                 nifty_member = (meta.get("exchange") == "NSE"),
                 active       = True,
-            ))
+            )
+            db.add(new_stock)
+            seen_this_call[symbol] = new_stock
             added += 1
     db.commit()
     data_logger.info("Global universe seeded: %d added, %d updated", added, updated)

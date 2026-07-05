@@ -63,7 +63,7 @@ class Settings(BaseSettings):
             "DABUR.NS,MARICO.NS,COLPAL.NS,GODREJCP.NS,EMAMILTD.NS,TATACONSUM.NS,"
             "VEDL.NS,NATIONALUM.NS,SAIL.NS,HINDCOPPER.NS,"
             "IOC.NS,GAIL.NS,ADANIPOWER.NS,ADANIGREEN.NS,"
-            "DMART.NS,NYKAA.NS,ZOMATO.NS,PAYTM.NS,POLICYBZR.NS,"
+            "DMART.NS,NYKAA.NS,ETERNAL.NS,PAYTM.NS,POLICYBZR.NS,"
             "IRCTC.NS,INDHOTEL.NS,"
             "HAL.NS,BHEL.NS,SIEMENS.NS,ABB.NS,AIAENG.NS,GRINDWELL.NS,"
             "PIIND.NS,UPL.NS,SRF.NS,AARTIIND.NS,DEEPAKNTR.NS,NAVINFLUOR.NS,"
@@ -94,6 +94,18 @@ class Settings(BaseSettings):
     max_sector_pct: float = Field(default=25.0)
     max_portfolio_exposure: float = Field(default=80.0)
     min_confidence: float = Field(default=60.0)
+
+    # ── Obsidian Vault Export ──────────────────────────────────────
+    # Absolute path to the Obsidian vault folder. Export is disabled
+    # entirely when unset (no-placeholder rule: no vault, no writes).
+    obsidian_vault_path: str = Field(default="")
+
+    # ── GO-4: Telegram Alerts ─────────────────────────────────────
+    # Set AQRTI_TELEGRAM_BOT_TOKEN and AQRTI_TELEGRAM_CHAT_ID in .env
+    # to enable out-of-dashboard alerts. Alerts are silently skipped
+    # when either is unset — no crash, no fake messages.
+    telegram_bot_token: str = Field(default="")
+    telegram_chat_id: str = Field(default="")
 
 
 _settings: Settings | None = None
