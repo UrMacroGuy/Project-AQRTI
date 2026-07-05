@@ -1,70 +1,77 @@
 """
-AQRTINet v3.1 — Custom ML Model for NSE/BSE Stock Direction Prediction
+AQRTINet v4.1 — Custom ML Model for NSE/BSE Stock Direction Prediction
 
-Eleven innovations over off-the-shelf gradient boosters.
-v3.1 adds three improvements calibrated for the expanded 5-year feature dataset
-(15.8M rows, 639 symbols, 2021-2026):
+Thirteen innovations over off-the-shelf gradient boosters.
 
-  v3 INNOVATIONS (retained):
-  1. ASYMMETRIC TRADING LOSS
-     class_weight={0: 2.0, 1: 1.0} penalises false positives 2× harder.
+  CORE INNOVATIONS (v3/v3.1, retained):
+  1.  ASYMMETRIC TRADING LOSS — class_weight={0: 1.5, 1: 1.0}
+      Softened from 2.0 (2026-07-06): the 2.0 weight suppressed recall to 12.6%
+      in benchmarking while AUC-ROC was competitive (0.645 vs CatBoost 0.634).
+      1.5 keeps precision bias without muting positive calls.
 
-  2. REGIME-AWARE MIXTURE OF EXPERTS
-     One HistGBT specialist per market regime (BULL / BEAR / SIDEWAYS / VOLATILE)
-     with regime-tuned hyperparameters.
+  2.  REGIME-AWARE MIXTURE OF EXPERTS
+      One HistGBT specialist per market regime (BULL / BEAR / SIDEWAYS / VOLATILE)
+      with regime-tuned hyperparameters.
 
-  3. CROSS-SECTIONAL PERCENTILE RANKING
-     All features → [0,1] rank in training distribution. Scale-invariant.
+  3.  CROSS-SECTIONAL PERCENTILE RANKING
+      All features → [0,1] rank in training distribution. Scale-invariant.
 
-  4. META-LEARNING / STACKING
-     OOF predictions from CatBoost and NGBoost as extra meta-features.
+  4.  META-LEARNING / STACKING
+      7-fold OOF predictions from CatBoost and NGBoost as extra meta-features.
 
-  5. PLATT PROBABILITY CALIBRATION
-     OOF logistic regression converts raw GBT scores to calibrated P(UP).
+  5.  PLATT PROBABILITY CALIBRATION
+      5-fold OOF logistic regression converts raw GBT scores to calibrated P(UP).
 
-  6. ENGINEERED INTERACTION FEATURES
-     9 domain-specific feature crosses (was 6 in v3):
-     - momentum_x_trend    momentum_10d × adx_14
-     - rsi_x_vol           rsi_14 × rolling_vol_21d
-     - volume_x_momentum   volume_spike × momentum_10d
-     - breadth_x_beta      breadth_pct_above_ema50 × beta_21d
-     - sector_x_nifty      sector_return_5d × nifty_return_5d
-     - support_x_rsi       support_distance_20d × rsi_14
-     - [NEW v3.1] rsi_x_momentum     rsi_14 × momentum_5d
-     - [NEW v3.1] vol_x_breakout     vol_expansion × breakout_distance_52w
-     - [NEW v3.1] trend_x_price      adx_14 × price_vs_ema21_pct
+  6.  ENGINEERED INTERACTION FEATURES (9 domain-specific crosses)
+      - momentum_x_trend, rsi_x_vol, volume_x_momentum, breadth_x_beta,
+        sector_x_nifty, support_x_rsi, rsi_x_momentum, vol_x_breakout,
+        trend_x_price
 
-  7. TEMPORAL DECAY WEIGHTING
-     Exponential decay, half-life now 252d (1 trading year) calibrated for 5yr
-     dataset. v3 used 180d — too aggressive when 3+ years of history are available.
+  7.  TEMPORAL DECAY WEIGHTING — half-life 252d (1 trading year)
 
-  8. REGIME-SPECIFIC FEATURE SELECTION
-     Top-30 IC features per regime with domain-knowledge seed boosting.
+  8.  REGIME-SPECIFIC FEATURE SELECTION
+      Top-30 IC features per regime with domain-knowledge seed boosting.
 
-  v3.1 NEW INNOVATIONS:
-  9. CONFIDENT-LABEL FILTERING
-     Rows where |5d return| < 0.5% are ambiguous direction signals (noise > signal).
-     These are down-weighted 0.3× in training rather than dropped (preserve sample
-     size), so near-zero returns don't teach the model noise patterns.
+  9.  CONFIDENT-LABEL FILTERING
+      Rows where |5d return| < 0.5% down-weighted 0.3× (ambiguous direction).
 
-  10. 7-FOLD STACKING (was 5-fold)
-      With 15.8M feature rows and 639 symbols across 5yr, 7-fold OOF produces
-      meta-features with lower variance than 5-fold, giving the meta-learner
-      cleaner signals to learn from.
+  10. 7-FOLD STACKING OOF (lower-variance meta-features)
 
-  11. 5-FOLD PLATT CALIBRATION (was 3-fold)
-      More calibration folds = better-estimated sigmoid, especially for the
-      BULL expert which has the most data.
+  11. 5-FOLD PLATT CALIBRATION (tighter sigmoid fit)
+
+  v4.0 IMPROVEMENTS (SOTA upgrades, 2026-07-03):
+  12. P0-A FEATURE NEUTRALIZATION — OLS residuals vs beta_21d + sector_return_5d
+      P0-B TRIPLE-BARRIER LABELS — ATR14-dynamic TP/SL
+      P0-C ERA-BOOSTED TRAINING — 60-day eras, bottom-quartile upweighted 3× × 2 rounds
+      P0-D ROLLING IC RETRAIN TRIGGER — IC < 0.01 for 3 days → emergency retrain
+      P1-A FII/DII FLOW FEATURES — 6 institutional flow features
+      P1-B SPLIT-CONFORMAL PREDICTION INTERVALS — guaranteed marginal coverage
+      P1-D ADVERSARIAL AUGMENTATION — 2× training data with Gaussian noise σ=0.05×std
+      P1-E PURGED EMBARGO CV — 5-day label-window purge between folds
+      P2-A SECTOR PEER-MEAN PROPAGATION — O(n) sector-group feature averages
+
+  v4.1 IMPROVEMENTS (threshold calibration pass, 2026-07-06):
+  13. PER-REGIME F1-OPTIMAL DECISION THRESHOLD
+      Decision boundary chosen by sweeping thresholds on OOF probabilities and
+      picking the one that maximises F1 on held-out fold data, per regime.
+      Stored in the saved pkl (`regime_thresholds`) and applied in predict().
+      Root cause of the 12.6% recall result: the raw 0.5 cutoff was never
+      calibrated for the model's actual probability distribution.
 
 Architecture:
-    AQRTINet v3.1
-    ├── InteractionFeatureBuilder (9 engineered crosses, up from 6)
-    ├── PercentileRanker (45 original + 9 interaction + 2 meta = 56 features)
-    ├── ConfidentLabelWeighter (down-weight |return_5d| < 0.5% rows × 0.3)
-    ├── TemporalDecayWeighter (half-life 252d → sample_weight vector)
-    └── RegimeExpert × 4 (per-regime tuned HistGBT)
-        ├── RegimeFeatureSelector (top-30 IC features per regime, sample=8000)
-        └── PlattCalibratedExpert (5-fold OOF logistic regression)
+    AQRTINet v4.1
+    ├── FeatureNeutralizer (P0-A: OLS residuals vs beta + sector)
+    ├── InteractionFeatureBuilder (9 engineered crosses)
+    ├── AdversarialAugmenter (P1-D: 2× rows with Gaussian noise)
+    ├── PercentileRanker (cross-sectional [0,1] ranks)
+    ├── ConfidentLabelWeighter (|return_5d| < 0.5% → 0.3× weight)
+    ├── TemporalDecayWeighter (half-life 252d → sample_weight)
+    └── RegimeExpert × 4 (BULL / BEAR / SIDEWAYS / VOLATILE)
+        ├── EraBooster (P0-C: 60d eras, bottom-quartile ×3, 2 rounds)
+        ├── RegimeFeatureSelector (top-30 IC, domain-hint seeded)
+        ├── PlattCalibratedExpert (5-fold OOF logistic regression)
+        ├── ConformalQuantiles (P1-B: split-conformal intervals)
+        └── F1ThresholdSelector (v4.1: OOF threshold sweep per regime)
 
 Hardware: AMD Ryzen AI 7 350, 16GB RAM, CPU-only
 Training: ~6 minutes (7-fold stacking + 4 × 5-fold calibrated experts)
@@ -95,7 +102,10 @@ REGIMES = ["BULL", "BEAR", "SIDEWAYS", "VOLATILE"]
 FALLBACK_REGIME = "BULL"
 MIN_REGIME_ROWS = 200   # raised from 80 — with 15.8M rows we can afford stricter cutoff
 
-ASYMMETRIC_CLASS_WEIGHT = {0: 2.0, 1: 1.0}
+# 1.5× false-positive penalty (softened from 2.0 per improvement plan §2 —
+# the 2.0 weight suppressed recall to ~12.6% in testing; 1.5 keeps precision
+# bias without making the model nearly mute on positive calls).
+ASYMMETRIC_CLASS_WEIGHT = {0: 1.5, 1: 1.0}
 
 # Temporal decay half-life: 252 trading days = 1yr, calibrated for 5yr dataset.
 # v3 used 180d (6mo) which was too aggressive when 3+ years of history are available.
@@ -179,12 +189,14 @@ def _compute_era_boost_weights(
     dates_r: pd.Series,
     era_days: int = 60,
     rounds: int = 2,
+    regime: str = "BULL",
 ) -> Optional[np.ndarray]:
     """
     P0-C: Era-boosted training.
-    Divide training rows into 60-day eras, compute per-era IC (Spearman correlation
-    between first feature and label as a proxy), upweight bottom-quartile eras 3×.
-    Returns updated sample_weight array after `rounds` upweighting cycles.
+    Divide training rows into 60-day eras. Score each era by the mean absolute
+    Spearman IC across regime-hint features (not just `columns[0]` — that was
+    a proxy that could pick a low-IC feature and produce wrong era rankings).
+    Upweight bottom-quartile eras 3× over `rounds` cycles.
     Returns None if there aren't enough eras to be meaningful.
     """
     try:
@@ -198,7 +210,10 @@ def _compute_era_boost_weights(
             return None
 
         weights = base_weights.copy().astype(np.float64)
-        first_feat = X_r.columns[0]
+
+        # Use regime-hint features as IC anchors; fall back to first 5 columns
+        hint_cols = [c for c in REGIME_FEATURE_HINTS.get(regime, []) if c in X_r.columns]
+        ic_cols = hint_cols[:5] if hint_cols else list(X_r.columns[:5])
 
         for _ in range(rounds):
             era_ics = {}
@@ -206,9 +221,14 @@ def _compute_era_boost_weights(
                 mask = (era_idx == era).values
                 if mask.sum() < 20:
                     continue
-                corr = X_r[first_feat].iloc[mask].corr(y_r.iloc[mask], method="spearman")
-                if not np.isnan(corr):
-                    era_ics[era] = abs(corr)
+                # Mean |IC| across anchor features — more robust than single-feature proxy
+                ic_vals = []
+                for fc in ic_cols:
+                    corr = X_r[fc].iloc[mask].corr(y_r.iloc[mask], method="spearman")
+                    if not np.isnan(corr):
+                        ic_vals.append(abs(corr))
+                if ic_vals:
+                    era_ics[era] = float(np.mean(ic_vals))
 
             if len(era_ics) < 4:
                 break
@@ -230,46 +250,74 @@ def _compute_era_boost_weights(
         return None
 
 
+class FeatureNeutralizer:
+    """
+    P0-A: Fitted feature neutralizer (Numerai-style OLS residualization).
+    Fit on training data, transform at both train and inference time so there
+    is no train/test mismatch (the original stateless function was only called
+    during training, leaving raw features at inference).
+    """
+    def __init__(self, beta_col: str = "beta_21d", sector_col: str = "sector_return_5d"):
+        self.beta_col = beta_col
+        self.sector_col = sector_col
+        self._confounders: list[str] = []
+        self._coeffs: dict[str, np.ndarray] = {}  # col → [intercept, beta_coef, sector_coef]
+        self._target_cols: list[str] = []
+
+    def fit(self, X: pd.DataFrame) -> "FeatureNeutralizer":
+        from numpy.linalg import lstsq
+        confounders = [c for c in [self.beta_col, self.sector_col] if c in X.columns]
+        self._confounders = confounders
+        if not confounders:
+            return self
+        C = X[confounders].values.astype(np.float64)
+        ones = np.ones((C.shape[0], 1), dtype=np.float64)
+        C_aug = np.hstack([ones, C])
+        valid_mask = ~np.isnan(C_aug).any(axis=1)
+        skip = set(confounders) | {"date", "symbol"}
+        target_cols = [c for c in X.columns if c not in skip and pd.api.types.is_numeric_dtype(X[c])]
+        self._coeffs = {}
+        self._target_cols = []
+        for col in target_cols:
+            y = X[col].values.astype(np.float64)
+            valid = valid_mask & ~np.isnan(y)
+            if valid.sum() < 30:
+                continue
+            coeffs, _, _, _ = lstsq(C_aug[valid], y[valid], rcond=None)
+            self._coeffs[col] = coeffs
+            self._target_cols.append(col)
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if not self._confounders or not self._coeffs:
+            return X
+        X_out = X.copy()
+        C = X[[c for c in self._confounders if c in X.columns]].values.astype(np.float64)
+        # Pad missing confounder columns with zeros (keeps intercept correct)
+        if C.shape[1] < len(self._confounders):
+            pad = np.zeros((C.shape[0], len(self._confounders) - C.shape[1]))
+            C = np.hstack([C, pad])
+        ones = np.ones((C.shape[0], 1), dtype=np.float64)
+        C_aug = np.hstack([ones, C])
+        valid_mask = ~np.isnan(C_aug).any(axis=1)
+        for col, coeffs in self._coeffs.items():
+            if col not in X.columns:
+                continue
+            y = X[col].values.astype(np.float64)
+            valid = valid_mask & ~np.isnan(y)
+            residuals = y.copy()
+            if valid.sum() > 0:
+                residuals[valid] = y[valid] - C_aug[valid] @ coeffs
+            X_out[col] = residuals
+        return X_out
+
+    def fit_transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        return self.fit(X).transform(X)
+
+
 def _neutralize_features(X: pd.DataFrame, beta_col: str = "beta_21d", sector_col: str = "sector_return_5d") -> pd.DataFrame:
-    """
-    P0-A: Feature neutralization (Numerai-style).
-    OLS-project each feature against market beta + sector return, keep the residual.
-    This removes market/sector exposure so the model learns stock-specific alpha.
-
-    Rows where confounders are fully missing are left unchanged (no imputation here —
-    the PercentileRanker handles NaN natively downstream).
-    """
-    confounders = []
-    if beta_col in X.columns:
-        confounders.append(beta_col)
-    if sector_col in X.columns:
-        confounders.append(sector_col)
-    if not confounders:
-        return X
-
-    from numpy.linalg import lstsq
-    X_out = X.copy()
-    C = X[confounders].values.astype(np.float64)
-    # Add intercept column
-    ones = np.ones((C.shape[0], 1), dtype=np.float64)
-    C_aug = np.hstack([ones, C])
-    # Build a NaN mask — rows where any confounder is NaN can't be neutralized
-    valid_mask = ~np.isnan(C_aug).any(axis=1)
-
-    skip_cols = set(confounders) | {"date", "symbol"}
-    target_cols = [c for c in X.columns if c not in skip_cols and pd.api.types.is_numeric_dtype(X[c])]
-
-    for col in target_cols:
-        y = X[col].values.astype(np.float64)
-        valid = valid_mask & ~np.isnan(y)
-        if valid.sum() < 30:
-            continue
-        coeffs, _, _, _ = lstsq(C_aug[valid], y[valid], rcond=None)
-        residuals = y.copy()
-        residuals[valid] = y[valid] - C_aug[valid] @ coeffs
-        X_out[col] = residuals
-
-    return X_out
+    """Stateless neutralization for backward-compat. Prefer FeatureNeutralizer.fit_transform()."""
+    return FeatureNeutralizer(beta_col, sector_col).fit_transform(X)
 
 
 def _build_interaction_features(X: pd.DataFrame) -> pd.DataFrame:
@@ -365,9 +413,14 @@ def _select_regime_features(
     """
     all_cols = [c for c in X.columns if not c.startswith("meta_")]
 
-    # Compute IC on available data — 8000 rows for more stable estimates (was 3000 in v3)
-    sample = X if len(X) <= 8000 else X.sample(8000, random_state=42)
-    y_s = y.loc[sample.index]
+    # Compute IC on up to 8000 rows. Reset index before sampling so that
+    # y_s alignment is by position, not by label (avoids silent misalignment
+    # when X and y have different integer indices after masking/augmentation).
+    X_ri = X.reset_index(drop=True)
+    y_ri = y.reset_index(drop=True)
+    sample_idx = X_ri.index if len(X_ri) <= 8000 else X_ri.sample(8000, random_state=42).index
+    sample = X_ri.loc[sample_idx]
+    y_s = y_ri.loc[sample_idx]
 
     ics = {}
     for col in all_cols:
@@ -396,6 +449,24 @@ def _select_regime_features(
             selected.append(m)
 
     return selected
+
+
+def _find_f1_threshold(probas: np.ndarray, y_true: np.ndarray, n_steps: int = 50) -> float:
+    """
+    Improvement plan §1: sweep thresholds on OOF probabilities and return the
+    one that maximises F1 on the held-out fold data.  Falls back to 0.5 if
+    there is not enough positive signal to compute a meaningful F1.
+    """
+    from sklearn.metrics import f1_score
+    best_t, best_f1 = 0.5, 0.0
+    for t in np.linspace(0.10, 0.90, n_steps):
+        preds = (probas >= t).astype(int)
+        if preds.sum() == 0:
+            continue
+        f = f1_score(y_true, preds, zero_division=0)
+        if f > best_f1:
+            best_f1, best_t = f, float(t)
+    return best_t
 
 
 class PlattCalibratedExpert:
@@ -437,14 +508,18 @@ class PlattCalibratedExpert:
     def predict_interval(self, X: pd.DataFrame, alpha: float = 0.10) -> np.ndarray:
         """
         Return (n, 2) array of [lower, upper] conformal prediction intervals.
-        If conformal quantiles are not yet fitted, returns [proba-0.2, proba+0.2].
+        Lower bound: proba - q_high (wider tail); upper: proba + q_high.
+        q_low is the tighter inner quantile stored for reference.
+        Falls back to ±0.20 if conformal quantiles were not fitted.
         """
         probas = self.predict_proba(X)[:, 1]
-        if self._conformal_q_low is None:
+        if self._conformal_q_high is None:
             return np.column_stack([
                 np.clip(probas - 0.20, 0, 1),
                 np.clip(probas + 0.20, 0, 1),
             ])
+        # Both directions use q_high (the wider, coverage-guaranteeing quantile).
+        # q_low (5th percentile of residuals) would give an overly tight interval.
         return np.column_stack([
             np.clip(probas - self._conformal_q_high, 0, 1),
             np.clip(probas + self._conformal_q_high, 0, 1),
@@ -467,8 +542,8 @@ class PlattCalibratedExpert:
 
 class AQRTINet(BaseModel):
     """
-    AQRTINet v3 — AQRTI's custom ML backbone.
-    Drop-in BaseModel replacement with 8 trading-domain improvements.
+    AQRTINet v4.1 — AQRTI's custom ML backbone.
+    13 trading-domain improvements over off-the-shelf gradient boosters.
     """
 
     @property
@@ -487,11 +562,13 @@ class AQRTINet(BaseModel):
     def __init__(self, task: str, label_col: str, hyperparams: Optional[dict] = None, version: int = 1):
         super().__init__(task, label_col, hyperparams, version)
         self._experts: dict[str, Any] = {}
+        self._neutralizer: Optional[FeatureNeutralizer] = None
         self._ranker: Optional[PercentileRanker] = None
         self._regime_map: dict[str, str] = {}
         self._current_regime: str = FALLBACK_REGIME
         self._stacking_feature_cols: list[str] = []
-        self._regime_feature_cols: dict[str, list[str]] = {}  # per-regime selected features
+        self._regime_feature_cols: dict[str, list[str]] = {}
+        self._regime_thresholds: dict[str, float] = {}  # F1-optimal per-regime decision threshold
 
     # ── Training ──────────────────────────────────────────────────────────
 
@@ -515,10 +592,15 @@ class AQRTINet(BaseModel):
         self._feature_cols = list(X_clean.columns)
 
         # ── P0-A: Feature neutralization (Numerai-style) ──────────────────
-        # OLS-project each feature against market beta + sector return; use residuals.
-        # Removes market/sector exposure, isolates stock-specific alpha signal.
-        X_neutral = _neutralize_features(X_clean)
-        log.info("AQRTINet: feature neutralization applied (confounder cols: beta_21d, sector_return_5d)")
+        # Fit the neutralizer on training data and store it so inference applies
+        # the same OLS projection (fixes the prior train/test mismatch where
+        # _neutralize_features was only called during training).
+        self._neutralizer = FeatureNeutralizer()
+        X_neutral = self._neutralizer.fit_transform(X_clean)
+        log.info(
+            "AQRTINet: feature neutralizer fitted on %d target cols (confounders: beta_21d, sector_return_5d)",
+            len(self._neutralizer._target_cols),
+        )
 
         X_work = _build_interaction_features(X_neutral)
         ix_cols = [c for c in X_work.columns if c.startswith("ix_")]
@@ -643,7 +725,15 @@ class AQRTINet(BaseModel):
             n = mask.sum()
 
             if n < MIN_REGIME_ROWS:
-                log.info("AQRTINet: %s has %d rows — skipping (will use %s fallback)", regime, n, FALLBACK_REGIME)
+                # Improvement plan §3: log as WARNING so regime data scarcity
+                # is visible — a skipped expert means the BULL fallback covers it,
+                # which is imprecise. Do NOT lower MIN_REGIME_ROWS to paper over this.
+                log.warning(
+                    "AQRTINet: %s regime has only %d rows (< MIN_REGIME_ROWS=%d) — "
+                    "skipping specialist expert, %s fallback will be used. "
+                    "This is a genuine data-scarcity gap, not a bug.",
+                    regime, n, MIN_REGIME_ROWS, FALLBACK_REGIME,
+                )
                 continue
 
             X_r = X_ranked_aug[mask]
@@ -665,7 +755,7 @@ class AQRTINet(BaseModel):
             # bottom-quartile eras 3× and retrain 2 more rounds.
             # Forces the model to learn patterns from hard/low-IC regimes.
             try:
-                era_weights = _compute_era_boost_weights(X_r, y_r, w_r, dates_aug[mask], era_days=60, rounds=2)
+                era_weights = _compute_era_boost_weights(X_r, y_r, w_r, dates_aug[mask], era_days=60, rounds=2, regime=regime)
                 if era_weights is not None:
                     expert_era = _build_expert(hp)
                     expert_era.fit(X_rf, y_r, sample_weight=era_weights)
@@ -706,6 +796,7 @@ class AQRTINet(BaseModel):
 
                 if n < 150:
                     calibrated[regime] = PlattCalibratedExpert(expert, _make_passthrough_platt(), feats)
+                    self._regime_thresholds[regime] = 0.5  # not enough data for threshold sweep
                     continue
 
                 oof_proba = np.zeros(n)
@@ -728,9 +819,17 @@ class AQRTINet(BaseModel):
                 ce._conformal_q_low  = float(np.quantile(np.abs(oof_proba - y_r.values.astype(float)), 0.05))
                 ce._conformal_q_high = float(np.quantile(np.abs(oof_proba - y_r.values.astype(float)), 0.90))
                 calibrated[regime] = ce
+
+                # Improvement plan §1: F1-maximising decision threshold on OOF data.
+                # OOF probas are already out-of-fold so there's no leakage here.
+                # We store these per-regime so _predict_impl can apply the right
+                # cutoff instead of the raw 0.5 that was causing 12.6% recall.
+                calibrated_oof = platt.predict_proba(oof_proba.reshape(-1, 1))[:, 1]
+                best_t = _find_f1_threshold(calibrated_oof, y_r.values)
+                self._regime_thresholds[regime] = best_t
                 log.info(
-                    "AQRTINet: Platt+Conformal calibrated %s (n=%d, feats=%d, folds=%d, q90=%.3f)",
-                    regime, n, len(feats), n_splits, ce._conformal_q_high,
+                    "AQRTINet: Platt+Conformal calibrated %s (n=%d, feats=%d, folds=%d, q90=%.3f, threshold=%.3f)",
+                    regime, n, len(feats), n_splits, ce._conformal_q_high, best_t,
                 )
 
             self._experts = calibrated
@@ -742,8 +841,11 @@ class AQRTINet(BaseModel):
     # ── Inference ─────────────────────────────────────────────────────────
 
     def _build_inference_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Add interaction features + meta-features, then percentile-rank."""
-        X_ix = _build_interaction_features(X)
+        """Apply neutralization → interactions → meta-features → percentile-rank (matches training order)."""
+        # P0-A: apply the fitted neutralizer so inference sees the same feature
+        # distribution as training (fixes prior train/test mismatch).
+        X_n = self._neutralizer.transform(X) if self._neutralizer is not None else X
+        X_ix = _build_interaction_features(X_n)
 
         # Meta-features from saved base models
         if self._stacking_feature_cols:
@@ -789,7 +891,17 @@ class AQRTINet(BaseModel):
 
     def _predict_impl(self, X: pd.DataFrame) -> np.ndarray:
         X_r = self._build_inference_features(X)
-        expert = self._route_to_expert(self._get_current_regime())
+        regime = self._get_current_regime()
+        expert = self._route_to_expert(regime)
+        # Apply F1-optimal per-regime threshold (improvement plan §1).
+        # Use explicit None sentinel — a threshold of 0.0 or 0.5 is still valid.
+        threshold = self._regime_thresholds.get(regime)
+        if threshold is None:
+            threshold = self._regime_thresholds.get(FALLBACK_REGIME)
+        if threshold is not None:
+            proba = expert.predict_proba(X_r)
+            p1 = proba[:, 1] if proba.ndim == 2 else proba
+            return (p1 >= threshold).astype(int)
         return expert.predict(X_r)
 
     def _predict_proba_impl(self, X: pd.DataFrame) -> np.ndarray:
@@ -855,10 +967,12 @@ class AQRTINet(BaseModel):
             "hyperparams":           self.hyperparams,
             "artifact":              self._artifact,
             "experts":               self._experts,
+            "neutralizer":           self._neutralizer,
             "ranker":                self._ranker,
             "regime_map":            self._regime_map,
             "stacking_feature_cols": self._stacking_feature_cols,
             "regime_feature_cols":   self._regime_feature_cols,
+            "regime_thresholds":     self._regime_thresholds,
         }
         with open(fpath, "wb") as f:
             pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -878,11 +992,13 @@ class AQRTINet(BaseModel):
         inst._artifact              = payload.get("artifact")
         inst._is_classification     = (inst.task == "direction")
         inst._experts               = payload.get("experts", {})
+        inst._neutralizer           = payload.get("neutralizer")
         inst._ranker                = payload.get("ranker")
         inst._regime_map            = payload.get("regime_map", {})
         inst._current_regime        = FALLBACK_REGIME
         inst._stacking_feature_cols = payload.get("stacking_feature_cols", [])
         inst._regime_feature_cols   = payload.get("regime_feature_cols", {})
+        inst._regime_thresholds     = payload.get("regime_thresholds", {})
         inst._model                 = inst._experts
         return inst
 
@@ -903,7 +1019,7 @@ def _make_passthrough_platt():
 
 # ── Smoke test ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("AQRTINet v3.1 smoke test...")
+    print("AQRTINet v4.1 smoke test...")
     import numpy as np, pandas as pd
 
     np.random.seed(42)

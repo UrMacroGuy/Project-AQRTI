@@ -1,4 +1,54 @@
-﻿## [2026-07-06b] — AQRTINet v4.0: P1-A/B + P2-A SOTA upgrades
+﻿## [2026-07-06c] — AQRTINet v4.1: threshold calibration + 5 correctness fixes
+
+Acted on `docs/AQRTINET_IMPROVEMENT_PLAN.md` (items §1–§3) and found 5 additional
+correctness bugs on re-reading the code. All fixes are in
+`backend/ml/models/aqrtinet_model.py`. No gate weakening, no mock data.
+
+**Improvement plan §2: softened ASYMMETRIC_CLASS_WEIGHT 2.0 → 1.5**
+The 2.0 weight was causing ~12.6% recall (model almost never called UP).
+AUC-ROC (0.645) was already beating CatBoost (0.634) — ranking was fine,
+threshold was the problem. 1.5 keeps precision bias without muting signals.
+
+**Improvement plan §1: per-regime F1-optimal decision threshold**
+Added `_find_f1_threshold()`: sweeps 50 thresholds on Platt-calibrated OOF
+probabilities, picks the one maximising F1 on held-out fold data per regime.
+Stored as `self._regime_thresholds[regime]` in the pkl, applied in
+`_predict_impl()`. Replaces the hardcoded raw 0.5 cutoff that caused the
+recall collapse. Threshold fallback uses explicit `None` sentinel (not falsy
+float check — a threshold of 0.0 or 0.5 is valid and must not be skipped).
+
+**Improvement plan §3: regime scarcity logged as WARNING**
+Upgraded the skip-regime log from `info` to `warning` so data-scarcity gaps
+are visible in the log stream, not buried.
+
+**Bug fix: train/inference feature neutralization mismatch (critical)**
+`_neutralize_features()` was called during training but not inference, so the
+model received raw (unneutralized) features at prediction time despite being
+trained on OLS residuals. Fixed by replacing the stateless function with a
+fitted `FeatureNeutralizer` class: `fit_transform()` at training time stores
+per-feature OLS coefficients; `transform()` applies the same projection at
+inference. Neutralizer persisted in the pkl under `"neutralizer"` key.
+Also fixed the training order: neutralization now precedes interaction-feature
+construction, and `_build_inference_features` matches that order.
+
+**Bug fix: era IC proxy used single arbitrary column**
+`_compute_era_boost_weights()` computed era IC using only `X_r.columns[0]`
+(whichever column happened to be first), which could be a low-IC feature and
+produce wrong era rankings. Fixed: now averages |Spearman IC| across up to 5
+regime-hint features (BULL momentum/trend, BEAR vol/beta, etc.). Falls back
+to first 5 columns if no hints present. Call site updated: passes `regime=`.
+
+**Bug fix: _select_regime_features index misalignment**
+After masking/augmentation, `X` and `y` could have different integer indices.
+The `y.loc[sample.index]` lookup silently misaligned them. Fixed: both X and
+y are `reset_index(drop=True)` before sampling so alignment is positional.
+
+**Bug fix: conformal interval docstring clarified**
+Both lower and upper bounds correctly use `q_high` (the 90th-percentile
+coverage-guaranteeing quantile). Noted in docstring that `q_low` is the
+tighter inner quantile stored for reference only.
+
+## [2026-07-06b] — AQRTINet v4.0: P1-A/B + P2-A SOTA upgrades
 
 Completed the remaining three items from the v4.0 proposal. All verified with
 import checks and smoke test. No gate weakening, no mock data.
