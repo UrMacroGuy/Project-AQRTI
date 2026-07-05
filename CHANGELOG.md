@@ -1,4 +1,192 @@
-﻿## [2026-07-05] — Index Futures Segment: Strategy Generation Wired End-to-End
+﻿## [2026-07-05e] — IMPROVEMENTS.md Backlog: P0 Placeholder-Data Purge + P1 Docs Fixes
+
+Worked the `IMPROVEMENTS.md` backlog created earlier today. Completed all
+6 P0 items (placeholder/fabricated data — the project's hard rule) plus
+the README/USER_GUIDE portions of P1.
+
+### P0 — fabricated data purged, and 2 more instances found beyond the list
+- Deleted `backend/seed_missing_data.py` (P0-1/P0-2) — confirmed it HAD
+  been run: purged the 26 fabricated `EarningsEvent` rows and 1 fabricated
+  `OptionsChain` row it wrote (hardcoded fake earnings actuals, random
+  YoY/PCR/max-pain/IV). Both API endpoints now correctly return honest
+  empty states, verified live.
+- Removed `MOCK_AGENT_DATA` and `MOCK_VAULT_DATA` from `ui/app.js` (P0-3/
+  P0-4) — fake agents/briefs/findings/vault data no longer silently
+  rendered when their APIs return nothing; both pages now show the
+  honest "no data" states their own markup already supported.
+- Stripped the dead `USE_MOCK`/`API_CONFIG.USE_MOCK` plumbing (P0-5, was
+  always `false`) and the stale `app.js` header comment describing
+  "Realistic Mock Data" that no longer exists.
+- **P0-6 full audit (via a dedicated research pass) found two more real
+  violations not in the original list:**
+  - `data_supremacy/fii_dii_scraper.py`'s `_maybe_backfill_history()` wrote
+    randomized-but-plausible FII/DII crore flows (`random.uniform()`)
+    into `fii_dii_flows` with no synthetic flag — indistinguishable from
+    real scraped data. Deleted the function; purged all 44 existing rows
+    (couldn't reliably separate real from fabricated given an exact match
+    to the backfill window). `/api/v1/fii-dii` now returns honest empty
+    arrays, verified live.
+  - The Overview page's "Today's Alerts" panel (`ui/index.html`) had four
+    fake alerts (fake symbols, fake "Impact Score," fake "Alpha Score")
+    hardcoded directly into the HTML with **zero JS wiring** — permanently
+    shown to every user, worse than a JS fallback since there was no live
+    path to ever replace it. Wired real hydration from the existing
+    `/research-findings/summary` API (already used elsewhere), with an
+    honest "No alerts today" empty state.
+
+### P1 — README.md and AQRTI_USER_GUIDE.md corrected
+- Fixed the ML stack claim in both docs (CatBoost + NGBoost + AQRTINet
+  v3.1 — LightGBM/XGBoost were removed 2026-06-27 for sub-coin-flip
+  accuracy, confirmed not in the active ensemble path via `ensemble_engine.py`).
+- Replaced both docs' hardcoded stats snapshots (README's "2026-06-28:
+  7,000+ strategies, fitness 69.8"; USER_GUIDE's "2026-06-25: Intelligence
+  Score 71.5, 4,087 strategies, 847 promoted") with dateless pointers to
+  the live dashboard, plus a short explanation of the Trust Overhaul so a
+  reader comparing old screenshots to today's much-lower numbers
+  understands why, rather than assuming something broke.
+- Corrected family/mutation-op/fitness-dimension counts to match code
+  exactly (11 families, 9 mutation ops, 6-dimension fitness — verified by
+  counting `_generate_*`/mutation-op branches/`W_*` weights directly, not
+  assumed) and the stale "45+ REST API endpoints" claim (actual: 265
+  endpoints across 59 route files).
+- Removed README's stale "DataStore → Fallback mock data" architecture
+  line (the mock DataStore was deleted 2026-06-25).
+- Completed the strategy→algo naming pass in both docs' user-facing prose
+  (matching the UI rename, commit `ee57c8f`) while leaving literal
+  code/table/API-path references (`backend/strategies/`, `GET /strategies`)
+  untouched.
+- Corrected two specific facts flagged in `IMPROVEMENTS.md`: the glossary's
+  stop-loss entry (per-algo DSL value, not a fixed 8%) and the paper-trading
+  confidence threshold (pointed at the actual `MIN_CONFIDENCE` constant in
+  `continuous_monitor.py` — currently 60%, not asserted as a specific
+  historical value that couldn't be verified in code).
+
+### PROJECT_DIARY.md synced (P1-6)
+Added Timeline phase H (2026-07-03 feature-fix/arena-rigor/index-futures
+work) and phase I (this entry). Updated §6 with the real `MAX_DRAWDOWN_LIMIT
+-35%` retirement gate (was undocumented — the diary didn't previously
+describe drawdown-based retirement at all) and the `arena_status` isolation
+history. Updated §5 with full AQRTINet v3.1 details (9 interaction features,
+252d half-life, 0.3× confident-label weighting, 7-fold stacking, 5-fold
+Platt). Added the Index Futures parallel-schema block to §12. Bumped
+"Last synced."
+
+### Remaining work (not done this session, still open in IMPROVEMENTS.md)
+P1-7 (STRATEGY_ARENA.md constants sync), P1-8 (close out the division-by-
+zero investigation doc), P1-9 (DATABASE_AND_TRAINING.md v3.1 sync), all of
+P2 (plans/ historical-doc banners), all of P3 (consistency/polish).
+
+---
+
+## [2026-07-05d] — Obsidian Integration Planned
+
+New spec: `docs/OBSIDIAN_INTEGRATION_PLAN.md` — one-way exporter rendering
+DB knowledge into an Obsidian vault (`AQRTI Vault/` in OneDrive, outside the
+repo). Design: DB is source of truth, vault is derived/regenerable; notes
+per Daily (CRO brief + trades + regime), Stock (lazy, with backlinks),
+Lesson, Algo (promoted only), Home dashboard; uniform YAML frontmatter for
+Dataview queries; `[[wikilinks]]` make Obsidian's graph mirror AQRTI's
+knowledge (days↔stocks↔lessons↔algos). Exporter is idempotent
+(byte-compare upserts), only overwrites files flagged `aqrti_generated:
+true`, never deletes, never blocks the pipeline, and renders nothing for
+missing data (no-placeholder rule). Runs as a late daily-pipeline step +
+`POST /admin/obsidian-export`. Phase 3 (two-way vault→agent-task inbox)
+explicitly deferred pending its own design. Work items: IMPROVEMENTS.md
+§P-OBS (OBS-1..5); CLAUDE.md bootstrap updated to list the spec.
+
+---
+
+## [2026-07-05c] — Personal Portfolio Module Planned + Architecture Review
+
+Planning session (no code): designed the new "My Portfolio" section tracking
+the user's real 60-40 investment plan, reviewed the whole architecture, and
+wired task discovery into CLAUDE.md so new sessions self-orient.
+
+### New: `docs/PERSONAL_PORTFOLIO_PLAN.md` — full module spec
+Tracks the user's actual ₹2,000/month plan (60% India: Nifty50 fund SIP ₹600,
+TCS/INFY/HDFCBANK/RELIANCE quarterly rotation ₹300, Smallcap 250 fund ₹200,
+gold ETF ₹100; 40% US via INDmoney: VTI ₹400, PLTR ₹250, LMT ₹150).
+Spec covers: 6 new tables (`PortfolioInstrument/Transaction/Holding/
+Valuation`, `MutualFundNAV`, `PortfolioActionLog` — transactions append-only
+as a tax audit trail), UI page #15 (allocation-vs-60/40 drift, plan
+checklist with quarterly rotation, projections-vs-actuals, LTCG/Schedule FA
+tax panel, read-only AQRTI intelligence overlay), data sources (AMFI NAV
+feed for mutual funds — prior-day NAV, honestly labeled; yfinance for
+VTI/gold/fx; TCS/INFY/HDFCBANK/RELIANCE already covered; PLTR/LMT already
+in universe, coverage to verify; gold ticker "GOLDNXT" UNVERIFIED — must
+confirm, not guess), and algo training: US names get their own isolated
+`us_portfolio` asset-class segment (US costs, VTI benchmark — follows the
+index-futures isolation precedent); mutual funds excluded (NAV has no
+microstructure). Hard rules: tracker/advisor only, no execution, never
+mixed with paper trading, honest empty state until first real transaction.
+
+### IMPROVEMENTS.md: two new sections
+- **§P-PF** — 7 ordered build items for the portfolio module (PF-1
+  instrument verification blocks the rest).
+- **§P-ARCH** — 12 architecture findings: stray 101MB `./aqrti.db` beside
+  the real 3.1GB `backend/aqrti.db`; zero automated tests (every past
+  regression was caught by manual audit); no migration convention;
+  scheduler+API share one process (a crash kills both — see 2026-07-03e);
+  5,000-line `app.js` monolith (split before adding page #15); 93-table
+  `models.py` monolith; SQLite lock handling by convention only (add
+  busy_timeout); unauthenticated /admin endpoints; manual-only backup
+  policy for a single 3.1GB file; deprecated legacy tables still live;
+  Electron installers stale since 2026-06-22; FeatureValue long-format
+  scale note (16.7M rows).
+
+### CLAUDE.md: session bootstrap hardcoded
+New sessions now follow a fixed sequence: CHANGELOG top entries →
+IMPROVEMENTS.md as the task queue (work highest-priority unchecked item if
+no user task) → active specs in `docs/` → diary/DB-doc for depth. Added
+concurrent-session etiquette (re-read before writes, never clobber) and a
+real-money rules section for the portfolio module.
+
+---
+
+## [2026-07-05b] — Full Docs Review: IMPROVEMENTS.md Backlog + Project CLAUDE.md
+
+Reviewed every markdown file in the project (all 16 `plans/*.md`, `docs/*.md`,
+README, USER_GUIDE, PROJECT_DIARY, DATABASE_AND_TRAINING, full CHANGELOG)
+plus targeted code verification (`ui/app.js`, `ui/api.js`, `promotion_config.py`,
+`seed_missing_data.py`).
+
+### New: `IMPROVEMENTS.md` — the working backlog
+All findings recorded as prioritized, checkbox work items (P0–P3). Headline
+findings:
+- **P0 (placeholder data — violates the project's hard rule):**
+  `backend/seed_missing_data.py` seeded FABRICATED rows into `earnings_events`
+  and `options_chain` (invented earnings actuals, `random.uniform()` PCR/
+  max-pain/IV) so "the UI shows data" — must be purged from the DB and the
+  script deleted. `MOCK_AGENT_DATA` (app.js ~2819) and `MOCK_VAULT_DATA`
+  (~3163) still silently render fake agents/briefs/vault data when the API
+  fails. Dead `USE_MOCK` plumbing still present.
+- **P1 (wrong user-facing docs):** README + USER_GUIDE still list LightGBM/
+  XGBoost (removed 2026-06-27) and pre-Trust-Overhaul stats (7,000+
+  strategies / fitness 69.8 vs the honest 927-population / 0-promoted
+  baseline); STRATEGY_ARENA.md constants lag promotion_config.py;
+  PROJECT_DIARY.md unsynced past 2026-07-02b; the division-by-zero
+  investigation doc has no recorded resolution.
+- **P2:** all `plans/*.md` are June-2026 v1.0 design docs needing a
+  "historical — superseded" banner (PROJECT_SUMMARY.md is worst: titled
+  "Current State" while stale across two overhauls).
+- **P3:** universe-count inconsistencies (779/641/639/608/352 across docs),
+  hardcoded stats rot, strategy→algo naming pass for docs/UI leftovers.
+
+### New: `CLAUDE.md` — project instructions for Claude sessions
+Codifies: the NO-placeholder-data hard rule (with the synthetic-data
+labeling exception), honest-metrics rules (no look-ahead, fail-closed DSL,
+"too-good = bug"), algo terminology, source-of-truth order
+(code/promotion_config > CHANGELOG > diary/DB doc > STRATEGY_ARENA >
+plans-as-history), session workflow (read CHANGELOG at start; CHANGELOG +
+diary sync after tasks; new problems go to IMPROVEMENTS.md), run/operate
+facts (ports, LITE mode, DB backup convention, lock contention), code
+conventions (models.py, /api/v1, point-in-time features, session rollback
+rule, index-futures isolation), and the quant bar (all gates + quarantine;
+0-promoted is correct behavior, not a bug to fix by weakening gates).
+
+---
+
+## [2026-07-05] — Index Futures Segment: Strategy Generation Wired End-to-End
 
 Second phase of the index-futures segment — the piece explicitly deferred
 in the prior session ("strategy generation/DSL for index instruments is

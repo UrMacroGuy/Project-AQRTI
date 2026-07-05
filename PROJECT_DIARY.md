@@ -4,7 +4,11 @@
 
 **How to keep this current:** every time meaningful work is done on the project, the newest entry in `CHANGELOG.md` should be reflected here — either as a new line in the Timeline (§9) or, if it changes an actual number/threshold/architecture described elsewhere in this diary, as an edit to that section. See the note at the very end of this file for the exact rule Claude follows.
 
-Last synced with project state: **2026-07-03** (through CHANGELOG entry `2026-07-02b`).
+**Terminology note:** what this diary and the underlying code call "strategies" (the genetic-algorithm-evolved trading rules in `strategies_v2`) are referred to as **algos** in conversation and in newer docs going forward. This file keeps "strategy" in places that quote code/table/column names (e.g. `StrategyV2`, `strategy_lifecycle.py`) for technical accuracy, but "algo" and "strategy" mean the same thing throughout.
+
+**Companion document:** `DATABASE_AND_TRAINING.md` goes much deeper on the database schema and exactly how stored data becomes a trained model or a scored algo — read that alongside §6 and §12 of this file.
+
+Last synced with project state: **2026-07-05** (through CHANGELOG entry `2026-07-05c`, plus this session's own placeholder-data-purge work — see Timeline phase I below and the newest CHANGELOG entry).
 
 ---
 
@@ -178,12 +182,19 @@ api.js       → API Layer            apiFetch / apiPost → http://localhost:80
 
 ## 5. The ML Prediction Engine
 
-### Model ensemble (current, as of 2026-06-28)
+### Model ensemble (current, as of 2026-07-03 — AQRTINet v3.1)
 | Model | Role |
 |---|---|
 | **CatBoost** | Primary gradient-boosted-tree direction/return model |
 | **NGBoost** | Calibrated probability estimates (gives well-formed confidence intervals, not just point predictions) |
-| **AQRTINet** (custom) | In-house model — asymmetric trading loss (false positives penalized 2× harder than false negatives), regime-aware mixture of experts (a separate gradient booster per BULL/BEAR/SIDEWAYS/VOLATILE regime), cross-sectional percentile ranking, stacking (uses CatBoost/NGBoost out-of-fold predictions as 2 of 42 meta-features), Platt-scaled calibration for well-behaved P(UP) outputs |
+| **AQRTINet v3.1** (custom) | In-house model — asymmetric trading loss (false positives penalized 2× harder than false negatives), regime-aware mixture of experts (a separate gradient booster per BULL/BEAR/SIDEWAYS/VOLATILE regime), cross-sectional percentile ranking, 7-fold out-of-fold stacking (uses CatBoost/NGBoost predictions as meta-features), 5-fold Platt-scaled calibration (3-fold below n=500 samples) for well-behaved P(UP) outputs |
+
+### AQRTINet v3.1 — what changed from v3, calibrated for the 5yr/15.8M-row feature store
+- **9 domain interaction features** (was 6): kept `ix_momentum_x_trend`, `ix_rsi_x_vol`, `ix_volume_x_momentum`, `ix_breadth_x_beta`, `ix_sector_x_nifty`, `ix_support_x_rsi` from v3; added `ix_rsi_x_momentum` (RSI×5d momentum), `ix_vol_x_breakout` (vol expansion×breakout distance), `ix_trend_x_price` (ADX×price-vs-EMA21) — domain-specific crosses the regime experts can learn from directly rather than re-derive.
+- **Temporal decay half-life 252 trading days** (1yr) — recalibrated for the 5yr dataset so recent rows are weighted meaningfully heavier without the decay curve going degenerate over a much longer history than v3 was tuned for.
+- **Confident-label weighting**: rows where `|return_5d| < 0.5%` are ambiguous-direction "coin flip zone" labels — down-weighted ×0.3 in training (not dropped, to preserve sample size) so the model isn't misled by noisy direction calls on near-zero moves.
+- **Stacking**: 7-fold `StratifiedKFold(shuffle=False)` (was fewer folds in v3) for the out-of-fold CatBoost/NGBoost meta-features.
+- **Platt calibration**: 5-fold (3-fold when a regime has <500 training rows) per-regime calibration for P(UP) outputs.
 
 **LightGBM and XGBoost were removed entirely on 2026-06-27** — LightGBM measured 49.04% accuracy (worse than a coin flip) and XGBoost was found to be "actively anti-predictive" at 47.69%. Keeping bad models in an ensemble drags the whole thing down, so they were cut rather than down-weighted.
 
@@ -274,7 +285,7 @@ candidate → shadow → promoted → [active]*  (*requires human approval)
                     ↘ retired → graveyard
 ```
 - **Promotion gates (all must pass)**: fitness ≥50.0, trade_count ≥60 (was 300, found unreachable — see §14), win_rate ≥52%, sharpe ≥0.5 (honest scale, raised from 0.3), plus the OOS hard gate, the benchmark gate (Sharpe must reach ≥0.8× buy-and-hold NIFTY50 Sharpe over the same window — "beating do-nothing is mandatory"), and the duplicate gate (reject if backtest trade-overlap with an already-promoted strategy exceeds 60% Jaccard similarity — near-clones are one leveraged bet, not diversification).
-- **Retirement**: fitness <15.0, or (for already-promoted strategies) win rate falling below 52%.
+- **Retirement**: fitness <15.0, or (for already-promoted strategies) win rate falling below 52%, or **honest max drawdown < −35%** (`MAX_DRAWDOWN_LIMIT` in `promotion_config.py`, added 2026-07-03). This replaced a prior `-100.0` limit that was effectively unreachable — a strategy could score above the retirement fitness floor while carrying a catastrophic drawdown if its rare large losses were outweighed by many small wins, and fitness alone didn't reliably catch that "picking up pennies in front of a steamroller" pattern. The threshold is computed against the honest daily mark-to-market drawdown (post-2026-07 backtester fix), not the old per-trade-chained pseudo-equity number.
 - **Quarantine gate on `active`** (added 2026-07-02b — the most important recent change): even after promotion, human approval to `active` status is blocked until the strategy has been promoted for ≥60 days **and** produced ≥20 closed forward-paper (shadow) trades with ≥50% win rate and positive net P&L. This is forward performance on data that did not exist when the strategy was created — the one test that genuinely cannot be overfit. `force=true` can override, but the override is logged.
 - Retired strategies are never deleted — they go to `StrategyGraveyard` and feed the Meta-Learner.
 
@@ -312,6 +323,31 @@ All family weights are renormalized to sum to 1.0 after adjustment. This is how 
 8. Population snapshot.
 
 Also runs a lighter version every 5 minutes via APScheduler (see §11).
+
+### Arena champion grading (`arena_engine.py`) — 2026-07-03 rigor pass
+A separate refinement loop distinct from the daily research loop above: it
+takes already-`promoted`/`active` strategies and iteratively tries to breed
+a "champion" version that fixes a parent's losing days without breaking its
+winning ones (Option B regression check — child must retain ≥70% of
+parent's winning days and fix ≥50% of parent's losing days).
+- **Status isolation**: the arena's own progress tracking
+  (`champion`/`refining`/`needs_review`) lives in a dedicated
+  `StrategyV2.arena_status` + `arena_rounds` column pair — **never** written
+  to the lifecycle's own `status` field. A prior version of the arena wrote
+  directly into `status`, which silently collided with the lifecycle state
+  machine and let `auto_promote_strategies()` push a strategy straight to
+  `active` (bypassing human approval and the paper-trading quarantine
+  entirely). Fixed 2026-07-03 — `auto_promote_strategies()` now only
+  *logs* eligible strategy_ids, never mutates status.
+- **Champion grading now requires** (previously in-sample-only): the
+  existing return/drawdown/win-rate gates, a minimum trade-count floor
+  (`MIN_CHAMPION_TRADES=30` — a handful of lucky trades can't crown a
+  champion), an out-of-sample pass on a held-out 6-month window
+  (`OOS_MIN_TRADES=8`, `OOS_MIN_WIN_RATE=48%`, `OOS_MIN_RETURN_PCT≥0`), and
+  regime-stratified robustness (rejects any well-sampled market regime
+  — `MIN_TRADES_PER_REGIME_TO_JUDGE=5` — with net-negative PnL; a strategy
+  that only makes money in one regime isn't robust, it's a lucky fit to
+  whichever regime dominated the replay window).
 
 ---
 
@@ -466,6 +502,8 @@ The SQLite database (`backend/aqrti.db`, several GB, WAL mode) has **93 tables**
 
 **Phase 9 Intelligence**: `DiscoveredRegime`, `DailyRegimeAssignment`, `RegimeTransitionMatrix` (K-Means clustering); `CounterfactualSimulation`, `CounterfactualLesson`; `StrategyDNA`; `FeatureCandidate`; `KnowledgeNode`, `KnowledgeEdge`; `ResearchHypothesis`, `ResearchExperiment`; `ModelArena`, `ArenaEvaluation`; `UncertaintyEstimate`; `SpecialistAgentOpinion`, `ModeratorDecision`; parallel `P9*`-prefixed tables; `ArenaRun`
 
+**Index Futures Segment** (added 2026-07-03, fully parallel to the stock tables above — see `DATABASE_AND_TRAINING.md` §11 for the full schema): `IndexFuturesContract` (lot size/tick size/margin % per index), `IndexFuturesPrice` (continuous monthly-contract OHLC + spot_close + basis, `is_synthetic` flag), `IndexFuturesRoll` (contract-month rollover records), `IndexFuturesFeatureValue` (mirrors `FeatureValue`'s shape, keyed on `index_name` not a `Stock` FK). `StrategyV2` gained two new columns for isolation: `asset_class` (`"stock"` default / `"index_futures"`) and `index_name` — same dedicated-namespace pattern as `arena_status` (§6), so an index-futures strategy can never be mixed into stock arena rounds, stock benchmark comparisons, or stock promotion pools. `IndexFuturesPrice` rows are NOT real traded futures ticks — no free data source carries historical NSE index futures contract prices, so this is a documented cost-of-carry approximation (F = S·e^((r−q)T)) over the real underlying spot index, with `is_synthetic=True` on every row.
+
 ---
 
 ## 13. Backend Module Map
@@ -505,6 +543,8 @@ The SQLite database (`backend/aqrti.db`, several GB, WAL mode) has **93 tables**
 | **E. 5-Year Data & RAM Optimization** | 2026-06-27 | 5-year price history downloaded (820k rows); 70% win-rate gate imposed (later loosened); continuous 5-min paper trading monitor added; LITE mode for RAM; LightGBM/XGBoost removed; BSE universe added (309 India total) |
 | **F. Self-Learning Loop Closed** | 2026-06-28 | AQRTINet v2 (stacking + Platt calibration); self-learning loop fully wired end-to-end; strategy generation cut 100→30/day for quality; fixed a drawdown-limit bug that was retiring every single strategy |
 | **G. Trust Overhaul** | 2026-07-01 – 07-02b | **The most consequential phase.** Discovered Sharpe/Sortino were fabricated system-wide (see below); rebuilt the backtester for honesty; added realism gates and forward-paper quarantine; found only ~12% of strategies have genuine positive Sharpe once measured honestly |
+| **H. Feature Coverage Fix, Arena Rigor, Index Futures** | 2026-07-03 | Found and fixed a live bug: feature generation was capped to a trailing 1200-day (3.3yr) window while price history covers 5yr, silently blocking thousands of DSL entries per strategy — widened to 2000 days and re-backfilled (16.7M+ feature rows). Added OOS + regime-robustness gates and `arena_status` isolation to the arena (§6). Added meta-learner shrinkage estimators so small-sample deaths/wins can't swing family weights at full strength. Shipped AQRTINet v3.1 (§5). Cleaned the strategy population (deleted 1,229 zero-trade strategies, reset 926 with real trade history to honestly re-earn scores) — produced the current honest baseline of **927 population / 0 promoted**: no strategy has yet proven a genuine edge under the fully-fixed pipeline, which is the correct and expected state, not a bug. Fixed a real crash (orphaned paper positions from the population cleanup poisoning the DB session on every close — see `strategies/live_validator.py`). Added the evolution bootstrap parent tier (§6) so evolution doesn't stall when literally every strategy in the population has negative Sharpe. Built the Index Futures segment foundation (§12) — separate asset class, isolated from the stock population end-to-end. |
+| **I. Docs Audit + Placeholder-Data Purge** | 2026-07-05 | Full documentation review produced `IMPROVEMENTS.md`, a prioritized backlog (P0 placeholder-data violations, P1 stale/wrong docs, P2 historical-doc labeling, P3 polish). Working that backlog found and fixed three real fabricated-data violations beyond the ones already catalogued: `backend/seed_missing_data.py` (deleted — had written invented earnings actuals and `random.uniform()` options data into the DB as if real), a matching pattern in `fii_dii_scraper.py`'s history-backfill (deleted — wrote randomized FII/DII crore flows indistinguishable from real scraped rows), and a hardcoded fake "Today's Alerts" panel on the Overview page (`index.html`, never wired to JS at all — now hydrated from the real research-findings API). Removed `MOCK_AGENT_DATA`/`MOCK_VAULT_DATA`/dead `USE_MOCK` plumbing from the UI. README/USER_GUIDE corrected to match current code (model stack, family/mutation-op/fitness-dimension counts, algo naming). |
 
 ### The Trust Overhaul in detail (2026-07-01 to 2026-07-02b)
 
