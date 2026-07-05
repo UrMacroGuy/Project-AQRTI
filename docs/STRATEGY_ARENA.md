@@ -545,7 +545,7 @@ Three models trained together; predictions combined via ensemble:
 |---|---|---|
 | CatBoostModel | Gradient boosted trees | Handles mixed features; robust to outliers |
 | NGBoostModel | Natural Gradient Boosting | Calibrated probability estimates |
-| AQRTINet | Custom neural network | Captures non-linear feature interactions |
+| AQRTINet | Custom mixture-of-experts (v4.0) | 4 regime-specialist GBT experts + feature neutralization + conformal intervals |
 
 ### Prediction Pipeline (daily)
 
