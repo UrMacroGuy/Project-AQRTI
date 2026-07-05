@@ -1,6 +1,30 @@
 # Bug: `float division by zero` in Strategy Backtester
 
-## Status
+## Status: OBSOLETE — superseded by the 2026-07-02 backtester rebuild (closed 2026-07-05)
+
+This investigation was never formally resolved (no traceback was ever
+captured for the exact failing line), but the underlying code it
+investigates no longer exists in anything like this form. The 2026-07-02
+Trust Overhaul (see `PROJECT_DIARY.md` §14, Timeline phase G) rewrote
+`strategy_backtester.py` end-to-end: real day-by-day mark-to-market
+returns, intrabar SL/TP fills, circuit-lock handling, a corrupt-bar guard,
+fail-closed DSL evaluation, and honest Sharpe/Sortino computation via
+`strategy_metrics.py`'s `compute_sharpe`/`compute_sortino` (both of which
+already guard `if std == 0: return 0.0` in the current code). The
+traceback-logging patch this doc references at `strategy_research_loop.py`
+was never found in the current file — it was either removed as instructed
+in the original task list below, or the file was rewritten past it.
+
+No fresh `float division by zero` reports have surfaced since the July
+rebuild. This investigation is being closed as obsolete rather than
+resolved-with-proof, since the code it was chasing is gone — if a similar
+error resurfaces, it needs a new investigation against the current
+codebase, not a continuation of this one. The historical investigation
+notes below are kept for reference only.
+
+---
+
+## Original Status (2026-06-26, superseded)
 Partially fixed — root causes identified but the error persists after restart. The exact traceback line has not yet been captured because the `log.warning` call swallows the exception without a full stack trace. A traceback-logging patch is now in place (`strategy_research_loop.py:108`) and will emit the full stack on the next strategy loop cycle (~5 min after backend restart).
 
 ---
