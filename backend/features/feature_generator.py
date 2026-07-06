@@ -231,7 +231,9 @@ def _normalize_dates(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.sort_values("date").reset_index(drop=True)
     if len(df) and isinstance(df["date"].iloc[0], pd.Timestamp):
-        df = df.assign(date=df["date"].dt.date)
+        df = df.assign(date=pd.to_datetime(df["date"], errors="coerce").date)
+        if df["date"].isna().any():
+            raise ValueError("Corrupt date values found — NaT after coercion")
     return _coerce_numeric(df)
 
 
@@ -415,17 +417,23 @@ def _generate_all(
             if slice_stock is None or len(slice_stock) < MIN_HISTORY_ROWS:
                 continue
             try:
-                features = _compute_all_features(
-                    symbol, slice_stock, slice_nifty,
-                    slice_universe, sector_map,
-                    breadth_snapshot=breadth_snapshot,
-                    fii_dii_cache=fii_cache,
-                    peer_mean_snapshot=peer_mean_snapshot,
-                )
-                # commit=False: one commit per DATE (below) covers all symbols
-                # processed on that date, instead of one commit per symbol —
-                # cuts commit count from ~435k to ~1236 for a full backfill.
-                rows = save_feature_vector(db, symbol, feat_date, features, version, commit=False)
+                sp = db.begin_nested()
+                try:
+                    features = _compute_all_features(
+                        symbol, slice_stock, slice_nifty,
+                        slice_universe, sector_map,
+                        breadth_snapshot=breadth_snapshot,
+                        fii_dii_cache=fii_cache,
+                        peer_mean_snapshot=peer_mean_snapshot,
+                    )
+                    # commit=False: one commit per DATE (below) covers all symbols
+                    # processed on that date, instead of one commit per symbol —
+                    # cuts commit count from ~435k to ~1236 for a full backfill.
+                    rows = save_feature_vector(db, symbol, feat_date, features, version, commit=False)
+                    sp.commit()
+                except Exception:
+                    sp.rollback()
+                    raise
                 sym_rows_count[symbol] += rows
             except Exception as exc:
                 log.debug("%s %s: %s", symbol, feat_date, exc)
@@ -511,14 +519,16 @@ def _generate_incremental(
             features = _compute_all_features(symbol, slice_stock, slice_nifty,
                                              slice_universe, sector_map,
                                              fii_dii_cache=fii_cache)
-            rows = save_feature_vector(db, symbol, latest_price, features, version)
+            rows = save_feature_vector(db, symbol, latest_price, features, version, commit=False)
             total_rows += rows
             symbols_done += 1
-            log.debug("%s: %d features written for %s.", symbol, rows, latest_price)
         except Exception as exc:
+            db.rollback()
             log.error("%s: incremental generation failed: %s", symbol, exc)
             errors.append(symbol)
 
+    log.info("Incremental generation: processed=%d skipped=%d rows=%d errors=%d",
+             symbols_done, skipped, total_rows, len(errors))
     return {
         "symbols_processed": symbols_done,
         "symbols_skipped":   skipped,

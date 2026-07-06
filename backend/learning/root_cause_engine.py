@@ -13,7 +13,6 @@ Writes to FailureRecord and generates a LessonLearned entry.
 
 from __future__ import annotations
 
-import json
 from datetime import date
 from typing import Optional
 
@@ -131,7 +130,11 @@ def generate_root_cause(
         trade_id            = classified.get("trade_id"),
     )
     db.add(fail_row)
-    db.flush()
+    try:
+        db.flush()
+    except Exception:
+        db.rollback()
+        return
 
     # Generate linked lesson
     record_lesson(

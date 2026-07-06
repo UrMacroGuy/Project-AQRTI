@@ -30,6 +30,8 @@ TRADING_DAYS    = 252
 
 def _get_nifty_close(db: Session) -> Optional[float]:
     """Fetch today's Nifty50 close from IndexData, falling back to yfinance."""
+    import logging
+    _log = logging.getLogger(__name__)
     row = (
         db.query(IndexData.close)
         .filter(IndexData.index_name == "NIFTY50")
@@ -38,6 +40,7 @@ def _get_nifty_close(db: Session) -> Optional[float]:
     )
     if row and row[0]:
         return float(row[0])
+    _log.warning("IndexData has no NIFTY50 close — trying yfinance fallback")
     try:
         import yfinance as yf
         yf_stderr = StringIO()
@@ -45,8 +48,9 @@ def _get_nifty_close(db: Session) -> Optional[float]:
             hist = yf.Ticker("^NSEI").history(period="2d", interval="1d", auto_adjust=True)
         if not hist.empty:
             return float(hist["Close"].iloc[-1])
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.warning("yfinance fallback failed: %s", exc)
+    _log.warning("All NIFTY50 close sources exhausted — returning None")
     return None
 
 
@@ -204,7 +208,13 @@ def compute_and_save_snapshot(db: Session) -> PerformanceSnapshot:
     win_rate   = len(wins) / len(closed) * 100 if closed else 0.0
     gross_win  = sum(t.gross_pnl or 0 for t in wins)
     gross_loss = abs(sum(t.gross_pnl or 0 for t in losses))
-    pf         = gross_win / gross_loss if gross_loss > 0 else (1.0 if gross_win > 0 else 0.0)
+    if gross_loss > 0:
+        if gross_win > 0:
+            pf = gross_win / gross_loss
+        else:
+            pf = -gross_loss
+    else:
+        pf = 1.0 if gross_win > 0 else 0.0
     avg_win    = (sum(t.gross_pnl_pct or 0 for t in wins) / len(wins)) if wins else 0.0
     avg_loss   = (sum(t.gross_pnl_pct or 0 for t in losses) / len(losses)) if losses else 0.0
     expectancy = (win_rate / 100 * avg_win) + ((1 - win_rate / 100) * avg_loss)

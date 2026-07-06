@@ -30,7 +30,7 @@ PORTFOLIO_NAME = "default"
 def _get_nifty_close(db) -> Optional[float]:
     row = (
         db.query(IndexData.close)
-        .filter(IndexData.index_name == "^NSEI")
+        .filter(IndexData.index_name == "NIFTY50")
         .order_by(IndexData.date.desc())
         .first()
     )

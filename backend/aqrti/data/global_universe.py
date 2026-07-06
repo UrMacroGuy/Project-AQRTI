@@ -301,6 +301,10 @@ GLOBAL_UNIVERSE: dict[str, dict] = {
     "CANBK.NS":       {"name": "Canara Bank",                  "sector": "Banking",          "industry": "PSU Bank",               "exchange": "NSE", "currency": "INR", "region": "IN"},
     "UNIONBANK.NS":   {"name": "Union Bank of India",          "sector": "Banking",          "industry": "PSU Bank",               "exchange": "NSE", "currency": "INR", "region": "IN"},
 
+    # ══════════ INDIA NSE — ETF (for gold + indexing) ══════════
+    "GOLDBEES.NS": {"name": "Gold Bees (Nippon India Gold ETF)", "sector": "Commodities",     "industry": "Gold ETF",               "exchange": "NSE", "currency": "INR", "region": "IN"},
+    "VTI":        {"name": "Vanguard Total Stock Market ETF",    "sector": "Financial",       "industry": "US Total Market ETF",   "exchange": "NYSE", "currency": "USD", "region": "US"},
+
     # ══════════ UNITED KINGDOM — FTSE 100 ══════════
     "SHEL.L":  {"name": "Shell plc",                     "sector": "Energy",             "industry": "Oil & Gas",              "exchange": "LSE", "currency": "GBP", "region": "UK"},
     "AZN.L":   {"name": "AstraZeneca plc",               "sector": "Healthcare",         "industry": "Drug Manufacturers",     "exchange": "LSE", "currency": "GBP", "region": "UK"},

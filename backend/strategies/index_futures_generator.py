@@ -53,7 +53,13 @@ INDEX_VOLATILITY_FEATURES = [
     "vol_expansion", "historical_vol_63d",
 ]
 
-FAMILIES = ["momentum", "mean_reversion", "breakout", "volatility_play"]
+# Futures-specific features (computed by index_features.py compute_futures_features)
+INDEX_FUTURES_FEATURES = [
+    "basis_pct",
+]
+
+FAMILIES = ["momentum", "mean_reversion", "breakout", "volatility_play",
+            "carry_trade", "roll_yield_momentum"]
 
 
 def _cond(feature: str, op: str, threshold: float, weight: float = 1.0) -> Condition:
@@ -149,11 +155,81 @@ def _generate_volatility_play(rng: random.Random, index_name: str) -> StrategyDS
     )
 
 
+def _generate_carry_trade(rng: random.Random, index_name: str) -> StrategyDSL:
+    """
+    P-PF-7: Trade the cost-of-carry basis. Enter long when futures trade at
+    a discount to spot (negative basis = backwardation = positive carry for
+    longs), confirmed by trending conditions. The thesis: in backwardation,
+    the futures price converges toward spot at expiry, adding a structural
+    tailwind to long positions that pure equity strategies cannot access.
+    Index futures have far lower round-trip cost (0.10% vs 0.28%), so this
+    structural advantage is not eaten by transaction friction.
+    """
+    basis_th = round(rng.uniform(-0.15, -0.03), 3)   # basis < -0.03% = discount
+    rsi_th   = round(rng.uniform(45, 58), 1)
+    conds    = [_cond("basis_pct", "<", basis_th, weight=1.3),
+                _cond("rsi_14", ">", rsi_th)]
+    if rng.random() < 0.5:
+        conds.append(_cond("adx_14", ">", round(rng.uniform(18, 26), 1)))
+
+    sl = round(rng.uniform(-3.5, -1.5), 1)
+    tp = _rr_take_profit(rng, sl, min_rr=1.6)
+    return StrategyDSL(
+        name=f"Carry_{index_name}_basis{basis_th}",
+        family="carry_trade",
+        entry_conditions=ConditionGroup(conditions=conds, logic="AND"),
+        exit_conditions=ConditionGroup(
+            conditions=[_cond("basis_pct", ">", round(rng.uniform(0.0, 0.10), 3)),
+                        _cond("rsi_14", ">", round(rng.uniform(65, 78), 1))],
+            logic="OR"),
+        stop_loss_pct=sl, take_profit_pct=tp,
+        min_confidence=round(rng.uniform(52, 65), 1),
+        max_holding_days=rng.randint(10, 25),
+        allowed_regimes=["BULL", "SIDEWAYS"],
+    )
+
+
+def _generate_roll_yield_momentum(rng: random.Random, index_name: str) -> StrategyDSL:
+    """
+    P-PF-7: Momentum on the futures series, filtered by basis environment.
+    Only enter when (a) futures themselves are trending and (b) the basis
+    is not in extreme contango (which would impose excessive negative carry
+    cost on a long position). This avoids the worst case for a long futures
+    strategy: catching a trend right when it is most expensive to hold.
+    """
+    thresh = round(rng.uniform(0.8, 2.5), 2)     # modest momentum
+    rsi_th = round(rng.uniform(50, 62), 1)
+    basis_cap = round(rng.uniform(0.05, 0.15), 3) # basis must be below this (not extreme contango)
+    conds  = [_cond("return_5d", ">", thresh),
+              _cond("rsi_14", ">", rsi_th),
+              _cond("basis_pct", "<", basis_cap)]
+    if rng.random() < 0.5:
+        conds.append(_cond("adx_14", ">", round(rng.uniform(20, 28), 1)))
+
+    sl = round(rng.uniform(-3.0, -1.5), 1)
+    tp = _rr_take_profit(rng, sl, min_rr=1.5)
+    return StrategyDSL(
+        name=f"RollMom_{index_name}_ret{thresh}",
+        family="roll_yield_momentum",
+        entry_conditions=ConditionGroup(conditions=conds, logic="AND"),
+        exit_conditions=ConditionGroup(
+            conditions=[_cond("rsi_14", "<", round(rng.uniform(38, 48), 1)),
+                        _cond("return_5d", "<", round(-rng.uniform(1.0, 2.0), 2))],
+            logic="OR"),
+        stop_loss_pct=sl, take_profit_pct=tp,
+        min_confidence=round(rng.uniform(50, 62), 1),
+        max_holding_days=rng.randint(7, 18),
+        allowed_regimes=["BULL", "SIDEWAYS", "VOLATILE"],
+    )
+
+
 _GENERATORS = {
-    "momentum":        _generate_momentum,
-    "mean_reversion":  _generate_mean_reversion,
-    "breakout":         _generate_breakout,
-    "volatility_play":  _generate_volatility_play,
+    "momentum":            _generate_momentum,
+    "mean_reversion":      _generate_mean_reversion,
+    "breakout":             _generate_breakout,
+    "volatility_play":      _generate_volatility_play,
+    "carry_trade":          _generate_carry_trade,
+    "roll_yield_momentum":  _generate_roll_yield_momentum,
 }
 
 

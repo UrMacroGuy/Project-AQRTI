@@ -67,7 +67,7 @@ def compute_company_sentiment(db: Session, symbol: str) -> Optional[SentimentRes
     if not rows:
         return None
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Compute recency-weighted and impact-weighted sentiment
     weighted_scores: list[tuple[float, float]] = []  # (score_0_100, weight)

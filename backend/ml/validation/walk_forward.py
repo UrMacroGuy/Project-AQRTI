@@ -19,8 +19,6 @@ import pandas as pd
 from aqrti.utils.logger import get_logger
 from ml.datasets.training_dataset import TrainingDataset, DataSplit
 from ml.models.catboost_model import CatBoostModel
-from ml.models.ngboost_model import NGBoostModel
-from ml.models.aqrtinet_model import AQRTINet
 from ml.models.base_model import BaseModel
 from ml.validation.metrics import compute_metrics, aggregate_fold_metrics
 
@@ -29,17 +27,12 @@ log = get_logger("walk_forward")
 # Fraction of training fold used as early-stopping validation set
 VAL_FRACTION = 0.15
 
-# LightGBM/XGBoost were removed from this validator 2026-07-05 -- they were
-# retired from the active ensemble 2026-06-27 (sub-coin-flip accuracy) but
-# this walk-forward harness kept training them on every fold regardless,
-# doing real wasted work and (once BaseModel.fit() gained a sample_weight
-# param) throwing per-fold errors since their _fit_impl never accepted it.
-# This dict had also never been updated to include NGBoost/AQRTINet, so the
-# validator was silently checking a stale ensemble the whole time.
+# AQRTINet was removed from the active training pipeline 2026-07-07 after
+# the 50k-sample comparison (AUC-ROC 0.448 vs CatBoost 0.497) showed it
+# underperformed both baselines. It will be re-enabled once development
+# produces a version that beats CatBoost (see IMPROVEMENTS.md).
 MODEL_CLASSES = {
     "catboost": CatBoostModel,
-    "ngboost":  NGBoostModel,
-    "aqrtinet": AQRTINet,
 }
 
 
@@ -75,6 +68,7 @@ def run_fold(
     Returns dict with:
       fold, model_name, task, train_rows, test_rows, metrics, trained_at
     """
+    import pandas as pd
     ModelClass = MODEL_CLASSES[model_name]
     model: BaseModel = ModelClass(task=task, label_col=label_col, version=version)
 
@@ -128,7 +122,7 @@ def run_walk_forward_validation(
 
     Args:
         dataset:     Prepared TrainingDataset with .folds populated
-        model_names: Subset of ["catboost", "ngboost", "aqrtinet"] to run
+        model_names: Subset of ["catboost"] to run
         version:     Model version number for artifact naming
         save_to_db:  Whether to persist results to walk_forward_folds / model_metrics
 

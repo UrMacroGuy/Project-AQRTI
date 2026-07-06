@@ -75,6 +75,12 @@ class BaseModel(ABC):
         self._feature_cols: list[str] = []
         self._artifact: Optional[ModelArtifact] = None
         self._is_classification = (task == "direction")
+        # Per-row dates for the in-flight predict()/predict_proba() call, if the
+        # caller supplied them. None means "no historical dates known" — subclasses
+        # that support regime/date-aware routing (e.g. AQRTINet) fall back to their
+        # single-current-value behavior in that case. Ignored by models that don't
+        # need it (CatBoost, NGBoost).
+        self._predict_dates: Optional[pd.Series] = None
 
     @property
     @abstractmethod
@@ -123,12 +129,18 @@ class BaseModel(ABC):
         """Model-specific training logic."""
         ...
 
-    def predict(self, X: pd.DataFrame) -> np.ndarray:
+    def predict(self, X: pd.DataFrame, dates: Optional[pd.Series] = None) -> np.ndarray:
         """
         For classification: returns class labels (0/1).
         For regression: returns predicted float values.
+
+        dates: optional per-row date Series aligned to X's index, used by models
+        that support date/regime-aware inference (e.g. AQRTINet routing each
+        historical row to its own regime expert instead of "today's" regime).
+        Ignored by models that don't need it.
         """
         assert self._model is not None, "Model not trained — call fit() first"
+        self._predict_dates = dates
         X = X[self._feature_cols]
         return self._predict_impl(X)
 
@@ -136,12 +148,15 @@ class BaseModel(ABC):
     def _predict_impl(self, X: pd.DataFrame) -> np.ndarray:
         ...
 
-    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+    def predict_proba(self, X: pd.DataFrame, dates: Optional[pd.Series] = None) -> np.ndarray:
         """
         For classification: returns probability of positive class (shape: [n,]).
         For regression: returns raw predictions (same as predict).
+
+        dates: see predict().
         """
         assert self._model is not None, "Model not trained"
+        self._predict_dates = dates
         X = X[self._feature_cols]
         return self._predict_proba_impl(X)
 

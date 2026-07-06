@@ -14,7 +14,6 @@ Results are stored in model_drift_history for trend analysis.
 
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from typing import Optional
 

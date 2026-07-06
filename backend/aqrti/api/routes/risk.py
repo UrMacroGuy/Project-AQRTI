@@ -65,7 +65,7 @@ def get_risk(db: Session = Depends(get_db_dependency)):
     sector_list = [
         {
             "sector": sector,
-            "weight": round(amt / total_value * 100, 1),
+            "weight": round(amt / total_value * 100, 1) if total_value else 0.0,
             "limit":  settings.max_sector_pct,
         }
         for sector, amt in sorted(sector_exposure.items(), key=lambda x: -x[1])

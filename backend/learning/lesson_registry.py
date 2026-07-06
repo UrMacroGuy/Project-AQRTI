@@ -14,7 +14,6 @@ what worked, what failed, and what to do differently.
 
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from typing import Optional
 

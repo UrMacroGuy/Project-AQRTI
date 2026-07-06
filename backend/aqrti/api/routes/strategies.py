@@ -307,8 +307,13 @@ def get_trade_recommendations(db: Session = Depends(get_db_dependency)):
     }
 
 
+RESERVED_IDS = {"all", "ALL", "All"}
+
+
 @router.get("/{strategy_id}")
 def get_strategy_detail(strategy_id: str, db: Session = Depends(get_db_dependency)):
+    if strategy_id in RESERVED_IDS:
+        raise HTTPException(status_code=400, detail="'All' is reserved — use GET /strategies without an ID to list all")
     row = get_strategy(db, strategy_id)
     if not row:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -357,6 +362,8 @@ def get_strategy_dna(strategy_id: str, db: Session = Depends(get_db_dependency))
     live validation vs backtest, and trade-by-trade breakdown.
     Used by the Strategy DNA Viewer panel in the UI.
     """
+    if strategy_id in RESERVED_IDS:
+        raise HTTPException(status_code=400, detail="'All' is reserved — provide a concrete strategy ID")
     row = get_strategy(db, strategy_id)
     if not row:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -543,6 +550,8 @@ def promote(
     reason: str = Query(default="manual_approval"),
     db: Session = Depends(get_db_dependency),
 ):
+    if strategy_id in RESERVED_IDS:
+        raise HTTPException(status_code=400, detail="'All' is reserved — provide a concrete strategy ID")
     result = promote_strategy(db, strategy_id, reason=reason)
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
@@ -561,6 +570,8 @@ def activate(strategy_id: str, force: bool = False, db: Session = Depends(get_db
     strategy was created is the only test that can't be overfit.
     Pass force=true to override (logged in status_reason).
     """
+    if strategy_id in RESERVED_IDS:
+        raise HTTPException(status_code=400, detail="'All' is reserved — provide a concrete strategy ID")
     from datetime import datetime as _dt
     from aqrti.database.models import PaperTrade
     from strategies.promotion_config import (
@@ -620,6 +631,8 @@ def retire(
     reason: str = Query(default="manual_retirement"),
     db: Session = Depends(get_db_dependency),
 ):
+    if strategy_id in RESERVED_IDS:
+        raise HTTPException(status_code=400, detail="'All' is reserved — provide a concrete strategy ID")
     result = retire_strategy(db, strategy_id, failure_reason=reason)
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
@@ -772,6 +785,8 @@ def replay_strategy(
     db: Session = Depends(get_db_dependency),
 ):
     """Re-run backtest for a strategy and return full trade sequence for replay."""
+    if strategy_id in RESERVED_IDS:
+        raise HTTPException(status_code=400, detail="'All' is reserved — provide a concrete strategy ID")
     import json as _json
     row = get_strategy(db, strategy_id)
     if not row:

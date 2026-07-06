@@ -77,7 +77,12 @@ def compute_dna(strategy: StrategyV2, db: Session) -> dict:
 
     sector_wins: dict = defaultdict(list)
     trades = db.query(StrategyBacktestTrade).filter(StrategyBacktestTrade.strategy_id == strategy.strategy_id).all()
-    sym_sector = {s.symbol: s.sector for s in db.query(Stock).all()}
+    sym_sector: dict[str, str] = {}
+    for s in db.query(Stock).all():
+        sec = s.sector or "Unknown"
+        if sec == "Unknown":
+            log.warning("Missing sector mapping for %s — using 'Unknown'", s.symbol)
+        sym_sector[s.symbol] = sec
 
     # Build regime map for trade dates
     regime_map = {r.date: r.regime for r in db.query(MarketRegime).all()}

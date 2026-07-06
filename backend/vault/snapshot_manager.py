@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from aqrti.database.models import (
-    MarketSnapshot, DailyPrice, MarketRegime, SentimentRecord,
+    MarketSnapshot, DailyPrice, IndexData, MarketRegime, SentimentRecord,
     KnowledgeScore,
 )
 
@@ -39,29 +39,44 @@ def archive_market_snapshot(db: Session, target_date: date) -> dict:
     regime       = regime_row.regime          if regime_row else "UNKNOWN"
     regime_conf  = float(regime_row.confidence) if regime_row and regime_row.confidence else None
 
-    # Nifty proxy — use NIFTY50 or ^NSEI
+    # Nifty proxy — use IndexData (correct table for index data, not DailyPrice)
     nifty_close = None
     nifty_ret1d = None
     nifty_ret5d = None
     nifty_vol   = None
 
     nifty_price = (
-        db.query(DailyPrice)
-        .filter(DailyPrice.symbol.in_(["^NSEI", "NIFTY50"]), DailyPrice.date == target_date)
+        db.query(IndexData)
+        .filter(IndexData.index_name == "NIFTY50", IndexData.date == target_date)
         .first()
     )
     if nifty_price:
         nifty_close = nifty_price.close
-        nifty_ret1d = nifty_price.daily_return
-        nifty_vol   = None  # DailyPrice has no volatility_20d column
+        nifty_ret1d = nifty_price.returns
+        # Compute 20-day rolling annualised vol from IndexData.close if column doesn't exist
+        nifty_vol = getattr(nifty_price, 'volatility_20d', None)
+        if nifty_vol is None:
+            import numpy as _np
+            vol_rows = (
+                db.query(IndexData.returns)
+                .filter(IndexData.index_name == "NIFTY50", IndexData.date <= target_date)
+                .order_by(IndexData.date.desc())
+                .limit(21)
+                .all()
+            )
+            ret_vals = [r[0] for r in vol_rows if r[0] is not None]
+            if len(ret_vals) >= 2:
+                nifty_vol = float(_np.nanstd(ret_vals) * _np.sqrt(252))
+            else:
+                nifty_vol = None
 
         prev5 = (
-            db.query(DailyPrice)
+            db.query(IndexData)
             .filter(
-                DailyPrice.symbol == nifty_price.symbol,
-                DailyPrice.date < target_date,
+                IndexData.index_name == "NIFTY50",
+                IndexData.date < target_date,
             )
-            .order_by(DailyPrice.date.desc())
+            .order_by(IndexData.date.desc())
             .offset(4)
             .first()
         )

@@ -268,8 +268,10 @@ def _save_arena_run(db, strategy, replay_result: dict, grade: dict,
     winning_days = replay_result.get("winning_days", [])
     daily = replay_result.get("daily_results", [])
 
-    # Sample daily results for UI (keep every 5th day to limit JSON size)
+    # Tag with schema version for forward-compat
+    _ARENA_DATA_VERSION = 2
     sampled = daily[::5] if len(daily) > 100 else daily
+    sampled = [{**d, "_v": _ARENA_DATA_VERSION} for d in sampled]
 
     run = db.query(ArenaRun).filter_by(
         strategy_id=strategy.strategy_id,

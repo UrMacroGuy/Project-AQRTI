@@ -83,6 +83,7 @@ class IndexFuturesBacktestResult:
     trade_count:   int = 0
     avg_holding_days: float = 0.0
     rolls_encountered: int = 0
+    is_synthetic:  bool = True
 
     def compute_metrics(self, daily_returns: Optional[list[float]] = None) -> None:
         closed = [t for t in self.trades if t.pnl_pct is not None]

@@ -205,8 +205,13 @@ CATALOG: dict[str, FeatureDef] = {f.name: f for f in FEATURE_CATALOG}
 def seed_feature_metadata(db: Session) -> int:
     """Insert / update FeatureMetadata rows for every catalog entry. Returns upserted count."""
     import json
+    seen: set[str] = set()
     count = 0
     for feat in FEATURE_CATALOG:
+        if feat.name in seen:
+            log.warning("Duplicate feature name in catalog: %s — skipping", feat.name)
+            continue
+        seen.add(feat.name)
         existing = db.query(FeatureMetadata).filter_by(name=feat.name).first()
         if existing:
             existing.description = feat.description

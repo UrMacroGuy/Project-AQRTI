@@ -12,6 +12,10 @@ delivery_ratio, etc.) are deliberately NOT computed here — index futures
 signal the way stock volume is, and none of the stock volume features
 translate meaningfully.
 
+Futures-specific features (basis_pct) are computed separately from the
+spot_close and basis columns in IndexFuturesPrice — these capture the
+cost-of-carry signal that has no equivalent in the equity pipeline.
+
 Cross-index relative strength (e.g. BANKNIFTY vs NIFTY50) is intentionally
 out of scope for v1 — each index's features are computed standalone. This
 can be added later the same way stock-vs-NIFTY relative strength works,
@@ -37,22 +41,26 @@ VERSION = 1
 
 def _load_continuous_series(db, index_name: str) -> pd.DataFrame:
     """
-    Load the continuous futures OHLC series for one index, sorted ascending.
-    One row per date (the "current" contract for that date — see
-    backfill_index_futures.py's contract-month rollover logic).
+    Load the continuous futures OHLC + spot_close + basis series for one
+    index, sorted ascending.  One row per date (the "current" contract for
+    that date — see backfill_index_futures.py's contract-month rollover
+    logic).  spot_close and basis are needed for futures-specific features
+    (basis_pct) that have no stock equivalent.
     """
     rows = (
         db.query(IndexFuturesPrice.date, IndexFuturesPrice.open,
                  IndexFuturesPrice.high, IndexFuturesPrice.low,
-                 IndexFuturesPrice.close)
+                 IndexFuturesPrice.close,
+                 IndexFuturesPrice.spot_close, IndexFuturesPrice.basis)
         .filter(IndexFuturesPrice.index_name == index_name)
         .order_by(IndexFuturesPrice.date.asc())
         .all()
     )
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close"])
-    for col in ("open", "high", "low", "close"):
+    df = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close",
+                                     "spot_close", "basis"])
+    for col in ("open", "high", "low", "close", "spot_close", "basis"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
@@ -82,6 +90,25 @@ def _save_feature_vector(db, index_name: str, on_date, features: dict) -> int:
     )
     db.execute(stmt)
     return len(rows)
+
+
+def compute_futures_features(df: pd.DataFrame) -> dict:
+    """
+    Futures-specific features that have no stock equivalent.
+    Input: DataFrame with columns [close, spot_close, basis] sorted by date.
+    Returns dict of {feature_name: float|None} for the last row.
+    """
+    if df.empty or len(df) < 2:
+        return {}
+    last = df.iloc[-1]
+    sp = last.get("spot_close")
+    bs = last.get("basis")
+    results = {}
+    if sp is not None and sp > 0 and bs is not None:
+        results["basis_pct"] = round(bs / sp * 100, 4)
+    else:
+        results["basis_pct"] = None
+    return results
 
 
 def run_index_feature_generation(index_names: list[str] | None = None) -> dict:
@@ -115,6 +142,7 @@ def run_index_feature_generation(index_names: list[str] | None = None) -> dict:
             features.update(compute_price_features(window))
             features.update(compute_trend_features(window))
             features.update(compute_volatility_features(window))
+            features.update(compute_futures_features(window))
 
             n = _save_feature_vector(db, index_name, on_date, features)
             rows_written += n

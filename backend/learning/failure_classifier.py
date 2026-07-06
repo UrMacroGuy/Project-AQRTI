@@ -58,7 +58,7 @@ def _get_sentiment(db: Session, symbol: str, on_date: date) -> Optional[float]:
 
 def _has_missing_features(db: Session, symbol: str, on_date: date) -> bool:
     """True if critical features were missing or zero on the prediction date."""
-    critical_features = ["rsi_14", "ema_20", "macd_signal", "vol_20d"]
+    critical_features = ["rsi_14", "ema_21", "macd_signal", "rolling_vol_21d"]
     for feat in critical_features:
         row = (
             db.query(FeatureValue.value)

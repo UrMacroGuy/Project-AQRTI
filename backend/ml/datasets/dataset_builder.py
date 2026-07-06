@@ -67,18 +67,24 @@ def _load_nifty_data(db: Session, days: int = 2000) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["date", "close"])
 
 
-def _load_feature_vectors(db: Session, symbol: str, version: int = 1) -> pd.DataFrame:
+def _load_feature_vectors(db: Session, symbol: str, version: int = 1, days: Optional[int] = None) -> pd.DataFrame:
     """
-    Load all feature vectors for a symbol from feature_values table.
+    Load feature vectors for a symbol from feature_values table.
     Returns DataFrame: rows=dates, columns=feature_names.
+
+    days: if given, only load feature vectors from the last N calendar days
+    (keeps training-window restrictions RAM-friendly by not pulling full
+    history into memory just to discard it after the date filter).
     """
     from aqrti.database.models import FeatureValue
-    rows = (
+    query = (
         db.query(FeatureValue.date, FeatureValue.feature_name, FeatureValue.value)
         .filter(FeatureValue.symbol == symbol, FeatureValue.version == version)
-        .order_by(FeatureValue.date.asc())
-        .all()
     )
+    if days is not None:
+        cutoff = date.today() - timedelta(days=days)
+        query = query.filter(FeatureValue.date >= cutoff)
+    rows = query.order_by(FeatureValue.date.asc()).all()
     if not rows:
         return pd.DataFrame()
 
@@ -94,6 +100,7 @@ def build_symbol_dataset(
     db: Session,
     symbol: str,
     version: int = 1,
+    days_back: Optional[int] = None,
 ) -> Optional[pd.DataFrame]:
     """
     Build a fully labeled, feature-joined dataset for one symbol.
@@ -104,11 +111,20 @@ def build_symbol_dataset(
       - [all feature columns]
       - [all label columns]
 
+    days_back: if given, restrict to the last N calendar days of history
+    (both price/feature loading AND the min-rows check below account for
+    this — see build_full_dataset for the min-rows adjustment).
+
     Returns None if insufficient data.
     """
-    price_df = _load_price_data(db, symbol)
-    nifty_df = _load_nifty_data(db)
-    feat_df  = _load_feature_vectors(db, symbol, version)
+    # Pad the price/nifty load window so forward-looking labels (direction_5d
+    # needs 5 future trading days) can still be computed for rows near the
+    # end of the requested window, and so early rows in the window have
+    # enough trailing history for rolling-window features.
+    load_days = (days_back + 15) if days_back is not None else 2000
+    price_df = _load_price_data(db, symbol, days=load_days)
+    nifty_df = _load_nifty_data(db, days=load_days)
+    feat_df  = _load_feature_vectors(db, symbol, version, days=days_back)
 
     if price_df.empty or feat_df.empty:
         log.debug("Skipping %s — missing price or feature data", symbol)
@@ -129,8 +145,9 @@ def build_symbol_dataset(
     # Inner join on date — only dates with BOTH features AND labels
     merged = feat_df.merge(labels_df, on="date", how="inner")
 
-    if len(merged) < MIN_ROWS_PER_SYMBOL:
-        log.debug("Skipping %s — only %d joined rows (min %d)", symbol, len(merged), MIN_ROWS_PER_SYMBOL)
+    min_rows = MIN_ROWS_PER_SYMBOL
+    if len(merged) < min_rows:
+        log.debug("Skipping %s — only %d joined rows (min %d)", symbol, len(merged), min_rows)
         return None
 
     # Drop rows where too many features are NaN
@@ -139,7 +156,7 @@ def build_symbol_dataset(
     nan_ratio = merged[feature_cols].isnull().mean(axis=1)
     merged = merged[nan_ratio <= MAX_NAN_RATIO].copy()
 
-    if len(merged) < MIN_ROWS_PER_SYMBOL:
+    if len(merged) < min_rows:
         log.debug("Skipping %s — only %d rows after NaN filter", symbol, len(merged))
         return None
 
@@ -158,12 +175,24 @@ def build_symbol_dataset(
     return merged
 
 
-def build_full_dataset(version: int = 1) -> pd.DataFrame:
+DEFAULT_TRAINING_WINDOW_DAYS = 90  # 2026-07-07 policy: train on recent data only
+                                    # (~62-63 trading days, ~57-58 usable rows/symbol
+                                    # after the 5-day forward-label truncation — clears
+                                    # MIN_ROWS_PER_SYMBOL=50 with margin). Also keeps
+                                    # per-symbol DataFrames small -> lower peak RAM than
+                                    # building full 2021->now history for every symbol.
+
+
+def build_full_dataset(version: int = 1, days_back: Optional[int] = DEFAULT_TRAINING_WINDOW_DAYS) -> pd.DataFrame:
     """
     Build the complete multi-symbol labeled dataset.
 
     Returns combined DataFrame sorted by date (then symbol).
     Uses all active stocks in the DB (not just hardcoded universe).
+
+    days_back: restrict to the last N calendar days (default 90 — recent-data-
+    only training policy, 2026-07-07). Pass None for full history (e.g. one-off
+    research/comparison scripts that intentionally want the whole dataset).
     """
     all_dfs = []
     with get_db() as db:
@@ -172,12 +201,12 @@ def build_full_dataset(version: int = 1) -> pd.DataFrame:
             row[0] for row in
             db.query(Stock.symbol).filter(Stock.active == True).all()
         ]
-        log.info("Building dataset for %d active symbols", len(symbols))
+        log.info("Building dataset for %d active symbols (days_back=%s)", len(symbols), days_back)
         for symbol in symbols:
-            df = build_symbol_dataset(db, symbol, version)
+            df = build_symbol_dataset(db, symbol, version, days_back=days_back)
             if df is not None:
                 all_dfs.append(df)
-                log.info("Built dataset for %s: %d rows", symbol, len(df))
+                log.debug("Built dataset for %s: %d rows", symbol, len(df))
             else:
                 log.debug("No dataset for %s", symbol)
 

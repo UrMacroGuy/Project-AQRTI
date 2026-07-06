@@ -260,14 +260,13 @@ def download_stock_prices(
     for ticker_ns in symbols_ns:
         symbol = ticker_ns.replace(".NS", "")
         try:
-            last_date = start_override or _latest_date_in_db(db, symbol)
-            if last_date:
-                fetch_start = last_date + timedelta(days=1)
-            else:
-                fetch_start = date.today() - timedelta(days=365)
+            # No SELECT-then-INSERT: always fetch a recent window and rely on
+            # ON CONFLICT to handle any existing rows. The old _latest_date_in_db
+            # check created a race condition when two processes ran concurrently.
+            fetch_start = start_override or (date.today() - timedelta(days=5))
 
             if fetch_start > date.today():
-                data_logger.debug("%s: already up to date.", symbol)
+                data_logger.debug("%s: skip (fetch_start after today).", symbol)
                 results[symbol] = 0
                 continue
 
@@ -351,11 +350,8 @@ def download_index_data(db: Session, start_override: Optional[date] = None) -> d
 
     for ticker, index_name in INDEX_META.items():
         try:
-            last_date = start_override or _latest_index_date(db, index_name)
-            if last_date:
-                fetch_start = last_date + timedelta(days=1)
-            else:
-                fetch_start = date.today() - timedelta(days=365)
+            # No SELECT-then-INSERT; rely on ON CONFLICT for dedup.
+            fetch_start = start_override or (date.today() - timedelta(days=5))
 
             if fetch_start > date.today():
                 results[index_name] = 0
@@ -558,9 +554,9 @@ def _fetch_live_index(index_name: str) -> Optional[dict]:
     yf_sym = _INDEX_YF_MAP.get(index_name)
     if not yf_sym:
         return None
+    import yfinance as yf
+    ticker = yf.Ticker(yf_sym)
     try:
-        import yfinance as yf
-        ticker = yf.Ticker(yf_sym)
         yf_stderr = StringIO()
         with redirect_stderr(yf_stderr):
             fi = ticker.fast_info
@@ -586,6 +582,11 @@ def _fetch_live_index(index_name: str) -> Optional[dict]:
             }
     except Exception:
         pass
+    finally:
+        try:
+            ticker.session.close()
+        except Exception:
+            pass
     return None
 
 

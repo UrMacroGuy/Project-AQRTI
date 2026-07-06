@@ -1,6 +1,6 @@
 """
 AQRTI Ensemble Engine
-Combines CatBoost + NGBoost predictions using dynamic weights.
+CatBoost-only production model (single-model, no ensemble as of 2026-07-07).
 
 For each symbol, produces:
   - direction_prob:    probability of positive 5d return (0.0–1.0)

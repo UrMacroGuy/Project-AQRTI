@@ -86,7 +86,7 @@ def _simulate(db, trade: PaperTrade) -> list:
     s = _sim("exit_1d_later",      entry_price, p_xl, {"exit_shift": +1})
     if s: sims.append(s)
     stop3  = entry_price * 0.97
-    sl_exit = min(exit_price, stop3) if orig < 0 else exit_price
+    sl_exit = max(exit_price, stop3) if orig < 0 else exit_price
     s = _sim("stop_loss_tighter",  entry_price, sl_exit, {"stop_pct": -3.0})
     if s: sims.append(s)
     tp8 = entry_price * 1.08

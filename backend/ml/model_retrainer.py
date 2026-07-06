@@ -10,7 +10,7 @@ Triggered by:
 Retraining steps:
   1. Build a fresh training dataset (last 365 days)
   2. Walk-forward validation to select hyperparams
-  3. Train final models (CatBoost + NGBoost) on full dataset
+  3. Train final model (CatBoost) on full dataset
   4. Register new model versions in model_versions table
   5. Retire the old active model (is_active → False)
   6. Write a LessonLearned record explaining what changed
@@ -24,7 +24,7 @@ Failure analysis fed into retraining:
 
 from __future__ import annotations
 
-import sys, os, json, time
+import sys, os, json, time, signal
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -42,6 +42,43 @@ from aqrti.database.models import (
 from aqrti.utils.logger import get_logger
 
 log = get_logger("model_retrainer")
+
+_INTERRUPTED = False
+
+
+def _signal_handler(signum, frame):
+    global _INTERRUPTED
+    if not _INTERRUPTED:
+        _INTERRUPTED = True
+        log.warning("Received signal %d — will checkpoint on next opportunity", signum)
+
+
+try:
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+except (ValueError, AttributeError):
+    pass
+
+
+def _save_intermediate_checkpoint(model, iteration: int, next_version: int, label: str = ""):
+    """Save an intermediate model pickle to the intermediate directory."""
+    try:
+        from ml.models.base_model import ML_MODELS_DIR
+        inter_dir = Path(backend_dir) / "ml_models" / "intermediate"
+        inter_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"{model.model_type}_{model.task}_v{next_version}_iter_{iteration}"
+        if label:
+            fname += f"_{label}"
+        fpath = inter_dir / f"{fname}.pkl"
+        model.save()
+        # Also copy the saved model to the intermediate dir with the iteration name
+        import shutil
+        saved_path = ML_MODELS_DIR / f"{model.model_type}_{model.task}_v{next_version}.pkl"
+        if saved_path.exists():
+            shutil.copy2(str(saved_path), str(fpath))
+        log.info("Checkpoint saved at iteration %d — %s", iteration, fpath)
+    except Exception as exc:
+        log.warning("Checkpoint save failed at iteration %d: %s", iteration, exc)
 
 # ── Thresholds ────────────────────────────────────────────────
 WIN_RATE_FLOOR        = 50.0   # below this → trigger retraining
@@ -205,8 +242,53 @@ def _check_rolling_ic(db: Session) -> dict:
     }
 
 
+    # 2026-07-06 policy (user decision): don't retrain on a schedule or on
+    # rolling metrics alone. Only retrain when new data has actually arrived
+    # since the last training run. Strategy improvement now comes entirely
+    # from the algo generation/evolution loop, not from repeatedly retraining
+    # the same model on the same data.
+NEW_DATA_MIN_ROWS = 1500  # need at least this many new DailyPrice rows since last training to justify a retrain
+                          # (~297 rows/trading day observed 2026-07 -> ~5 trading days / weekly cadence)
+
+
+def _check_new_data_available(db: Session) -> dict:
+    """
+    Only trigger is that matters now: has enough new market data arrived
+    since the active model was last trained? Time-based staleness and
+    rolling-accuracy/IC decay no longer trigger retraining on their own —
+    see policy note above _check_model_staleness.
+    """
+    from aqrti.database.models import DailyPrice
+
+    active = (
+        db.query(ModelVersion)
+        .filter(ModelVersion.is_active == True)
+        .order_by(ModelVersion.trained_at.desc())
+        .first()
+    )
+    if not active or not active.trained_at:
+        return {"should_retrain": True, "reason": "no_active_model_or_unknown_train_date", "new_rows": None}
+
+    new_rows = (
+        db.query(DailyPrice)
+        .filter(DailyPrice.date > active.trained_at.date())
+        .count()
+    )
+    should_retrain = new_rows >= NEW_DATA_MIN_ROWS
+    reason = (
+        f"new_data={new_rows} rows since {active.trained_at.date()} >= {NEW_DATA_MIN_ROWS}"
+        if should_retrain
+        else f"new_data={new_rows} rows since {active.trained_at.date()} < {NEW_DATA_MIN_ROWS} — not enough to justify retraining"
+    )
+    return {"should_retrain": should_retrain, "reason": reason, "new_rows": new_rows}
+
+
 def _check_model_staleness(db: Session) -> dict:
-    """Check if the active model is too old."""
+    """
+    Check if the active model is too old.
+    NOTE: kept for reporting/visibility only — as of 2026-07-06 this no
+    longer triggers retraining on its own (see _check_new_data_available).
+    """
     active = (
         db.query(ModelVersion)
         .filter(ModelVersion.is_active == True)
@@ -241,8 +323,6 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
     try:
         from ml.datasets.training_dataset import prepare_training_dataset
         from ml.models.catboost_model import CatBoostModel
-        from ml.models.ngboost_model import NGBoostModel
-        from ml.models.aqrtinet_model import AQRTINet
         import pandas as pd, numpy as np
 
         dataset = prepare_training_dataset(label_col="direction_5d", top_features=40, scale=True)
@@ -258,15 +338,6 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         y_train = latest_split.y_train
         X_test  = latest_split.X_test
         y_test  = latest_split.y_test
-
-        # Build a date series aligned to X_train index (needed by AQRTINet regime routing)
-        # dataset.df has "date" column; X_train index = original df row indices
-        train_dates = None
-        try:
-            train_dates = dataset.df.loc[X_train.index, "date"].astype(str)
-            train_dates.index = X_train.index
-        except Exception as e:
-            log.warning("Could not extract training dates for regime routing: %s", e)
 
         # Compute next version number before training so models can use it
         last_version = (
@@ -287,22 +358,21 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
         else:
             sample_weights = None
 
-        for ModelClass in [CatBoostModel, NGBoostModel, AQRTINet]:
+        for iter_count, ModelClass in enumerate([CatBoostModel]):
+            if _INTERRUPTED:
+                log.warning("Interrupt detected — stopping training loop")
+                break
             try:
                 model = ModelClass(task="direction", label_col="direction_5d", version=next_version)
-                # Inject training dates for AQRTINet regime routing (ignored by other models)
-                if train_dates is not None:
-                    model._training_dates = train_dates
                 model.fit(X_train, y_train, X_val=X_test, y_val=y_test,
                           sample_weight=sample_weights)
-                # Compute metrics manually using predict
+                _save_intermediate_checkpoint(model, iter_count, next_version, "trained")
                 preds = model.predict(X_test)
                 correct = int((preds == y_test.values).sum())
                 accuracy = correct / len(y_test) if len(y_test) > 0 else 0.0
                 try:
                     probas = model.predict_proba(X_test)
                     from sklearn.metrics import roc_auc_score
-                    # predict_proba returns 1D array of P(class=1) for classifiers
                     prob_pos = probas if probas.ndim == 1 else probas[:, 1]
                     auc = float(roc_auc_score(y_test, prob_pos))
                 except Exception:
@@ -318,14 +388,8 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
             return {"status": "error", "reason": "all_model_training_failed"}
 
         # Activate every model that clears the quality bar (WIN_RATE_TARGET on
-        # accuracy), not just the single best one — EnsembleEngine is designed
-        # to combine multiple active models (see ensemble_engine.py), so
-        # winner-take-all here silently starved it down to whichever model
-        # happened to win the most recent retrain's accuracy comparison
-        # (found 2026-07-05: AQRTINet trained successfully but had been
-        # inactive since 2026-06-28 because CatBoost won that comparison).
-        # Always activate the single best model regardless of the bar, so a
-        # bad retrain across the board never leaves zero active models.
+        # accuracy). Always activate the single best model regardless of the
+        # bar, so a bad retrain never leaves zero active models.
         best_model, best_metrics = max(
             trained_models,
             key=lambda x: x[1].get("accuracy", 0),
@@ -492,43 +556,55 @@ def check_and_retrain(db: Session, force: bool = False) -> dict:
     """
     Check if retraining is needed and run it if so.
 
+    Policy (2026-07-06, user decision): retraining is gated on new data
+    only — win-rate decay, rolling IC, and model age are computed and
+    logged for visibility but no longer trigger a retrain by themselves.
+    Repeatedly retraining the same model on the same data doesn't produce
+    better algos; the algo generation/evolution loop (scheduler.py's
+    strategy_loop) is what should be running continuously instead.
+
     Args:
         db:    DB session
-        force: if True, retrain regardless of accuracy check
+        force: if True, retrain regardless of the new-data check (used by
+               `python scripts/train_models.py --quick` for manual runs)
 
     Returns:
         Summary dict with "retrained", "reason", and optional "result".
     """
     accuracy = _check_accuracy(db)
     staleness = _check_model_staleness(db)
+    new_data = _check_new_data_available(db)
 
-    # P0-D: rolling IC check — fires earlier than win-rate trigger
+    # P0-D: rolling IC — reported only, does not trigger retraining (see policy above)
     try:
         rolling_ic = _check_rolling_ic(db)
     except Exception as exc:
         log.warning("Rolling IC check failed (skipping): %s", exc)
         rolling_ic = {"should_retrain": False, "reason": f"ic_check_error: {exc}"}
 
-    should_retrain = force or accuracy["should_retrain"] or staleness["stale"] or rolling_ic["should_retrain"]
+    should_retrain = force or new_data["should_retrain"]
     reason = []
     if force:
         reason.append("forced")
-    if accuracy["should_retrain"]:
-        reason.append(accuracy["reason"])
-    if staleness["stale"]:
-        reason.append(staleness["reason"])
-    if rolling_ic["should_retrain"]:
-        reason.append(f"ic_trigger: {rolling_ic['reason']}")
+    if new_data["should_retrain"]:
+        reason.append(new_data["reason"])
+    if not should_retrain:
+        # Non-triggering signals are still logged so drift is visible even
+        # though it no longer causes an automatic retrain.
+        log.info(
+            "Retrain not triggered (new-data gate only). For visibility: %s | %s | ic=%s",
+            accuracy["reason"], staleness["reason"], rolling_ic["reason"],
+        )
 
-    trigger_reason = "; ".join(reason) if reason else "scheduled_check"
+    trigger_reason = "; ".join(reason) if reason else "no_new_data"
 
     if not should_retrain:
-        log.info("No retraining needed: %s", accuracy["reason"])
         return {
             "retrained":   False,
-            "reason":      accuracy["reason"],
+            "reason":      new_data["reason"],
             "win_rate":    accuracy.get("win_rate"),
             "model_age":   staleness.get("age_days"),
+            "new_rows":    new_data.get("new_rows"),
         }
 
     log.info("Triggering retraining: %s", trigger_reason)

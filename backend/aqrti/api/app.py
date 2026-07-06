@@ -17,6 +17,7 @@ from aqrti.utils.logger import api_logger
 import os
 import threading
 import time as _time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TimeoutError
 
 # ── External scheduler detection ─────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ _BOOT_STEPS = [
     "agents",
     "strategy_research",
     "learning",
+    "rescore",
 ]
 
 def _boot_step(name: str, status: str, msg: str = ""):
@@ -74,11 +76,118 @@ def _boot_step(name: str, status: str, msg: str = ""):
             _BOOT_STATUS["current_step"] = name
 
 
+# ── Timeout helper for boot steps ──────────────────────────────────────────────
+_STEP_TIMEOUT = 600  # 10 min per step — prevents hanging boot from blocking API
+
+def _run_with_timeout(name: str, fn, timeout: int = _STEP_TIMEOUT):
+    """Run `fn` in a thread with a timeout. Returns (True, result) or (False, error_msg)."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(fn)
+        try:
+            result = fut.result(timeout=timeout)
+            return True, result
+        except _TimeoutError:
+            fut.cancel()
+            return False, f"TIMEOUT after {timeout}s"
+        except Exception as e:
+            return False, str(e)
+
+
+def _boot_market_data():
+    from aqrti.data.market_data import run_daily_ingestion, run_new_symbol_backfill
+    bf = run_new_symbol_backfill(years=3)
+    if bf["backfilled"]:
+        api_logger.info("Boot — Backfilled %d rows for %d new symbols", bf["backfilled"], len(bf["symbols"]))
+    return run_daily_ingestion()
+
+
+def _boot_features():
+    from aqrti.database.engine import get_db as _get_db
+    from aqrti.database.models import FeatureValue as _FV
+    with _get_db() as _db:
+        _fv_count = _db.query(_FV).count()
+    if _fv_count < 1000:
+        api_logger.info("Boot step 2 — feature_values nearly empty (%d rows), running full generation", _fv_count)
+        from features.feature_generator import run_full_feature_generation
+        return run_full_feature_generation()
+    from features.feature_generator import run_incremental_feature_generation
+    return run_incremental_feature_generation()
+
+
+def _boot_news():
+    from news.news_pipeline import run_news_pipeline
+    return run_news_pipeline()
+
+
+def _boot_sentiment():
+    from sentiment.sentiment_engine import run_sentiment_pipeline
+    return run_sentiment_pipeline()
+
+
+def _boot_predictions():
+    from datetime import date as _date
+    from aqrti.database.engine import get_db as _get_db
+    from aqrti.database.models import Prediction as _Pred
+    with _get_db() as _db:
+        _today_count = _db.query(_Pred).filter(_Pred.date == _date.today()).count()
+    if _today_count >= 10:
+        return f"skip — {_today_count} already exist for today"
+    from ml.prediction_pipeline import run_prediction_pipeline
+    return run_prediction_pipeline()
+
+
+def _boot_paper_trading():
+    from datetime import date as _date2
+    from aqrti.database.engine import get_db as _get_db2
+    from aqrti.database.models import PaperTrade as _PT
+    with _get_db2() as _db2:
+        _pt_today = _db2.query(_PT).filter(_PT.entry_date == _date2.today()).count()
+    if _pt_today > 0:
+        return f"skip — already ran today ({_pt_today} trades)"
+    from paper_trading.paper_engine import run_paper_trading_cycle
+    return run_paper_trading_cycle()
+
+
+def _boot_learning():
+    from learning.learning_loop import run_daily_learning
+    return run_daily_learning(days=7)
+
+
+def _boot_rescore():
+    from strategies.fitness_engine import rescore_all
+    from strategies.strategy_lifecycle import run_lifecycle_sweep
+    from strategies.strategy_backtester import backtest_and_update
+    from aqrti.database.engine import get_session_factory
+    _db = get_session_factory()()
+    try:
+        from aqrti.database.models import StrategyV2
+        import json
+        stale = _db.query(StrategyV2).filter(StrategyV2.sharpe > 5).all()
+        api_logger.info("Boot step 10 — Re-backtesting %d inflated-Sharpe strategies", len(stale))
+        rebt = 0
+        for s in stale:
+            try:
+                dsl = json.loads(s.dsl_json) if s.dsl_json else {}
+                dsl["strategy_id"] = s.strategy_id
+                backtest_and_update(_db, dsl)
+                rebt += 1
+            except Exception as _be:
+                api_logger.debug("Re-backtest %s failed: %s", s.strategy_id, _be)
+        _db.commit()
+        r = rescore_all(_db)
+        lc = run_lifecycle_sweep(_db)
+        _db.commit()
+        return f"{r.get('total', 0)} rescored, {len(lc.get('promoted', []))} promoted, {len(lc.get('retired', []))} retired"
+    finally:
+        _db.close()
+
+
 def _run_boot_sequence():
     """
     Full startup pipeline — runs once in background immediately after backend starts.
     Ensures all data is fresh when the user opens the frontend.
     Each step is independently guarded so one failure doesn't block the rest.
+    Each step has a timeout to prevent a hanging external API from blocking the API.
     """
     import sys, os
     backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -96,103 +205,71 @@ def _run_boot_sequence():
 
     # Step 1 — Market Data
     _boot_step("market_data", "running")
-    try:
-        from aqrti.data.market_data import run_daily_ingestion, run_new_symbol_backfill
-        # Backfill 3-year history for any new symbols before normal incremental ingest
-        bf = run_new_symbol_backfill(years=3)
-        if bf["backfilled"]:
-            api_logger.info("Boot — Backfilled %d rows for %d new symbols", bf["backfilled"], len(bf["symbols"]))
-        report = run_daily_ingestion()
-        _boot_step("market_data", "done", f"status={report.get('status','?')}")
-        api_logger.info("Boot step 1 — Market data: %s", report.get("status"))
-    except Exception as e:
-        _boot_step("market_data", "error", str(e))
-        api_logger.error("Boot step 1 — Market data failed: %s", e)
+    ok, res = _run_with_timeout("market_data", lambda: _boot_market_data())
+    if ok:
+        _boot_step("market_data", "done", f"status={res.get('status','?')}")
+        api_logger.info("Boot step 1 — Market data: %s", res.get("status"))
+    else:
+        _boot_step("market_data", "error", str(res))
+        api_logger.error("Boot step 1 — Market data failed: %s", res)
 
     # Step 2 — Feature Engineering
     _boot_step("features", "running")
-    try:
-        from aqrti.database.engine import get_db as _get_db
-        from aqrti.database.models import FeatureValue as _FV
-        with _get_db() as _db:
-            _fv_count = _db.query(_FV).count()
-        if _fv_count < 1000:
-            # DB is nearly empty — run full generation to backfill all history
-            api_logger.info("Boot step 2 — feature_values nearly empty (%d rows), running full generation", _fv_count)
-            from features.feature_generator import run_full_feature_generation
-            r = run_full_feature_generation()
-        else:
-            from features.feature_generator import run_incremental_feature_generation
-            r = run_incremental_feature_generation()
-        _boot_step("features", "done", f"status={r.get('status','?')}")
-        api_logger.info("Boot step 2 — Features: %s rows=%d", r.get("status"), r.get("total_rows_written", 0))
-    except Exception as e:
-        _boot_step("features", "error", str(e))
-        api_logger.error("Boot step 2 — Features failed: %s", e)
+    ok, res = _run_with_timeout("features", lambda: _boot_features())
+    if ok:
+        _boot_step("features", "done", f"status={res.get('status','?')}")
+        api_logger.info("Boot step 2 — Features: %s rows=%d", res.get("status"), res.get("total_rows_written", 0))
+    else:
+        _boot_step("features", "error", str(res))
+        api_logger.error("Boot step 2 — Features failed: %s", res)
 
     # Step 3 — News
     _boot_step("news", "running")
-    try:
-        from news.news_pipeline import run_news_pipeline
-        r = run_news_pipeline()
-        _boot_step("news", "done", f"stored={r.get('stored',0)}")
-        api_logger.info("Boot step 3 — News: stored=%d", r.get("stored", 0))
-    except Exception as e:
-        _boot_step("news", "error", str(e))
-        api_logger.error("Boot step 3 — News failed: %s", e)
+    ok, res = _run_with_timeout("news", lambda: _boot_news())
+    if ok:
+        _boot_step("news", "done", f"stored={res.get('stored',0)}")
+        api_logger.info("Boot step 3 — News: stored=%d", res.get("stored", 0))
+    else:
+        _boot_step("news", "error", str(res))
+        api_logger.error("Boot step 3 — News failed: %s", res)
 
     # Step 4 — Sentiment & Regime
     _boot_step("sentiment", "running")
-    try:
-        from sentiment.sentiment_engine import run_sentiment_pipeline
-        r = run_sentiment_pipeline()
-        _boot_step("sentiment", "done", f"regime={r.get('regime','?')}")
-        api_logger.info("Boot step 4 — Sentiment: regime=%s", r.get("regime"))
-    except Exception as e:
-        _boot_step("sentiment", "error", str(e))
-        api_logger.error("Boot step 4 — Sentiment failed: %s", e)
+    ok, res = _run_with_timeout("sentiment", lambda: _boot_sentiment())
+    if ok:
+        _boot_step("sentiment", "done", f"regime={res.get('regime','?')}")
+        api_logger.info("Boot step 4 — Sentiment: regime=%s", res.get("regime"))
+    else:
+        _boot_step("sentiment", "error", str(res))
+        api_logger.error("Boot step 4 — Sentiment failed: %s", res)
 
     # Step 5 — Predictions (skip if today's predictions already exist)
     _boot_step("predictions", "running")
-    try:
-        from datetime import date as _date
-        from aqrti.database.engine import get_db as _get_db
-        from aqrti.database.models import Prediction as _Pred
-        with _get_db() as _db:
-            _today_count = _db.query(_Pred).filter(_Pred.date == _date.today()).count()
-        if _today_count >= 10:
-            _boot_step("predictions", "done", f"cached={_today_count} (skipped re-run)")
-            api_logger.info("Boot step 5 — Predictions: %d already exist for today, skipping", _today_count)
-        else:
-            from ml.prediction_pipeline import run_prediction_pipeline
-            r = run_prediction_pipeline()
-            _boot_step("predictions", "done", f"written={r.get('predictions_written',0)}")
-            api_logger.info("Boot step 5 — Predictions: written=%d", r.get("predictions_written", 0))
-    except Exception as e:
-        _boot_step("predictions", "error", str(e))
-        api_logger.error("Boot step 5 — Predictions failed: %s", e)
+    ok, res = _run_with_timeout("predictions", lambda: _boot_predictions())
+    if ok:
+        _boot_step("predictions", "done", f"written={res.get('predictions_written',0)}")
+        api_logger.info("Boot step 5 — Predictions: written=%d", res.get("predictions_written", 0))
+    elif res and "skip" in str(res):
+        _boot_step("predictions", "done", f"cached (skipped)")
+        api_logger.info("Boot step 5 — Predictions: %s", res)
+    else:
+        _boot_step("predictions", "error", str(res))
+        api_logger.error("Boot step 5 — Predictions failed: %s", res)
 
     # Step 6 — Paper Trading (skip if already ran today)
     _boot_step("paper_trading", "running")
-    try:
-        from datetime import date as _date2
-        from aqrti.database.engine import get_db as _get_db2
-        from aqrti.database.models import PaperTrade as _PT
-        with _get_db2() as _db2:
-            _pt_today = _db2.query(_PT).filter(_PT.entry_date == _date2.today()).count()
-        if _pt_today > 0:
-            _boot_step("paper_trading", "done", f"already ran today ({_pt_today} trades)")
-            api_logger.info("Boot step 6 — Paper trading: skipped, already ran today")
-        else:
-            from paper_trading.paper_engine import run_paper_trading_cycle
-            r = run_paper_trading_cycle()
-            _boot_step("paper_trading", "done",
-                       f"opened={len(r.get('opened',[]))} value={r.get('portfolioValue',0):.0f}")
-            api_logger.info("Boot step 6 — Paper trading: opened=%d value=%.2f",
-                            len(r.get("opened", [])), r.get("portfolioValue", 0))
-    except Exception as e:
-        _boot_step("paper_trading", "error", str(e))
-        api_logger.error("Boot step 6 — Paper trading failed: %s", e)
+    ok, res = _run_with_timeout("paper_trading", lambda: _boot_paper_trading())
+    if ok:
+        _boot_step("paper_trading", "done",
+                   f"opened={len(res.get('opened',[]))} value={res.get('portfolioValue',0):.0f}")
+        api_logger.info("Boot step 6 — Paper trading: opened=%d value=%.2f",
+                        len(res.get("opened", [])), res.get("portfolioValue", 0))
+    elif res and "skip" in str(res):
+        _boot_step("paper_trading", "done", res)
+        api_logger.info("Boot step 6 — Paper trading: %s", res)
+    else:
+        _boot_step("paper_trading", "error", str(res))
+        api_logger.error("Boot step 6 — Paper trading failed: %s", res)
 
     # Step 7 — Agent Pipeline (skip on boot — scheduler runs this every hour)
     _boot_step("agents", "done", "deferred to hourly scheduler")
@@ -204,55 +281,25 @@ def _run_boot_sequence():
 
     # Step 9 — Learning Loop (lightweight — just scoring, not full retrain)
     _boot_step("learning", "running")
-    try:
-        from learning.learning_loop import run_daily_learning
-        r = run_daily_learning(days=7)
-        score = r.get("steps", {}).get("knowledge_score", {}).get("overall_score", 0)
-        filled = r.get("steps", {}).get("prediction_backfill", {}).get("filled", 0)
+    ok, res = _run_with_timeout("learning", lambda: _boot_learning())
+    if ok:
+        score = res.get("steps", {}).get("knowledge_score", {}).get("overall_score", 0)
+        filled = res.get("steps", {}).get("prediction_backfill", {}).get("filled", 0)
         _boot_step("learning", "done", f"score={score:.1f} backfilled={filled}")
         api_logger.info("Boot step 9 — Learning: score=%.1f backfilled=%d", score, filled)
-    except Exception as e:
-        _boot_step("learning", "error", str(e))
-        api_logger.error("Boot step 9 — Learning failed: %s", e)
+    else:
+        _boot_step("learning", "error", str(res))
+        api_logger.error("Boot step 9 — Learning failed: %s", res)
 
-    # Step 10 — Fix inflated-Sharpe strategies (backtested before the POSITION_SIZE bug fix)
-    #           and rescore everything with corrected fitness parameters
-    try:
-        from strategies.fitness_engine import rescore_all
-        from strategies.strategy_lifecycle import run_lifecycle_sweep
-        from strategies.strategy_backtester import backtest_and_update
-        from aqrti.database.engine import get_session_factory
-        _db = get_session_factory()()
-        try:
-            # Re-backtest any strategy with Sharpe > 5 (clearly from the old bug)
-            from aqrti.database.models import StrategyV2
-            import json
-            stale = _db.query(StrategyV2).filter(StrategyV2.sharpe > 5).all()
-            api_logger.info("Boot step 10 — Re-backtesting %d inflated-Sharpe strategies", len(stale))
-            rebt = 0
-            for s in stale:
-                try:
-                    dsl = json.loads(s.dsl_json) if s.dsl_json else {}
-                    dsl["strategy_id"] = s.strategy_id
-                    backtest_and_update(_db, dsl)
-                    rebt += 1
-                except Exception as _be:
-                    api_logger.debug("Re-backtest %s failed: %s", s.strategy_id, _be)
-            _db.commit()
-            api_logger.info("Boot step 10 — Re-backtested %d strategies", rebt)
-
-            # Rescore all with corrected MIN_TRADES/TARGET_TRADES
-            r = rescore_all(_db)
-            lc = run_lifecycle_sweep(_db)
-            _db.commit()
-            api_logger.info(
-                "Boot step 10 — Rescore: %d strategies rescored, %d promoted, %d retired",
-                r.get("total", 0), len(lc.get("promoted", [])), len(lc.get("retired", []))
-            )
-        finally:
-            _db.close()
-    except Exception as e:
-        api_logger.error("Boot step 10 — Rescore/rebacktest failed: %s", e)
+    # Step 10 — Fix inflated-Sharpe strategies + rescore
+    _boot_step("rescore", "running")
+    ok, res = _run_with_timeout("rescore", lambda: _boot_rescore())
+    if ok:
+        _boot_step("rescore", "done", res)
+        api_logger.info("Boot step 10 — Rescore: %s", res)
+    else:
+        _boot_step("rescore", "error", str(res))
+        api_logger.error("Boot step 10 — Rescore failed: %s", res)
 
     with _BOOT_LOCK:
         _BOOT_STATUS["booting"] = False
@@ -277,7 +324,7 @@ def create_app() -> FastAPI:
     # ── CORS — allow the UI (file:// or localhost:3000) ──────────
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "null"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -444,6 +491,10 @@ def create_app() -> FastAPI:
     # ── GO-1 / GO-7 / GO-8: Go/No-Go Scorecard ───────────────────
     from aqrti.api.routes import go_nogo as go_nogo_router
     app.include_router(go_nogo_router.router, prefix=PREFIX, tags=["Go/No-Go"])
+
+    # ── GO-7: Morning Decision Screen ────────────────────────────
+    from aqrti.api.routes import morning as morning_router
+    app.include_router(morning_router.router, prefix=PREFIX, tags=["Morning Decision"])
 
     # ── System Status (boot progress) ────────────────────────────
     @app.get("/api/v1/system/status", tags=["System"])
@@ -871,11 +922,13 @@ def create_app() -> FastAPI:
         """
         import sys, os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-        from datetime import date, datetime, timedelta
+        from datetime import date, datetime, timedelta, timezone
         from aqrti.database.engine import get_db
         from aqrti.database.models import DailyPrice, FeatureValue, KnowledgeEvent, StrategyV2
 
         result = {"status": "ok", "version": "0.8.0"}
+        now_utc = datetime.now(timezone.utc)
+        result["server_time"] = now_utc.isoformat()
         problems = []
         try:
             with get_db() as db:
@@ -905,7 +958,7 @@ def create_app() -> FastAPI:
                 # job (generate/backtest/evolve/promote) has stopped running,
                 # even if price ingestion is fine.
                 date_cutoff = today - timedelta(days=3)
-                dt_cutoff   = datetime.utcnow() - timedelta(days=3)
+                dt_cutoff   = now_utc - timedelta(days=3)
                 last_snapshot = (
                     db.query(KnowledgeEvent.event_date)
                     .filter(KnowledgeEvent.event_type == "population_snapshot")
@@ -947,7 +1000,7 @@ def create_app() -> FastAPI:
                 # new promoted/active to feed it (itself worth surfacing,
                 # not just an error state).
                 from aqrti.database.models import ArenaRun
-                arena_cutoff = datetime.utcnow() - timedelta(hours=6)
+                arena_cutoff = now_utc - timedelta(hours=6)
                 recent_arena_runs = db.query(ArenaRun).filter(
                     ArenaRun.completed_at.isnot(None),
                     ArenaRun.completed_at >= arena_cutoff,

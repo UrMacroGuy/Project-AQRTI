@@ -1,4 +1,137 @@
-﻿## [2026-07-06c] — AQRTINet v4.1: threshold calibration + 5 correctness fixes
+﻿## [2026-07-07c] — Decision: CatBoost-only production model, AQRTINet retired
+
+**Decision (user):** Stop developing/using AQRTINet. CatBoost is now the sole
+production model for all algo training going forward — no ensemble, no
+multi-model blending. Rationale: fewer moving parts, more reliable algo
+output, faster path to live trading.
+
+**Verified already-migrated (as of this session, prior work):** production
+training (`ml/validation/backtest_validator.py`, `ml/validation/walk_forward.py`),
+`ml/model_retrainer.py`, and the ensemble weighting
+(`ml/ensemble/model_weighting.py`) were already CatBoost-only — `MODEL_CLASSES`
+in all three contains only `CatBoostModel`. No API route or config file
+hardcodes a model type, so no route/config changes were needed.
+
+**Cleanup done this session:**
+- `ml/ensemble/model_weighting.py` — changed the "AQRTINet will be re-enabled"
+  comment to a permanent CatBoost-only note (matches the actual decision now).
+- `ml/ensemble/ensemble_engine.py` — docstring updated (no longer says
+  "Combines CatBoost + NGBoost").
+- `ml/model_retrainer.py`, `scripts/train_models.py` — stale docstrings/print
+  statements referencing NGBoost / "3 models" corrected to CatBoost/single-model.
+- **DB fix:** `ModelVersion` had a stale `ngboost/direction/v1` row with
+  `is_active=True` (harmless for predictions — ensemble code hardcodes
+  `["catboost"]` — but misleading on the `/api/v1/models` UI page). Deactivated it.
+- `scripts/compare_models.py` left as-is (standalone offline comparison tool,
+  never called by production code — kept for historical reference only).
+
+**Not touched:** AQRTINet source files (`ml/models/aqrtinet_model.py`, etc.)
+left in place, unused. Can be deleted later if desired; no rush since nothing
+imports them in the production path.
+
+## [2026-07-07b] — GO-9 (partial): Migrated all frontend `_set`/`_s`/`setEl` helpers to global `setDataPoint(id, val, source)`
+
+**Scope — 20 files, ~23 local helper clones eliminated.** Every KPI card across all pages now sets both `textContent` and `title` (source+timestamp) via the global `setDataPoint()` function in `core.js`.
+
+**Files changed:**
+- `ui/core.js` — removed `_set`/`_s` helpers in `renderOverview()`, `hydrateTopbarLive()` (3 instances); replaced with `setDataPoint()` calls
+- `ui/pages/overview.js` — removed `_set` + `_setEl`; 13 → `setDataPoint()`; added `title` on P&L, Sharpe, Sortino, maxDD, win rate, profit factor, perf date
+- `ui/pages/agents.js` — removed `_set`; 8 → `setDataPoint()`
+- `ui/pages/sentiment.js` — removed `_set`; 12 → `setDataPoint()`
+- `ui/pages/vault.js` — removed `_set`; 7 → `setDataPoint()`
+- `ui/pages/learning.js` — removed `setEl`; 14 → `setDataPoint()`
+- `ui/pages/news.js` — removed `_setKpi` + `_set`; 8 → `setDataPoint()`
+- `ui/pages/opportunity.js` — removed `_set`; 6 → `setDataPoint()`
+- `ui/pages/market.js` — removed `_set` (2 instances); 9 → `setDataPoint()`
+- `ui/pages/paper.js` — removed `_set`; 23 → `setDataPoint()`; added `title` on return, unrealized, winrate KPIs
+- `ui/pages/risk.js` — removed `_set` (2 instances); 8 → `setDataPoint()`; added `title` on VaR card
+- `ui/pages/arena.js` — removed `s`; 9 → `setDataPoint()`
+- `ui/pages/data-intelligence.js` — removed `_set` (4 instances); 24 → `setDataPoint()`
+- `ui/pages/live-prices.js` — removed `_s`; 6 → `setDataPoint()`
+- `ui/pages/strategy-trades-modal.js` — removed `_s`; 10 → `setDataPoint()`
+
+**Verified:** All 20 JS files pass `node -c` syntax check. Zero remaining `const _set`, `const _s`, `const setEl`, or `const _setKpi` patterns in any page file.
+
+**GO-9 remaining:** P3-5 rename leftovers (strategy→algo in remaining code paths), stale-cache render verification, empty/error state gap fill (model.js missing loading states).
+
+**GO-7 — Morning Decision Screen.** The backend API (`morning.py`) existed with
+`GET /morning/decision`, `POST /morning/act`, `GET /morning/act-log` but was
+never wired into the FastAPI app nor the UI. Completed the full integration:
+
+**Backend:** Added `from .routes import morning` + `include_router` to `app.py`.
+The 3 endpoints were already built — zero code changes needed in `morning.py`.
+
+**Frontend:**
+- `ui/api.js` — added `morningDecision()`, `morningAct()`, `morningActLog()` methods
+- `ui/core.js` — added `hydrateMorningDecision()` with full decision panel: NO ACTION
+  banner (red, with reason), regime/risk-posture/circuit-breaker bar, actionable
+  signals table (symbol, algo, direction, P&L%, size ₹, SL, TP, confidence,
+  quarantine days/trades/WR), compliance act/skip buttons, and recent action log
+- `ui/index.html` — added morning decision panel at top of Go/No-Go page, above
+  the scorecard conditions. Retitled page to "Morning Decision" with "Go / No-Go
+  Scorecard" as a sub-section below
+
+**Verified live:** `GET /morning/decision` → 200 with no_action=true, regime=BULL
+MARKET, 0 promoted algos (correct — honest empty state). `GET /morning/act-log`
+→ []. All JS passes `node -c` syntax check. All existing Go/No-Go endpoints
+remain healthy.
+
+## [2026-07-06d] — AQRTINet structural bug fixes: regime routing, CV leaks, confident-label weighting
+
+All bugs from `docs/AQRTINET_IMPROVEMENT_PLAN.md` fixed. Changes span 5 files.
+No gate weakening, no mock data.
+
+**HIGH — Bug B: training regime collapse in walk_forward.py + backtest_validator.py**
+`walk_forward.py::run_fold` and `backtest_validator.py::train_final_model` never set
+`model._training_dates` before calling `fit()`, causing all 4 regime experts to train on
+FALLBACK_REGIME data. Fixed by injecting `_training_dates` from the new `DataSplit.train_dates`
+/ `get_final_train_test()` output. Also fixed `compare_models.py` (same issue).
+
+**HIGH — Bug A: inference regime routing used "today's regime" for all rows**
+`walk_forward.py::run_fold` evaluated every historical test row through today's single
+regime expert — the v4.1 fix (per-row `dates` parameter) existed in `BaseModel` but
+was never wired into the walk_forward call site. Fixed by passing `fold.test_dates` to
+`model.predict(dates=...)` and `model.predict_proba(dates=...)` for AQRTINet.
+
+**HIGH — Bug A: model_retrainer.py evaluation also lacked dates**
+`model_retrainer.py::_run_training_pipeline` set `_training_dates` before fit (correct)
+but `model.predict(X_test)` didn't pass dates. Fixed: builds eval dates from `dataset.df`
+and passes them for AQRTINet.
+
+**MEDIUM — Bug C: inner stacking CV leaked future data**
+`StratifiedKFold(n_splits=7, shuffle=False)` on chronological data trained on later
+dates to predict earlier rows. Replaced with `TimeSeriesSplit(n_splits=7)`.
+
+**MEDIUM — Bug D: Platt calibration CV same leak**
+Same StratifiedKFold issue in Platt calibration fold loop. Replaced with TimeSeriesSplit.
+
+**MEDIUM — Bug #8: confident-label weighting was a silent no-op in all paths**
+`_compute_confident_label_weights` required `return_5d` in X_train, but
+`training_dataset.py` strips label columns from feature data. Fixed: callers now set
+`model._return_5d` before fit (via `DataSplit.return_5d_train` /
+`get_final_train_test()` return value). The function reads from this attribute instead.
+
+**Infrastructure: DataSplit + get_final_train_test now carry per-row metadata**
+Added `train_dates`, `test_dates`, `return_5d_train`, `return_5d_test` fields to
+`DataSplit`. `get_final_train_test()` returns `train_dates` + `test_return_5d` as new
+return values (8th→10th). All callers updated to unpack the extended tuple.
+
+**Fix: predict_interval also had the single-regime routing bug**
+`predict_interval` used `_get_current_regime()` for all rows. Changed to per-row
+routing via `_row_regimes()`, matching `_predict_impl`/`_predict_proba_impl`.
+
+Files changed:
+- `backend/ml/datasets/training_dataset.py` — DataSplit fields, fold date/return_5d pop.
+- `backend/ml/validation/walk_forward.py` — training dates + eval dates for AQRTINet.
+- `backend/ml/validation/backtest_validator.py` — training dates + return_5d for AQRTINet.
+- `backend/ml/model_retrainer.py` — eval dates for AQRTINet.
+- `backend/ml/models/aqrtinet_model.py` — CV TimeSeriesSplit, confident label fix, predict_interval.
+- `backend/scripts/compare_models.py` — training dates + return_5d for AQRTINet.
+
+Verification: 37 core tests pass, 14 aqrtinet tests pass, smoke test passes.
+Baseline: 927 algos, 0 promoted (unchanged — correct behavior).
+
+## [2026-07-06c] — AQRTINet v4.1: threshold calibration + 5 correctness fixes
 
 Acted on `docs/AQRTINET_IMPROVEMENT_PLAN.md` (items §1–§3) and found 5 additional
 correctness bugs on re-reading the code. All fixes are in

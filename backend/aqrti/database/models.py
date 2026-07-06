@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, date
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey,
+    Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey,
     Integer, String, Text, UniqueConstraint, Index, JSON,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -571,6 +571,7 @@ class PaperTrade(Base):
         Index("ix_pt_symbol",     "symbol"),
         Index("ix_pt_entry_date", "entry_date"),
         Index("ix_pt_exit_date",  "exit_date"),
+        CheckConstraint("shares >= 0", name="ck_pt_shares_nonneg"),
     )
 
     id               = Column(Integer,    primary_key=True, autoincrement=True)
@@ -2452,3 +2453,108 @@ class SystemHealthCheck(Base):
     prices_count    = Column(Integer,  nullable=True)
     shadow_count    = Column(Integer,  nullable=True)
     failures        = Column(String(500), nullable=True)
+
+
+# ══════════════════════════════════════════════════════════════
+# PERSONAL PORTFOLIO — Real-money tracker (PF-2)
+# ══════════════════════════════════════════════════════════════
+
+class PortfolioInstrument(Base):
+    """Registered instruments in the user's real-money portfolio."""
+    __tablename__ = "portfolio_instruments"
+
+    id                    = Column(Integer,    primary_key=True, autoincrement=True)
+    ticker                = Column(String(20),  nullable=False, unique=True, index=True)
+    asset_class           = Column(String(20),  nullable=False)   # equity|etf|mf|us_equity
+    fund_name             = Column(String(200), nullable=True)
+    amfi_code             = Column(String(20),  nullable=True, unique=True)
+    isin                  = Column(String(20),  nullable=True)
+    currency              = Column(String(3),   nullable=False)   # INR|USD
+    target_allocation_pct = Column(Float,       nullable=True)
+    risk_bucket           = Column(String(10),  nullable=False)   # core|satellite|cash
+    verification_status   = Column(String(10),  nullable=False, default="pending")  # verified|pending
+    created_at            = Column(DateTime,    default=datetime.utcnow)
+    updated_at            = Column(DateTime,    default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PortfolioTransaction(Base):
+    """Append-only record of every real buy/sell/rebalance/dividend/split."""
+    __tablename__ = "portfolio_transactions"
+    __table_args__ = (
+        Index("ix_pt_ticker_date", "ticker", "transaction_date"),
+    )
+
+    id               = Column(Integer,    primary_key=True, autoincrement=True)
+    ticker           = Column(String(20), nullable=False)
+    transaction_type = Column(String(10), nullable=False)   # buy|sell|rebalance|dividend|split
+    quantity         = Column(Float,      nullable=False)
+    price            = Column(Float,      nullable=False)
+    amount           = Column(Float,      nullable=False)
+    transaction_date = Column(Date,       nullable=False)
+    broker           = Column(String(10), nullable=False)   # zerodha|indmoney|manual
+    note             = Column(Text,       nullable=True)
+    created_at       = Column(DateTime,   default=datetime.utcnow)
+
+
+class PortfolioHolding(Base):
+    """Derived snapshot of current holdings — refreshed after each transaction or daily."""
+    __tablename__ = "portfolio_holdings"
+    __table_args__ = (
+        UniqueConstraint("ticker", "as_of_date", name="uq_ph_ticker_date"),
+    )
+
+    id              = Column(Integer,  primary_key=True, autoincrement=True)
+    ticker          = Column(String(20), nullable=False)
+    quantity        = Column(Float,    nullable=False)
+    avg_cost        = Column(Float,    nullable=False)
+    current_price   = Column(Float,    nullable=True)
+    current_value   = Column(Float,    nullable=True)
+    unrealized_pnl  = Column(Float,    nullable=True)
+    realized_pnl    = Column(Float,    nullable=True)
+    xirr            = Column(Float,    nullable=True)
+    as_of_date      = Column(Date,     nullable=False)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
+class PortfolioValuation(Base):
+    """Daily portfolio valuation snapshot."""
+    __tablename__ = "portfolio_valuations"
+
+    id                  = Column(Integer,  primary_key=True, autoincrement=True)
+    as_of_date          = Column(Date,     nullable=False, unique=True)
+    total_value         = Column(Float,    nullable=False)
+    total_cost          = Column(Float,    nullable=False)
+    total_unrealized_pnl = Column(Float,   nullable=True)
+    total_realized_pnl  = Column(Float,    nullable=True)
+    cash_balance        = Column(Float,    nullable=False)
+    xirr                = Column(Float,    nullable=True)
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
+
+class MutualFundNAV(Base):
+    """Daily NAV records for mutual funds sourced from AMFI/MFAPI."""
+    __tablename__ = "mutual_fund_navs"
+    __table_args__ = (
+        UniqueConstraint("amfi_code", "nav_date", name="uq_mfn_amfi_date"),
+    )
+
+    id          = Column(Integer,    primary_key=True, autoincrement=True)
+    amfi_code   = Column(String(20), nullable=False)
+    scheme_name = Column(String(200), nullable=True)
+    nav         = Column(Float,      nullable=False)
+    nav_date    = Column(Date,       nullable=False)
+    source      = Column(String(10), nullable=False, default="amfi")  # amfi|mfapi
+    created_at  = Column(DateTime,   default=datetime.utcnow)
+
+
+class PortfolioActionLog(Base):
+    """Generated reminders and action items — buys, SIP confirmations, tax checks."""
+    __tablename__ = "portfolio_action_logs"
+
+    id           = Column(Integer,    primary_key=True, autoincrement=True)
+    action_type  = Column(String(20), nullable=False)   # reminder|alert|rebalance_check|tax_check
+    description  = Column(Text,       nullable=True)
+    due_date     = Column(Date,       nullable=True)
+    status       = Column(String(10), nullable=False, default="pending")  # pending|completed|dismissed
+    completed_at = Column(DateTime,   nullable=True)
+    created_at   = Column(DateTime,   default=datetime.utcnow)

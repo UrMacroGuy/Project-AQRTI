@@ -288,8 +288,8 @@ def _daily_job():
                 with _get_db() as _db:
                     d = run_multi_agent_decision(_db, symbol=sym)
                 decisions.append(f"{sym}:{d.get('direction','?')}")
-            except Exception:
-                pass
+            except Exception as ma_exc:
+                scheduler_logger.warning("Step 7J — Multi-Agent decision failed for %s: %s", sym, ma_exc)
         scheduler_logger.info("Step 7J — Multi-Agent: %s", " | ".join(decisions))
     except Exception as exc:
         scheduler_logger.error("Step 7J — Multi-Agent failed: %s", exc)
@@ -396,8 +396,81 @@ def _hourly_agent_job():
         scheduler_logger.error("Hourly agent job failed: %s", exc)
 
 
+def _snapshot_only_job():
+    """
+    Lightweight population snapshot — runs every hour.
+    Records a strategy population snapshot without doing any generation,
+    backtesting, or evolution. Fast enough not to cause GIL contention.
+    This ensures the health endpoint always sees a fresh snapshot even when
+    the heavy strategy loop is disabled.
+    """
+    import sys, os
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
+    try:
+        from aqrti.database.session import get_db_session
+        from strategies.strategy_memory import record_knowledge_snapshot
+        with get_db_session() as db:
+            snap = record_knowledge_snapshot(db)
+        scheduler_logger.info(
+            "Snapshot job: total=%d active=%d avg_fitness=%.1f",
+            snap.get("total", 0),
+            snap.get("active_count", 0),
+            snap.get("avg_fitness", 0),
+        )
+    except Exception as exc:
+        scheduler_logger.error("Snapshot job failed: %s", exc)
+
+
+_strategy_loop_proc = None  # subprocess.Popen handle for the currently-running cycle, if any
+
+
+def _strategy_loop_subprocess_job():
+    """
+    Launches ONE strategy research cycle (scripts/strategy_loop_cycle.py) as a
+    detached OS subprocess, then returns immediately. Replaces the old
+    in-thread _strategy_loop_job: that function did the same generate/
+    backtest/score/evolve work but on a BackgroundScheduler thread inside the
+    API process, and Python's GIL meant its CPU-heavy work still blocked the
+    FastAPI event loop from handling HTTP requests for tens of seconds per
+    cycle (root cause of intermittent "BACKEND OFFLINE" in the UI).
+
+    A separate process has its own GIL, so heavy backtesting there can never
+    block the API's request handling, no matter how long it takes.
+
+    Skips launching a new cycle if the previous one hasn't finished yet
+    (mirrors the old job's max_instances=1 guard).
+    """
+    global _strategy_loop_proc
+    import subprocess, sys, os
+
+    if _strategy_loop_proc is not None and _strategy_loop_proc.poll() is None:
+        scheduler_logger.info("Strategy loop: previous cycle still running (pid=%d) — skipping this tick", _strategy_loop_proc.pid)
+        return
+
+    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    script = os.path.join(backend_dir, "scripts", "strategy_loop_cycle.py")
+    try:
+        _strategy_loop_proc = subprocess.Popen(
+            [sys.executable, script],
+            cwd=backend_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        scheduler_logger.info("Strategy loop: launched cycle subprocess (pid=%d)", _strategy_loop_proc.pid)
+    except Exception as exc:
+        scheduler_logger.error("Strategy loop: failed to launch subprocess: %s", exc)
+
+
 def _strategy_loop_job():
     """
+    DEPRECATED (2026-07-06) — kept for reference only, no longer scheduled.
+    Superseded by _strategy_loop_subprocess_job, which does the identical
+    generate/backtest/score/evolve work in a separate OS process instead of
+    an in-process thread, so it can't starve the API's event loop via GIL
+    contention. See scripts/strategy_loop_cycle.py for the current version.
+
     Continuous strategy research micro-loop — runs every 5 minutes.
     Priority: clear the backtest backlog first. Only generates new candidates
     when the backlog is small (< 200 unscored). Uses family-balanced backtest
@@ -665,15 +738,33 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
-    # Continuous strategy loop — every 5 minutes
+    # Continuous strategy loop — every 5 minutes. Runs as a detached subprocess
+    # (see _strategy_loop_subprocess_job) instead of in-thread, so its heavy
+    # generate/backtest/score/evolve work can't block the API's event loop via
+    # GIL contention (that was causing intermittent "BACKEND OFFLINE" in the
+    # UI, 2026-07-06). This is the only thing that grows/improves the algo
+    # population — keep it running.
     _scheduler.add_job(
-        _strategy_loop_job,
+        _strategy_loop_subprocess_job,
         trigger="interval",
         minutes=5,
         id="strategy_loop",
         name="Strategy Research Loop",
         replace_existing=True,
         misfire_grace_time=300,
+        max_instances=1,
+    )
+
+    # Lightweight population snapshot — every hour. Only records the snapshot,
+    # no generation/backtest/evolution, so it won't cause GIL contention.
+    _scheduler.add_job(
+        _snapshot_only_job,
+        trigger="interval",
+        hours=1,
+        id="snapshot_only",
+        name="Population Snapshot",
+        replace_existing=True,
+        misfire_grace_time=600,
         max_instances=1,
     )
 

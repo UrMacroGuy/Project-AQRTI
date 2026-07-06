@@ -13,8 +13,10 @@ Rules:
 from __future__ import annotations
 
 import sys, os, json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
+
+import pytz
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
@@ -38,6 +40,33 @@ from strategies.promotion_config import (
 DRAWDOWN_LIMIT = MAX_DRAWDOWN_LIMIT     # backwards-compat alias for external importers
 MIN_TRADES     = MIN_BACKTEST_TRADES   # backwards-compat alias for external importers
 PAPER_WIN_RATE = PAPER_WIN_RATE_GATE   # backwards-compat alias
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def _get_quarantine_release_date(promoted_at: Optional[datetime]) -> date:
+    """Return the quarantine release date, clamped to >= today."""
+    if promoted_at is None:
+        return date.today()
+    computed = (promoted_at + timedelta(days=QUARANTINE_MIN_DAYS)).date()
+    return max(computed, date.today())
+
+
+def _get_next_lottery_schedule() -> dict:
+    """Return next lottery run time as IST-aware dict."""
+    now_ist = datetime.now(IST)
+    # Next lottery: next weekday at 15:30 IST (after NSE close)
+    target = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
+    if target <= now_ist:
+        target += timedelta(days=1)
+    # Skip weekends
+    while target.weekday() >= 5:
+        target += timedelta(days=1)
+    return {
+        "next_lottery_ist": target.isoformat(),
+        "current_time_ist": now_ist.isoformat(),
+        "seconds_until_next": int((target - now_ist).total_seconds()),
+    }
 
 _nifty_sharpe_cache: dict = {}
 _index_futures_sharpe_cache: dict = {}

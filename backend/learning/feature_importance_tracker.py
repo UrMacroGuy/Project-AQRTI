@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sys
 import os
-import json
 from datetime import date
 from typing import Optional
 

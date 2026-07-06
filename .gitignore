@@ -44,12 +44,24 @@ Thumbs.db
 .gstack/
 
 # Large data files — never commit
+aqrti.db
+aqrti.db-wal
+aqrti.db-shm
+aqrti.db.bak-*
+aqrti.db.stray-root-bak-*
 backend/aqrti.db
 backend/aqrti.db-wal
 backend/aqrti.db-shm
 backend/aqrti.db.bak-*
 backend/ml_models/*.pkl
 backend/.yfinance-cache/
+
+# Debug/run logs left at project root
+be_log.txt
+backend.log
+backend2.log
+frontend.log
+backend/uvicorn.log.err
 
 # Backfill/backtest run logs and large CSV dumps (not source code)
 backend/scripts/*_log.txt

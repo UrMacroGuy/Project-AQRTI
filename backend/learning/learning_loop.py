@@ -116,8 +116,8 @@ def run_daily_learning(days: int = 7) -> dict:
                 summary["steps"][name] = {"status": "error", "error": str(step_exc)}
                 try:
                     db.rollback()
-                except Exception:
-                    pass
+                except Exception as rb_exc:
+                    log.warning("[Learning Loop] rollback during error handling failed: %s", rb_exc)
                 return None
 
         # Step 0: Backfill Prediction.actual_return from price data
@@ -211,8 +211,8 @@ def run_daily_learning(days: int = 7) -> dict:
         summary["error"]   = str(exc)
         try:
             db.rollback()
-        except Exception:
-            pass
+        except Exception as rb_exc:
+            log.warning("[Learning Loop] rollback during outer handler failed: %s", rb_exc)
     finally:
         db.close()
 

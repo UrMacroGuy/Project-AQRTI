@@ -110,7 +110,6 @@ def _momentum_agent(db, symbol, regime) -> dict:
 
 def _mean_reversion_agent(db, symbol, regime) -> dict:
     rsi = _latest_feat(db, symbol, "rsi_14")
-    vol = _latest_feat(db, symbol, "realized_vol_20d")
     if not rsi:
         return {"agent": "MeanReversion", "direction": "neutral", "confidence": 0.5,
                 "reasoning": "No RSI data", "regime_context": regime, "indicators_used": "[]"}
@@ -125,37 +124,34 @@ def _mean_reversion_agent(db, symbol, regime) -> dict:
         reason = f"RSI={rsi:.1f} in normal range"
     return {"agent": "MeanReversion", "direction": direction, "confidence": conf,
             "reasoning": reason, "regime_context": regime,
-            "indicators_used": json.dumps(["rsi_14", "realized_vol_20d"])}
+            "indicators_used": json.dumps(["rsi_14"])}
 
 
 def _trend_agent(db, symbol, regime) -> dict:
-    ma_ratio = _latest_feat(db, symbol, "ma20_ma50_ratio")
-    trend = _latest_feat(db, symbol, "trend_strength")
+    ma_spread_val = _latest_feat(db, symbol, "ma_spread")
+    adx = _latest_feat(db, symbol, "adx_14")
     reasons = []
     bull = bear = 0.0
-    if ma_ratio:
-        if ma_ratio > 1.02: bull += 0.7; reasons.append(f"MA20/MA50={ma_ratio:.3f} bullish")
-        elif ma_ratio < 0.98: bear += 0.7; reasons.append(f"MA20/MA50={ma_ratio:.3f} bearish")
-    if trend:
-        if trend > 0.5: bull += 0.8; reasons.append(f"Trend={trend:.2f} strong")
-        elif trend < 0.2: reasons.append(f"Trend={trend:.2f} weak")
+    if ma_spread_val is not None:
+        if ma_spread_val > 2.0: bull += 0.7; reasons.append(f"MA spread={ma_spread_val:.1f}% bullish")
+        elif ma_spread_val < -2.0: bear += 0.7; reasons.append(f"MA spread={ma_spread_val:.1f}% bearish")
+    if adx is not None:
+        if adx > 25: bull += 0.8; reasons.append(f"ADX={adx:.0f} trending")
     total = bull + bear or 1
     direction = "bullish" if bull > bear else ("bearish" if bear > bull else "neutral")
     return {"agent": "Trend", "direction": direction, "confidence": round(max(bull, bear) / total, 3),
             "reasoning": "; ".join(reasons) or "Trend unclear",
-            "regime_context": regime, "indicators_used": json.dumps(["ma20_ma50_ratio", "trend_strength"])}
+            "regime_context": regime, "indicators_used": json.dumps(["ma_spread", "adx_14"])}
 
 
 def _risk_agent(db, symbol, regime) -> dict:
-    vol = _latest_feat(db, symbol, "realized_vol_20d")
-    drawdown = _latest_feat(db, symbol, "max_drawdown_20d")
+    vol_raw = _latest_feat(db, symbol, "rolling_vol_21d")
+    vol = vol_raw / 100.0 if vol_raw is not None else None
     reasons = []
-    risk_score = 0.5  # base neutral
-    if vol:
+    risk_score = 0.5
+    if vol is not None:
         if vol > 0.35: risk_score += 0.2; reasons.append(f"High vol={vol:.2f}")
         elif vol < 0.15: risk_score -= 0.1; reasons.append(f"Low vol={vol:.2f}")
-    if drawdown:
-        if drawdown < -10: risk_score += 0.2; reasons.append(f"Drawdown={drawdown:.1f}%")
     if regime in ("HIGH_VOLATILITY", "CRISIS"):
         risk_score += 0.15; reasons.append(f"Risky regime={regime}")
     high_risk = risk_score > 0.65
@@ -163,7 +159,7 @@ def _risk_agent(db, symbol, regime) -> dict:
     confidence = min(0.95, risk_score)
     return {"agent": "Risk", "direction": direction, "confidence": round(confidence, 3),
             "reasoning": "; ".join(reasons) or "Risk normal",
-            "regime_context": regime, "indicators_used": json.dumps(["realized_vol_20d", "max_drawdown_20d"])}
+            "regime_context": regime, "indicators_used": json.dumps(["rolling_vol_21d"])}
 
 
 def _macro_agent(db, symbol, regime) -> dict:
@@ -181,8 +177,9 @@ def _macro_agent(db, symbol, regime) -> dict:
 
 
 def _volatility_agent(db, symbol, regime) -> dict:
-    vol = _latest_feat(db, symbol, "realized_vol_20d")
-    if not vol:
+    vol_raw = _latest_feat(db, symbol, "rolling_vol_21d")
+    vol = vol_raw / 100.0 if vol_raw is not None else None
+    if vol is None:
         return {"agent": "Volatility", "direction": "neutral", "confidence": 0.5,
                 "reasoning": "No vol data", "regime_context": regime, "indicators_used": "[]"}
     if vol > 0.40:
@@ -192,7 +189,7 @@ def _volatility_agent(db, symbol, regime) -> dict:
     else:
         direction, reason, conf = "neutral", f"Vol={vol:.2f} normal range", 0.50
     return {"agent": "Volatility", "direction": direction, "confidence": conf,
-            "reasoning": reason, "regime_context": regime, "indicators_used": json.dumps(["realized_vol_20d"])}
+            "reasoning": reason, "regime_context": regime, "indicators_used": json.dumps(["rolling_vol_21d"])}
 
 
 def _portfolio_agent(db, symbol, regime) -> dict:

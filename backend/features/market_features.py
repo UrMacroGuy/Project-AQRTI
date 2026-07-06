@@ -126,8 +126,9 @@ def compute_market_features(
             results["sector_rs_21d"] = stock_ret21 - sector_avg_ret21
             # Tie-safe rank: use bisect on descending-sorted list
             rank = _rank_desc(stock_ret21, peer_ret21)
-            results["sector_rank"]          = float(rank)
-            results["peer_rank_return_21d"] = float(rank)
+            total = len(peer_ret21) + 1
+            results["sector_rank"]          = round(rank / total * 100, 1)
+            results["peer_rank_return_21d"] = int(rank)
         else:
             results["sector_rs_21d"]        = None
             results["sector_rank"]          = None

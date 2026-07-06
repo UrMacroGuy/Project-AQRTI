@@ -24,8 +24,6 @@ from ml.datasets.training_dataset import (
     get_final_train_test,
 )
 from ml.models.catboost_model import CatBoostModel
-from ml.models.ngboost_model import NGBoostModel
-from ml.models.aqrtinet_model import AQRTINet
 from ml.models.base_model import BaseModel, ModelArtifact, ML_MODELS_DIR
 from ml.validation.metrics import compute_metrics
 from ml.validation.walk_forward import run_walk_forward_validation
@@ -34,8 +32,6 @@ log = get_logger("backtest_validator")
 
 MODEL_CLASSES = {
     "catboost": CatBoostModel,
-    "ngboost":  NGBoostModel,
-    "aqrtinet": AQRTINet,
 }
 
 # Tasks to train models for
@@ -60,7 +56,7 @@ def train_final_model(
     is_classif = task in ("direction_5d", "outperform_binary")
     ml_task    = "direction" if is_classif else "expected_return"
 
-    X_train, y_train, X_test, y_test, scaler, train_weights = get_final_train_test(dataset, scale=True)
+    X_train, y_train, X_test, y_test, scaler, train_weights, _, _, _, _ = get_final_train_test(dataset, scale=True)
 
     if len(X_train) < 50:
         log.warning("Insufficient training rows for %s — skipping", model_name)
@@ -81,7 +77,6 @@ def train_final_model(
         log.error("Final training failed for %s/%s: %s", model_name, task, exc)
         return None
 
-    # Evaluate on hold-out test set
     y_pred  = model.predict(X_test)
     y_proba = model.predict_proba(X_test)
     metrics = compute_metrics(y_test, y_pred, y_proba, ml_task)

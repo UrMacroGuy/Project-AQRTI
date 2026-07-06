@@ -48,15 +48,9 @@ def _kill_listeners_on_port(port: int) -> list[int]:
         )
     except Exception:
         return killed
-    seen = set()
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) < 5 or parts[0] != "TCP":
-            continue
-        local_addr, pid = parts[1], parts[-1]
-        if not local_addr.endswith(f":{port}") or not pid.isdigit():
-            continue
-        pid = int(pid)
+    pattern = re.compile(r"^TCP\s+\S+:" + str(port) + r"\s+\S+\s+\S+\s+(\d+)", re.MULTILINE)
+    for m in pattern.finditer(out):
+        pid = int(m.group(1))
         if pid in seen:
             continue
         seen.add(pid)
@@ -98,21 +92,28 @@ def _save_state(state: dict) -> None:
 
 
 def _log_restart(reason: str) -> None:
+    import msvcrt
     try:
-        log = []
-        if RESTART_LOG.exists():
-            log = json.loads(RESTART_LOG.read_text())
-        log.insert(0, {"ts": _now_str(), "reason": reason})
-        RESTART_LOG.write_text(json.dumps(log[:50]))  # keep last 50
+        with open(RESTART_LOG, "a+") as f:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            f.seek(0)
+            raw = f.read()
+            try:
+                log = json.loads(raw) if raw.strip() else []
+            except (json.JSONDecodeError, Exception):
+                log = []
+            log.insert(0, {"ts": _now_str(), "reason": reason})
+            f.seek(0)
+            f.truncate()
+            json.dump(log[:50], f)
+            f.flush()
     except Exception:
         pass
 
 
 def _start_backend() -> None:
     """Launch uvicorn in a new detached process."""
-    python = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
-    if not python.exists():
-        python = sys.executable
+    python = sys.executable
     cmd = [
         str(python), "-m", "uvicorn",
         "aqrti.api.app:app",
@@ -120,14 +121,17 @@ def _start_backend() -> None:
         "--port", "8000",
     ]
     log_file = open(BACKEND_DIR / "uvicorn.log", "a")
-    subprocess.Popen(
-        cmd,
-        cwd=str(BACKEND_DIR),
-        stdout=log_file,
-        stderr=log_file,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    )
-    print(f"[{_now_str()}] Backend started")
+    try:
+        subprocess.Popen(
+            cmd,
+            cwd=str(BACKEND_DIR),
+            stdout=log_file,
+            stderr=log_file,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        print(f"[{_now_str()}] Backend started")
+    finally:
+        log_file.close()
 
 
 def main():

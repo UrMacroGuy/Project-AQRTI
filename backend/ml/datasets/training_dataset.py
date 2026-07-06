@@ -49,6 +49,10 @@ class DataSplit:
     X_test:          pd.DataFrame = field(repr=False)
     y_test:          pd.Series    = field(repr=False)
     feature_cols:    list[str]    = field(repr=False)
+    train_dates:     pd.Series    = field(repr=False)  # aligned to X_train.index, for per-row regime routing
+    test_dates:      pd.Series    = field(repr=False)   # aligned to X_test.index
+    return_5d_train: pd.Series    = field(default_factory=pd.Series, repr=False)  # for confident-label weighting
+    return_5d_test:  pd.Series    = field(default_factory=pd.Series, repr=False)
     scaler:          Optional[object] = field(default=None, repr=False)
     sample_weights:  Optional[pd.Series] = field(default=None, repr=False)
 
@@ -175,6 +179,10 @@ def build_walk_forward_folds(
         y_train = df.loc[train_mask, label_col].copy()
         X_test  = df.loc[test_mask, feature_cols].copy()
         y_test  = df.loc[test_mask, label_col].copy()
+        train_dates = df.loc[train_mask, "date"].copy() if "date" in df.columns else pd.Series([""] * train_mask.sum(), index=X_train.index)
+        test_dates  = df.loc[test_mask, "date"].copy()  if "date" in df.columns else pd.Series([""] * test_mask.sum(),  index=X_test.index)
+        return_5d_train = df.loc[train_mask, "return_5d"].copy() if "return_5d" in df.columns else pd.Series([], dtype=float)
+        return_5d_test  = df.loc[test_mask, "return_5d"].copy()  if "return_5d" in df.columns else pd.Series([], dtype=float)
 
         if len(X_train) < 200 or len(X_test) < 20:
             test_start += timedelta(days=WF_STEP_MONTHS * 30)
@@ -210,6 +218,10 @@ def build_walk_forward_folds(
             X_test         = X_test,
             y_test         = y_test,
             feature_cols   = feature_cols,
+            train_dates    = train_dates,
+            test_dates     = test_dates,
+            return_5d_train = return_5d_train,
+            return_5d_test  = return_5d_test,
             scaler         = scaler,
             sample_weights = fold_weights,
         ))
@@ -305,6 +317,7 @@ def prepare_training_dataset(
     top_features: int = 40,
     version: int = 1,
     scale: bool = True,
+    days_back: Optional[int] = None,
 ) -> TrainingDataset:
     """
     Full pipeline:
@@ -318,14 +331,22 @@ def prepare_training_dataset(
         top_features: How many features to keep via IC ranking
         version:      Feature version to load from feature_store
         scale:        Whether to apply RobustScaler per fold
+        days_back:    Restrict training data to the last N calendar days.
+                      None (default here) uses build_full_dataset's own
+                      default (90 days, recent-data-only policy, 2026-07-07).
+                      Pass a larger number or a very large one explicitly for
+                      one-off full-history research/comparison runs.
 
     Returns:
         TrainingDataset with .df, .feature_cols, .folds populated
     """
     assert label_col in LABEL_COLUMNS, f"Unknown label: {label_col}. Choose from {LABEL_COLUMNS}"
 
-    log.info("Building full dataset (label=%s, version=%d)...", label_col, version)
-    df = build_full_dataset(version=version)
+    log.info("Building dataset (label=%s, version=%d, days_back=%s)...", label_col, version, days_back)
+    if days_back is not None:
+        df = build_full_dataset(version=version, days_back=days_back)
+    else:
+        df = build_full_dataset(version=version)  # uses build_full_dataset's own 90-day default
 
     if df.empty:
         log.error("Empty dataset — no training data available")
@@ -383,13 +404,18 @@ def get_final_train_test(
     dataset: TrainingDataset,
     test_fraction: float = 0.20,
     scale: bool = True,
-) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, Optional[RobustScaler], Optional[pd.Series]]:
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, Optional[RobustScaler], Optional[pd.Series], pd.Series]:
     """
     Simple chronological train/test split of the full dataset.
     Used for final model training after walk-forward validation.
 
-    Returns: X_train, y_train, X_test, y_test, scaler, train_sample_weights
+    Returns: X_train, y_train, X_test, y_test, scaler, train_sample_weights,
+             train_dates, test_dates, train_return_5d, test_return_5d
     train_sample_weights is None when no failure records exist (safe to ignore).
+    train_dates is the 'date' column aligned to X_train's index.
+    test_dates is the 'date' column aligned to X_test's index (for regime-aware
+    inference in historical/backtest evaluation, e.g. AQRTINet's per-row regime routing).
+    train_return_5d / test_return_5d are the return_5d values aligned to each split.
     """
     df   = dataset.df.sort_values("date").reset_index(drop=True)
     feat = dataset.feature_cols
@@ -403,6 +429,10 @@ def get_final_train_test(
     y_train = train[lbl].copy()
     X_test  = test[feat].copy()
     y_test  = test[lbl].copy()
+    test_dates = test["date"].copy() if "date" in test.columns else pd.Series([""] * len(test), index=test.index)
+    train_dates = train["date"].copy() if "date" in train.columns else pd.Series([""] * len(train), index=train.index)
+    train_return_5d = train["return_5d"].copy() if "return_5d" in train.columns else pd.Series([], dtype=float)
+    test_return_5d  = test["return_5d"].copy()  if "return_5d" in test.columns else pd.Series([], dtype=float)
 
     scaler = None
     if scale:
@@ -416,4 +446,4 @@ def get_final_train_test(
         # All weights equal 1.0 means no failure records — pass None so callers skip the overhead
         train_weights = None
 
-    return X_train, y_train, X_test, y_test, scaler, train_weights
+    return X_train, y_train, X_test, y_test, scaler, train_weights, train_dates, test_dates, train_return_5d, test_return_5d

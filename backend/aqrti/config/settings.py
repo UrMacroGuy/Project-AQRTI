@@ -6,6 +6,7 @@ Single source of truth for all runtime settings.
 from __future__ import annotations
 
 import os
+import warnings
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
@@ -13,14 +14,24 @@ from pydantic import Field
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+_ENV_PATH = BASE_DIR / ".env"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=BASE_DIR / ".env",
+        env_file=_ENV_PATH,
         env_prefix="AQRTI_",
         case_sensitive=False,
         extra="ignore",
     )
+
+    def __init__(self, **kwargs):
+        if not _ENV_PATH.exists():
+            warnings.warn(
+                f"Missing .env file at {_ENV_PATH} — all settings will use defaults. "
+                "Create a .env file to configure AQRTI_AUTH_TOKEN, AQRTI_TELEGRAM_*, etc."
+            )
+        super().__init__(**kwargs)
 
     # ── Server ──────────────────────────────────────────────────
     host: str = Field(default="127.0.0.1")   # ARCH-8: localhost-only; override via AQRTI_HOST for LAN after enabling auth

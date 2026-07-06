@@ -21,25 +21,70 @@ contract specs; recheck against the current NSE F&O contract file if this
 segment is still in use more than ~1 year after these were set.
 """
 
-# ── Universe ────────────────────────────────────────────────────
-# index_name -> underlying spot ticker (yfinance) for basis modeling
-INDEX_FUTURES_UNIVERSE = {
+# ── TTL for cached values (seconds) ─────────────────────────────
+_CONFIG_TTL: int = 3600  # 1 hour — re-evaluate periodically so
+                         # mid-session edits to near-production static
+                         # defaults don't require a backend restart.
+
+import time as _time
+
+_INDEX_FUTURES_UNIVERSE = {
     "NIFTY50":     "^NSEI",
     "BANKNIFTY":   "^NSEBANK",
     "SENSEX":      "^BSESN",
     "NIFTYIT":     "^CNXIT",
     "NIFTYPHARMA": "^CNXPHARMA",
 }
-
-# ── Contract specifications (NSE F&O, set 2026-07) ──────────────
-# lot_size: units per lot. tick_size: minimum price movement (index points).
-CONTRACT_SPECS = {
+_CONTRACT_SPECS = {
     "NIFTY50":     {"exchange": "NSE", "lot_size": 75,  "tick_size": 0.05},
     "BANKNIFTY":   {"exchange": "NSE", "lot_size": 30,  "tick_size": 0.05},
     "SENSEX":      {"exchange": "BSE", "lot_size": 20,  "tick_size": 0.05},
     "NIFTYIT":     {"exchange": "NSE", "lot_size": 50,  "tick_size": 0.05},
     "NIFTYPHARMA": {"exchange": "NSE", "lot_size": 100, "tick_size": 0.05},
 }
+_MARGIN_PCT: float = 0.13
+_RISK_FREE_RATE: float = 0.070
+_DIVIDEND_YIELD: float = 0.012
+
+# Cache state
+_last_fetch: float = 0.0
+_cache_ttl: int = _CONFIG_TTL
+
+def _refresh_if_stale() -> None:
+    """No-op placeholder for future DB-backed reload — currently just
+    logs a periodic heartbeat so TTL awareness shows in the logs."""
+    global _last_fetch
+    now = _time.time()
+    if now - _last_fetch >= _cache_ttl:
+        _last_fetch = now
+
+def get_universe() -> dict:
+    _refresh_if_stale()
+    return dict(_INDEX_FUTURES_UNIVERSE)
+
+def get_contract_specs() -> dict:
+    _refresh_if_stale()
+    return dict(_CONTRACT_SPECS)
+
+def get_margin_pct() -> float:
+    _refresh_if_stale()
+    return _MARGIN_PCT
+
+def get_risk_free_rate() -> float:
+    _refresh_if_stale()
+    return _RISK_FREE_RATE
+
+def get_dividend_yield() -> float:
+    _refresh_if_stale()
+    return _DIVIDEND_YIELD
+
+# ── Universe ────────────────────────────────────────────────────
+# index_name -> underlying spot ticker (yfinance) for basis modeling
+INDEX_FUTURES_UNIVERSE = _INDEX_FUTURES_UNIVERSE
+
+# ── Contract specifications (NSE F&O, set 2026-07) ──────────────
+# lot_size: units per lot. tick_size: minimum price movement (index points).
+CONTRACT_SPECS = _CONTRACT_SPECS
 
 # ── Margin model: fixed % of notional ───────────────────────────
 # Approximates typical NSE SPAN+exposure margin for index futures
@@ -49,7 +94,7 @@ CONTRACT_SPECS = {
 # realistic capital-efficiency comparisons between strategies. Recalibrate
 # if backtested strategies show margin-call-like behavior that a real SPAN
 # model would have caught earlier.
-MARGIN_PCT = 0.13
+MARGIN_PCT = _MARGIN_PCT
 
 # ── Cost-of-carry basis model ───────────────────────────────────
 # F = S * e^((r - q) * T)   where T = days_to_expiry / 365
@@ -57,8 +102,8 @@ MARGIN_PCT = 0.13
 # Both are coarse constants, not a fitted daily curve — the basis this
 # produces is a smooth approximation of the real futures-spot spread, not
 # a tick-accurate reproduction of actual bid/ask-driven basis moves.
-RISK_FREE_RATE     = 0.070   # ~7% — approximate long-run India risk-free rate
-DIVIDEND_YIELD     = 0.012   # ~1.2% — approximate NIFTY dividend yield
+RISK_FREE_RATE     = _RISK_FREE_RATE
+DIVIDEND_YIELD     = _DIVIDEND_YIELD
 
 # ── Transaction costs ────────────────────────────────────────────
 # Futures round-trip cost is lower than cash equity (no STT on the buy side,

@@ -114,6 +114,9 @@ def get_market(db: Session = Depends(get_db_dependency)):
     nifty     = get_latest_index(db, "NIFTY50")
     banknifty = get_latest_index(db, "BANKNIFTY")
 
+    if nifty is None and banknifty is None:
+        return {"error": "No data available"}
+
     # Top movers: stocks with highest absolute daily return today
     latest_prices = get_latest_prices(db, symbols)
     movers = sorted(
@@ -469,7 +472,14 @@ def get_correlation_matrix(
     def _returns(closes):
         if len(closes) < 2:
             return []
-        return [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
+        result = []
+        for i in range(1, len(closes)):
+            prev = closes[i - 1]
+            if prev == 0:
+                result.append(0.0)
+            else:
+                result.append((closes[i] - prev) / prev)
+        return result
 
     returns_map: dict[str, list] = {}
     for sym in symbols:

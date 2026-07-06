@@ -391,7 +391,7 @@ def export_vault(full: bool = False) -> dict:
         log.exception("Obsidian export failed — pipeline continues unaffected")
         return {"error": "export_failed"}
 
-    log.info(f"Obsidian export complete: {counts}")
+    log.info("Obsidian export complete: %s", counts)
     return counts
 
 

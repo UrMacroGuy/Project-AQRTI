@@ -32,7 +32,7 @@ def get_portfolio_summary(db: Session) -> dict:
             "openPositions":    open_count,
             "deployedCapital":  max(invested, 0.0),
             "cashReserve":      paper.current_cash,
-            "totalReturn":      (paper.total_value - paper.initial_capital) / paper.initial_capital * 100,
+            "totalReturn":      ((paper.total_value - paper.initial_capital) / paper.initial_capital * 100) if paper.initial_capital else 0.0,
             "drawdown":         0.0,
             "sharpe30d":        0.0,
             "lastUpdated":      str(date.today()),
@@ -165,7 +165,10 @@ def get_open_positions(db: Session) -> list[dict]:
             .first()
         )
         current_price = latest_price_row[0] if latest_price_row else t.entry_price
-        unrealized_pnl = (current_price - t.entry_price) / t.entry_price * t.position_size
+        if t.entry_price == 0:
+            unrealized_pnl = 0.0
+        else:
+            unrealized_pnl = (current_price - t.entry_price) / t.entry_price * t.position_size
         result.append({
             "symbol":         t.symbol,
             "entryDate":      str(t.entry_date),
@@ -174,7 +177,7 @@ def get_open_positions(db: Session) -> list[dict]:
             "positionSize":   t.position_size,
             "positionPct":    t.position_pct,
             "unrealizedPnl":  round(unrealized_pnl, 2),
-            "unrealizedPct":  round((current_price - t.entry_price) / t.entry_price * 100, 2),
+            "unrealizedPct":  round((current_price - t.entry_price) / t.entry_price * 100, 2) if t.entry_price else 0.0,
             "strategy":       t.strategy,
             "confidence":     t.confidence,
         })
@@ -192,7 +195,7 @@ def record_snapshot(
     """Upsert today's portfolio snapshot."""
     settings = get_settings()
     invested = total_value - cash
-    total_return = (total_value - settings.paper_capital) / settings.paper_capital * 100
+    total_return = ((total_value - settings.paper_capital) / settings.paper_capital * 100) if settings.paper_capital else 0.0
 
     existing = db.query(PortfolioSnapshot).filter_by(date=date.today()).first()
     if existing:

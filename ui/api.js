@@ -15,12 +15,12 @@ const API_CONFIG = {
 // Stores last-known API responses so panels show stale data when backend is offline
 const _cache = {
   PREFIX: 'aqrti_cache_',
-  TTL: 24 * 60 * 60 * 1000, // 24h — stale is better than empty
+  TTL: 60 * 1000, // 60s — short enough to stay fresh for a real session
 
   set(key, data) {
     try {
       localStorage.setItem(this.PREFIX + key, JSON.stringify({ data, ts: Date.now() }));
-    } catch (_) {}
+    } catch (_) { console.warn('[AQRTI Cache] set failed:', _.message); }
   },
 
   get(key) {
@@ -30,7 +30,7 @@ const _cache = {
       const { data, ts } = JSON.parse(raw);
       if (Date.now() - ts > this.TTL) return null;
       return data;
-    } catch (_) { return null; }
+    } catch (_) { console.warn('[AQRTI Cache] get failed:', _.message); return null; }
   },
 };
 
@@ -376,6 +376,13 @@ const Api = {
   async goNogoUptimeLog() { return apiFetch('/go-nogo/uptime-log'); },
   async goNogoRiskRails()     { return apiFetch('/go-nogo/risk-rails'); },
   async goNogoMonthlyReview() { return apiFetch('/go-nogo/monthly-review'); },
+
+  // ── GO-7: Morning Decision Screen ─────────────────────────────
+  async morningDecision() { return apiFetch('/morning/decision'); },
+  async morningAct(strategyId, symbol, action, note) {
+    return apiPost('/morning/act', { strategy_id: strategyId, symbol, action, note });
+  },
+  async morningActLog(limit) { return apiFetch('/morning/act-log', { limit }); },
 };
 
 // ── Legacy uppercase API shim (used in intelligence-lab + replay) ──

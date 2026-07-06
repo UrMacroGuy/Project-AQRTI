@@ -62,7 +62,7 @@ def _aleatoric_uncertainty(db: Session, symbol: Optional[str] = None, days: int 
     else:
         # Use NIFTY index as market proxy — much smaller than full price table
         rows = db.query(IndexData.close).filter(
-            IndexData.index_name == "^NSEI", IndexData.date >= cutoff
+            IndexData.index_name == "NIFTY50", IndexData.date >= cutoff
         ).order_by(IndexData.date.asc()).all()
         closes_raw = [r[0] for r in rows if r[0]]
     if len(closes_raw) < 10:
@@ -149,8 +149,8 @@ def estimate_uncertainty(db: Session, model_id: str,
         fs  * W_FEAT_STAB  +
         hc  * W_HIST_CALIB
     )
-    confidence_pct = round((1.0 - composite_uncertainty) * base_confidence * 100, 1)
-    uncertainty_pct = round(composite_uncertainty * 100 / 2, 1)  # ±uncertainty
+    confidence_pct = round((1.0 - composite_uncertainty) * 100, 1)
+    uncertainty_pct = round(composite_uncertainty * 100, 1)
     confidence_pct = max(0.0, min(99.9, confidence_pct))
     uncertainty_pct = max(0.1, min(49.9, uncertainty_pct))
 

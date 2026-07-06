@@ -39,7 +39,7 @@ def _build_feature_matrix(db: Session, days: int = LOOKBACK_DAYS):
     cutoff = date.today() - timedelta(days=days)
     nifty_rows = (
         db.query(IndexData.date, IndexData.close, IndexData.returns)
-        .filter(IndexData.index_name == "^NSEI", IndexData.date >= cutoff)
+        .filter(IndexData.index_name == "NIFTY50", IndexData.date >= cutoff)
         .order_by(IndexData.date.asc()).all()
     )
     if len(nifty_rows) < 30:
@@ -167,6 +167,38 @@ def run_regime_discovery(db: Session, n_clusters: int = N_CLUSTERS) -> dict:
         regime_stats[int(lbl)]["breadths"].append(X[i][1])
         regime_stats[int(lbl)]["moms"].append(X[i][2])
         regime_stats[int(lbl)]["vrs"].append(X[i][3])
+
+    # Identify clusters below MIN_CLUSTER_SIZE; reassign their rows to the
+    # nearest remaining centroid so no data is silently dropped.
+    small_clusters = {
+        idx for idx in range(n_clusters)
+        if len(regime_stats[idx]["dates"]) < MIN_CLUSTER_SIZE
+    }
+    if small_clusters:
+        retain = [i for i in range(n_clusters) if i not in small_clusters]
+        if retain:
+            centroids_retain = centroids[retain]
+            for small_idx in small_clusters:
+                mask = labels == small_idx
+                n_small = mask.sum()
+                if n_small == 0:
+                    continue
+                # Distance from each small-cluster row to all retained centroids
+                dists = np.linalg.norm(X_norm[mask][:, None] - centroids_retain[None], axis=2)
+                nearest_retain = np.argmin(dists, axis=1)
+                new_labels = retain[nearest_retain[0]] if n_small == 1 else retain[nearest_retain]
+                labels[mask] = new_labels
+                # Move rows into the correct regime_stats bucket
+                for orig_pos in np.where(mask)[0]:
+                    orig_pos_item = int(orig_pos)
+                    new_lbl_val = int(labels[orig_pos_item])
+                    regime_stats[new_lbl_val]["dates"].append(dates[orig_pos_item])
+                    regime_stats[new_lbl_val]["vols"].append(X[orig_pos_item][0])
+                    regime_stats[new_lbl_val]["breadths"].append(X[orig_pos_item][1])
+                    regime_stats[new_lbl_val]["moms"].append(X[orig_pos_item][2])
+                    regime_stats[new_lbl_val]["vrs"].append(X[orig_pos_item][3])
+            log.info("Reassigned %d rows from %d small clusters to nearest retained centroids",
+                     sum(len(regime_stats[s]["dates"]) for s in small_clusters if s in regime_stats), len(small_clusters))
 
     created = updated = 0
     regime_id_map: dict[int, str] = {}

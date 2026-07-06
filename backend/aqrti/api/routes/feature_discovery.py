@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from aqrti.database.engine import get_db_dependency as get_db

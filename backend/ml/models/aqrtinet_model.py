@@ -51,12 +51,28 @@ Thirteen innovations over off-the-shelf gradient boosters.
       P2-A SECTOR PEER-MEAN PROPAGATION — O(n) sector-group feature averages
 
   v4.1 IMPROVEMENTS (threshold calibration pass, 2026-07-06):
-  13. PER-REGIME F1-OPTIMAL DECISION THRESHOLD
+  13. PER-REGIME BALANCED-ACCURACY-OPTIMAL DECISION THRESHOLD
       Decision boundary chosen by sweeping thresholds on OOF probabilities and
-      picking the one that maximises F1 on held-out fold data, per regime.
-      Stored in the saved pkl (`regime_thresholds`) and applied in predict().
-      Root cause of the 12.6% recall result: the raw 0.5 cutoff was never
-      calibrated for the model's actual probability distribution.
+      picking the one that maximises balanced accuracy on held-out fold data,
+      per regime, rejecting degenerate thresholds that call >=98% of rows one
+      class. Stored in the saved pkl (`regime_thresholds`) and applied in
+      predict(). Root cause of the 12.6% recall result: the raw 0.5 cutoff was
+      never calibrated for the model's actual probability distribution.
+      Originally used plain F1, which was later found to pick degenerate
+      near-all-positive thresholds on positive-majority labels (see
+      _find_f1_threshold docstring) — switched to balanced accuracy with an
+      explicit degenerate-threshold guard.
+
+  14. PER-ROW HISTORICAL REGIME ROUTING (inference fix, 2026-07-06)
+      predict()/predict_proba() previously routed every row in a batch to
+      whichever regime is "current" in the DB right now — correct for live
+      single-day inference, but silently wrong for historical/backtest
+      evaluation spanning many dates, where it mis-routed most rows to the
+      wrong regime expert and threshold. BaseModel.predict()/predict_proba()
+      now accept an optional `dates` Series; when supplied, AQRTINet looks up
+      each row's regime from the date->regime map built during training.
+      Falls back to the single "current regime" behavior when dates aren't
+      passed (unchanged live-inference path).
 
 Architecture:
     AQRTINet v4.1
@@ -351,6 +367,7 @@ def _compute_confident_label_weights(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     training_dates: pd.Series,
+    return_5d: Optional[pd.Series] = None,
 ) -> np.ndarray:
     """
     Compute per-row confidence weights based on label ambiguity.
@@ -359,13 +376,13 @@ def _compute_confident_label_weights(
     than dropped so the model learns from the signal shape without being misled
     by the noisy direction call.
 
-    Requires 'return_5d' to be in X_train (it's dropped after weighting).
-    Falls back to uniform weights if not available.
+    Accepts return_5d as an optional series (set by callers via model._return_5d).
+    Falls back to uniform weights if not provided.
     """
-    if "return_5d" not in X_train.columns:
+    if return_5d is None or return_5d.empty:
         return np.ones(len(X_train), dtype=np.float32)
 
-    abs_ret = X_train["return_5d"].abs()
+    abs_ret = return_5d.abs()
     confident = abs_ret >= CONFIDENT_LABEL_THRESHOLD_PCT
     weights = np.where(confident, 1.0, CONFIDENT_LABEL_WEIGHT).astype(np.float32)
     n_ambiguous = int((~confident).sum())
@@ -454,18 +471,31 @@ def _select_regime_features(
 def _find_f1_threshold(probas: np.ndarray, y_true: np.ndarray, n_steps: int = 50) -> float:
     """
     Improvement plan §1: sweep thresholds on OOF probabilities and return the
-    one that maximises F1 on the held-out fold data.  Falls back to 0.5 if
-    there is not enough positive signal to compute a meaningful F1.
+    one that maximises balanced accuracy (mean of per-class recall) on the
+    held-out fold data. Falls back to 0.5 if there is not enough signal.
+
+    Originally maximised plain F1, which only scores the positive class: on a
+    positive-majority label (direction_5d was 61% positive in one benchmark),
+    F1 is maximised by a low threshold that calls almost every row positive —
+    100% recall, mediocre precision, and zero real discrimination. Balanced
+    accuracy penalises that degenerate case because it also requires correctly
+    calling the negative class, so a threshold that just chases the majority
+    class no longer looks "optimal".
     """
-    from sklearn.metrics import f1_score
-    best_t, best_f1 = 0.5, 0.0
+    from sklearn.metrics import balanced_accuracy_score
+    best_t, best_score = 0.5, 0.0
+    y_true = np.asarray(y_true)
     for t in np.linspace(0.10, 0.90, n_steps):
         preds = (probas >= t).astype(int)
-        if preds.sum() == 0:
+        n_pos = preds.sum()
+        # Reject thresholds where fewer than 2% or more than 98% of rows are
+        # called positive — those are degenerate (near-constant) predictions,
+        # not genuine discrimination, regardless of the resulting score.
+        if n_pos == 0 or n_pos >= 0.98 * len(preds):
             continue
-        f = f1_score(y_true, preds, zero_division=0)
-        if f > best_f1:
-            best_f1, best_t = f, float(t)
+        score = balanced_accuracy_score(y_true, preds)
+        if score > best_score:
+            best_score, best_t = score, float(t)
     return best_t
 
 
@@ -569,6 +599,7 @@ class AQRTINet(BaseModel):
         self._stacking_feature_cols: list[str] = []
         self._regime_feature_cols: dict[str, list[str]] = {}
         self._regime_thresholds: dict[str, float] = {}  # F1-optimal per-regime decision threshold
+        self._return_5d: Optional[pd.Series] = None       # for confident-label weighting
 
     # ── Training ──────────────────────────────────────────────────────────
 
@@ -580,6 +611,8 @@ class AQRTINet(BaseModel):
         y_val: Optional[pd.Series],
         sample_weight: Optional[np.ndarray] = None,
     ) -> None:
+        import sys as _sys
+        print(f"  [AQRTINet] Phase 0: neutralization + interactions", flush=True)
 
         # ── Step 0: Add engineered interaction features ───────────────────
         # Strip label columns that may have been passed through (e.g. return_5d used by
@@ -606,24 +639,33 @@ class AQRTINet(BaseModel):
         ix_cols = [c for c in X_work.columns if c.startswith("ix_")]
         log.info("AQRTINet: added %d interaction features (from %d clean features)", len(ix_cols), len(X_clean.columns))
 
+        print(f"  [AQRTINet] Phase 1: stacking OOF (7-fold CatBoost + NGBoost)...", flush=True)
+
         # ── Step 1: Stacking — OOF predictions from CatBoost + NGBoost ───
         # 7-fold (was 5-fold in v3): more folds = lower variance meta-features
         # with 15.8M rows now available across the full 5yr history.
         meta_cols: list[str] = []
         try:
-            from sklearn.model_selection import StratifiedKFold
-            skf5 = StratifiedKFold(n_splits=7, shuffle=False)
+            # TimeSeriesSplit for stacking OOF — prevents future-leakage where
+            # earlier (chronologically) rows get predicted by models trained on
+            # later rows (the old StratifiedKFold(shuffle=False) bug, see
+            # AQRTINET_IMPROVEMENT_PLAN.md finding C).
+            from sklearn.model_selection import TimeSeriesSplit
+            tscv = TimeSeriesSplit(n_splits=7)
             for meta_name, model_key in [("meta_catboost", "catboost"), ("meta_ngboost", "ngboost")]:
+                print(f"    Stacking {model_key} (7 folds):", end="", flush=True)
                 if model_key == "catboost":
                     from ml.models.catboost_model import CatBoostModel as MClass
                 else:
                     from ml.models.ngboost_model import NGBoostModel as MClass
                 oof = np.zeros(len(X_clean))
-                for tr_idx, val_idx in skf5.split(X_clean, y_train):
+                for fi, (tr_idx, val_idx) in enumerate(tscv.split(X_clean)):
+                    print(f" {fi+1}", end="", flush=True)
                     m = MClass(task=self.task, label_col=self.label_col, version=0)
                     m.fit(X_clean.iloc[tr_idx], y_train.iloc[tr_idx])
                     p = m.predict_proba(X_clean.iloc[val_idx])
                     oof[val_idx] = p if p.ndim == 1 else p[:, 1]
+                print(" done", flush=True)
                 X_work[meta_name] = oof
                 meta_cols.append(meta_name)
             self._stacking_feature_cols = meta_cols
@@ -631,10 +673,36 @@ class AQRTINet(BaseModel):
         except Exception as exc:
             log.warning("AQRTINet: stacking OOF failed: %s", exc)
 
-        # ── Step 2: Cross-sectional percentile ranking ────────────────────
+        print(f"  [AQRTINet] Phase 2: percentile ranking...", flush=True)
+
+        # ── Step 2: Cross-sectional percentile ranking (per-fold fit to avoid leakage) ──
+        # Instead of fitting on ALL data, we fit inside the CV loop so validation
+        # rows never influence the percentile distribution used for training.
+        # Collect all per-fold training portions for regime specialist training.
+        _fold_ranked_chunks: list[pd.DataFrame] = []
         self._ranker = PercentileRanker(n_quantiles=100)
-        X_ranked = self._ranker.fit_transform(X_work)
-        log.info("AQRTINet: PercentileRanker fitted on %d features", self._ranker.feature_count())
+        try:
+            tscv_r = TimeSeriesSplit(n_splits=7)
+            for tr_idx_r, _ in tscv_r.split(X_work):
+                ranker_fold = PercentileRanker(n_quantiles=100)
+                X_tr_ranked_fold = ranker_fold.fit_transform(X_work.iloc[tr_idx_r])
+                _fold_ranked_chunks.append(X_tr_ranked_fold)
+            # Build the full ranked matrix from concatenated per-fold training portions
+            X_ranked = pd.concat(_fold_ranked_chunks, ignore_index=True).loc[
+                X_work.index
+            ] if _fold_ranked_chunks else X_work
+            # Fit a final ranker on ALL training data for inference-time use
+            self._ranker.fit(X_work)
+            log.info(
+                "AQRTINet: PercentileRanker fitted per-fold (%d folds, %d features)",
+                len(_fold_ranked_chunks), self._ranker.feature_count(),
+            )
+        except Exception as exc:
+            log.warning("AQRTINet: per-fold ranking failed (%s) — falling back to full-fit ranker", exc)
+            self._ranker.fit(X_work)
+            X_ranked = self._ranker.transform(X_work)
+
+        print(f"  [AQRTINet] Phase 3: loading regime map...", flush=True)
 
         # ── Step 3: Load regime map and assign regime per training row ────
         self._regime_map = _fetch_regime_map()
@@ -655,9 +723,12 @@ class AQRTINet(BaseModel):
         )
         log.info("AQRTINet: regime distribution: %s", regimes.value_counts().to_dict())
 
+        print(f"  [AQRTINet] Phase 4: combined weights...", flush=True)
+
         # ── Step 4: Combined sample weights (temporal decay × confident-label) ──
         temporal_weights = _compute_temporal_weights(dates)
-        confident_weights = _compute_confident_label_weights(X_train, y_train, dates)
+        return_5d_vals = getattr(self, "_return_5d", None)
+        confident_weights = _compute_confident_label_weights(X_train, y_train, dates, return_5d=return_5d_vals)
         # Multiply: recent + confident rows get the highest weight
         combined_weights = temporal_weights * confident_weights
         # Renormalize so mean=1 (keeps effective learning rate stable)
@@ -716,6 +787,8 @@ class AQRTINet(BaseModel):
             regimes_aug = regimes.reset_index(drop=True)
             dates_aug = pd.Series(dates.values)
 
+        print(f"  [AQRTINet] Phase 5: training regime experts...", flush=True)
+
         # ── Step 5: Train regime-specific experts with selected features ──
         self._experts = {}
         self._regime_feature_cols = {}
@@ -725,6 +798,7 @@ class AQRTINet(BaseModel):
             n = mask.sum()
 
             if n < MIN_REGIME_ROWS:
+                print(f"    Expert {regime}: skipped ({n} rows < {MIN_REGIME_ROWS})", flush=True)
                 # Improvement plan §3: log as WARNING so regime data scarcity
                 # is visible — a skipped expert means the BULL fallback covers it,
                 # which is imprecise. Do NOT lower MIN_REGIME_ROWS to paper over this.
@@ -735,6 +809,8 @@ class AQRTINet(BaseModel):
                     regime, n, MIN_REGIME_ROWS, FALLBACK_REGIME,
                 )
                 continue
+
+            print(f"    Expert {regime}: {n} rows — training...", flush=True)
 
             X_r = X_ranked_aug[mask]
             y_r = y_train_aug[mask]
@@ -779,14 +855,17 @@ class AQRTINet(BaseModel):
             expert.fit(X_ranked_aug[all_feats], y_train_aug, sample_weight=combined_weights_aug)
             self._experts[FALLBACK_REGIME] = expert
 
+        print(f"  [AQRTINet] Phase 6: Platt calibration...", flush=True)
+
         # ── Step 6: Platt calibration per expert (5-fold OOF, up from 3-fold) ──
         # More folds = tighter sigmoid fit with more data available (15.8M rows).
         try:
             from sklearn.linear_model import LogisticRegression
-            from sklearn.model_selection import StratifiedKFold
+            from sklearn.model_selection import TimeSeriesSplit
             calibrated: dict[str, Any] = {}
 
             for regime, expert in self._experts.items():
+                print(f"    Calibrating {regime}...", end="", flush=True)
                 mask = (regimes == regime).values
                 n = mask.sum()
                 feats = self._regime_feature_cols.get(regime, list(X_ranked.columns))
@@ -795,15 +874,19 @@ class AQRTINet(BaseModel):
                 w_r = combined_weights[mask]
 
                 if n < 150:
+                    print(f" passthrough (n={n}<150)", flush=True)
                     calibrated[regime] = PlattCalibratedExpert(expert, _make_passthrough_platt(), feats)
                     self._regime_thresholds[regime] = 0.5  # not enough data for threshold sweep
                     continue
 
                 oof_proba = np.zeros(n)
-                # 5-fold for regimes with enough data, fall back to 3-fold for smaller regimes
+                # TimeSeriesSplit for Platt calibration OOF — prevents the same
+                # future-leakage bug as the inner stacking CV (finding D in
+                # AQRTINET_IMPROVEMENT_PLAN.md).
+                # 5-fold for regimes with enough data, fall back to 3-fold for smaller regimes.
                 n_splits = 5 if n >= 500 else 3
-                skf = StratifiedKFold(n_splits=n_splits, shuffle=False)
-                for tr_idx, val_idx in skf.split(X_r, y_r):
+                tscv = TimeSeriesSplit(n_splits=n_splits)
+                for tr_idx, val_idx in tscv.split(X_r):
                     hp = {**self.hyperparams, **REGIME_HYPERPARAMS[regime]}
                     fold_exp = _build_expert(hp)
                     fold_exp.fit(X_r.iloc[tr_idx], y_r.iloc[tr_idx], sample_weight=w_r[tr_idx])
@@ -827,6 +910,7 @@ class AQRTINet(BaseModel):
                 calibrated_oof = platt.predict_proba(oof_proba.reshape(-1, 1))[:, 1]
                 best_t = _find_f1_threshold(calibrated_oof, y_r.values)
                 self._regime_thresholds[regime] = best_t
+                print(f" done (n={n}, folds={n_splits}, threshold={best_t:.3f})", flush=True)
                 log.info(
                     "AQRTINet: Platt+Conformal calibrated %s (n=%d, feats=%d, folds=%d, q90=%.3f, threshold=%.3f)",
                     regime, n, len(feats), n_splits, ce._conformal_q_high, best_t,
@@ -886,35 +970,62 @@ class AQRTINet(BaseModel):
             pass
         return FALLBACK_REGIME
 
+    def _row_regimes(self, n_rows: int) -> list[str]:
+        """
+        Resolve one regime per row for the in-flight predict()/predict_proba() call.
+
+        If the caller supplied per-row dates (self._predict_dates — set by
+        BaseModel.predict()), look each date up in the regime map fitted during
+        training so historical/backtest evaluation routes each row to the regime
+        expert it actually belongs to. Without dates (the live single-day path,
+        where every row is "today"), falls back to one regime for the whole batch.
+        """
+        dates = self._predict_dates
+        if dates is not None and self._regime_map:
+            dates_aligned = dates.astype(str).values
+            if len(dates_aligned) == n_rows:
+                return [self._regime_map.get(d, FALLBACK_REGIME) for d in dates_aligned]
+        current = self._get_current_regime()
+        return [current] * n_rows
+
     def _route_to_expert(self, regime: str) -> Any:
         return self._experts.get(regime) or self._experts.get(FALLBACK_REGIME)
 
     def _predict_impl(self, X: pd.DataFrame) -> np.ndarray:
         X_r = self._build_inference_features(X)
-        regime = self._get_current_regime()
-        expert = self._route_to_expert(regime)
-        # Apply F1-optimal per-regime threshold (improvement plan §1).
-        # Use explicit None sentinel — a threshold of 0.0 or 0.5 is still valid.
-        threshold = self._regime_thresholds.get(regime)
-        if threshold is None:
-            threshold = self._regime_thresholds.get(FALLBACK_REGIME)
-        if threshold is not None:
-            proba = expert.predict_proba(X_r)
-            p1 = proba[:, 1] if proba.ndim == 2 else proba
-            return (p1 >= threshold).astype(int)
-        return expert.predict(X_r)
+        row_regimes = self._row_regimes(len(X_r))
+        preds = np.zeros(len(X_r), dtype=int)
+        for regime in set(row_regimes):
+            mask = np.array([r == regime for r in row_regimes])
+            expert = self._route_to_expert(regime)
+            threshold = self._regime_thresholds.get(regime, self._regime_thresholds.get(FALLBACK_REGIME))
+            if threshold is not None:
+                proba = expert.predict_proba(X_r[mask])
+                p1 = proba[:, 1] if proba.ndim == 2 else proba
+                preds[mask] = (p1 >= threshold).astype(int)
+            else:
+                preds[mask] = expert.predict(X_r[mask])
+        return preds
 
     def _predict_proba_impl(self, X: pd.DataFrame) -> np.ndarray:
         X_r = self._build_inference_features(X)
-        expert = self._route_to_expert(self._get_current_regime())
-        proba = expert.predict_proba(X_r)
-        return proba[:, 1] if proba.ndim == 2 else proba
+        row_regimes = self._row_regimes(len(X_r))
+        probas = np.zeros(len(X_r), dtype=float)
+        for regime in set(row_regimes):
+            mask = np.array([r == regime for r in row_regimes])
+            expert = self._route_to_expert(regime)
+            proba = expert.predict_proba(X_r[mask])
+            probas[mask] = proba[:, 1] if proba.ndim == 2 else proba
+        return probas
 
-    def predict_interval(self, X: pd.DataFrame, alpha: float = 0.10) -> np.ndarray:
+    def predict_interval(self, X: pd.DataFrame, alpha: float = 0.10,
+                         dates: Optional[pd.Series] = None) -> np.ndarray:
         """
         P1-B: Return (n, 2) conformal prediction intervals for P(UP).
         Intervals have guaranteed marginal coverage at (1-alpha) level.
         Returns [[lower, upper], ...] for each row in X.
+
+        dates: optional per-row date Series for regime-aware routing (see predict()).
         """
         X_clean = X.drop(columns=[c for c in ["return_5d", "return_3d", "return_10d",
                                                "return_15d", "outperform_nifty_5d",
@@ -922,15 +1033,21 @@ class AQRTINet(BaseModel):
                                                "direction_5d"] if c in X.columns],
                           errors="ignore")
         X_r = self._build_inference_features(X_clean)
-        expert = self._route_to_expert(self._get_current_regime())
-        if hasattr(expert, "predict_interval"):
-            return expert.predict_interval(X_r, alpha=alpha)
-        # Fallback: uniform ±0.15 interval
-        probas = expert.predict_proba(X_r)[:, 1]
-        return np.column_stack([
-            np.clip(probas - 0.15, 0, 1),
-            np.clip(probas + 0.15, 0, 1),
-        ])
+        # Use per-row regime routing if dates provided
+        row_regimes = self._row_regimes(len(X_r))
+        probas = np.zeros(len(X_r), dtype=float)
+        intervals = np.zeros((len(X_r), 2), dtype=float)
+        for regime in set(row_regimes):
+            mask = np.array([r == regime for r in row_regimes])
+            expert = self._route_to_expert(regime)
+            if hasattr(expert, "predict_interval"):
+                intv = expert.predict_interval(X_r[mask], alpha=alpha)
+            else:
+                p = expert.predict_proba(X_r[mask])[:, 1]
+                probas[mask] = p
+                intv = np.column_stack([np.clip(p - 0.15, 0, 1), np.clip(p + 0.15, 0, 1)])
+            intervals[mask] = intv
+        return intervals
 
     # ── Feature Importance ────────────────────────────────────────────────
 

@@ -20,8 +20,8 @@ log = get_logger("model_weighting")
 MIN_WEIGHT    = 0.10
 SOFTMAX_TEMP  = 2.0   # temperature: lower = more winner-takes-all
 
-# Fallback equal weights when no performance data exists
-EQUAL_WEIGHTS = {"catboost": 1/3, "ngboost": 1/3, "aqrtinet": 1/3}
+# Fallback weights when no performance data exists
+EQUAL_WEIGHTS = {"catboost": 1.0}
 
 
 def _softmax(scores: dict[str, float], temperature: float = SOFTMAX_TEMP) -> dict[str, float]:
@@ -93,12 +93,9 @@ def load_dynamic_weights(task: str, version: int = 1) -> dict[str, float]:
         primary = "auc_roc" if task == "direction" else "ic"
 
         with get_db() as db:
-            # LightGBM/XGBoost were removed from the active ensemble 2026-06-27
-            # (sub-coin-flip accuracy) — the training loop only ever produces
-            # catboost/ngboost/aqrtinet versions now (model_retrainer.py), so
-            # computing weights for the retired two was always a no-op that
-            # produced misleading log output.
-            model_names = ["catboost", "ngboost", "aqrtinet"]
+            # CatBoost-only: AQRTINet retired permanently 2026-07-07 (decision:
+            # single-model production, no ensemble). Do not re-add other models here.
+            model_names = ["catboost"]
             scores = {}
             for model_name in model_names:
                 # Most recent test-fold metric

@@ -22,6 +22,7 @@ from aqrti.database.models import (
     PaperPortfolio, PaperPosition, PaperTrade, Prediction, StrategyV2, Stock,
 )
 from aqrti.utils.logger import get_logger
+from paper_trading.paper_trade import NSE_BUY_COST_PCT, NSE_SELL_COST_PCT
 
 log = get_logger("paper_monitor")
 
@@ -106,9 +107,10 @@ def _check_exits(db) -> list[dict]:
         if not exit_reason:
             continue
 
-        # Execute close
-        pnl     = (price - pos.entry_price) * pos.shares
-        pnl_pct = (price - pos.entry_price) / pos.entry_price * 100
+        # Execute close — apply sell cost to exit price (matches paper_trade.py)
+        exit_price = price * (1 - NSE_SELL_COST_PCT)
+        pnl        = (exit_price - pos.entry_price) * pos.shares
+        pnl_pct    = (exit_price - pos.entry_price) / pos.entry_price * 100
 
         trade = (
             db.query(PaperTrade)
@@ -118,7 +120,7 @@ def _check_exits(db) -> list[dict]:
         )
         if trade:
             trade.exit_date     = today
-            trade.exit_price    = round(price, 4)
+            trade.exit_price    = round(exit_price, 4)
             trade.gross_pnl     = round(pnl, 4)
             trade.gross_pnl_pct = round(pnl_pct, 4)
             trade.actual_return = round(pnl_pct, 4)
@@ -131,11 +133,11 @@ def _check_exits(db) -> list[dict]:
 
         log.info(
             "CLOSE %s @ %.2f  reason=%s  pnl=%.2f (%.1f%%)",
-            pos.symbol, price, exit_reason, pnl, pnl_pct,
+            pos.symbol, exit_price, exit_reason, pnl, pnl_pct,
         )
         closed.append({
             "symbol":      pos.symbol,
-            "exit_price":  round(price, 2),
+            "exit_price":  round(exit_price, 2),
             "pnl":         round(pnl, 2),
             "pnl_pct":     round(pnl_pct, 2),
             "exit_reason": exit_reason,
@@ -248,9 +250,10 @@ def _check_entries(db) -> list[dict]:
         if capital > portfolio.current_cash or portfolio.current_cash < MIN_TRADE_CAPITAL:
             break
 
-        shares    = capital / fill
-        sl_price  = round(fill * (1 - strategy["stop_loss_pct"] / 100), 4)
-        tp_price  = round(fill * (1 + strategy["take_profit_pct"] / 100), 4)
+        filled_price = fill * (1 + NSE_BUY_COST_PCT)
+        shares    = capital / filled_price
+        sl_price  = round(filled_price * (1 - strategy["stop_loss_pct"] / 100), 4)
+        tp_price  = round(filled_price * (1 + strategy["take_profit_pct"] / 100), 4)
         sector    = _get_sector(db, pred.symbol)
 
         pos = PaperPosition(
@@ -258,7 +261,7 @@ def _check_entries(db) -> list[dict]:
             symbol           = pred.symbol,
             sector           = sector,
             entry_date       = date.today(),
-            entry_price      = fill,
+            entry_price      = round(filled_price, 4),
             shares           = shares,
             capital_deployed = round(capital, 2),
             weight_pct       = round(capital / pv * 100, 4) if pv > 0 else 0.0,
@@ -278,7 +281,7 @@ def _check_entries(db) -> list[dict]:
             symbol           = pred.symbol,
             sector           = sector,
             entry_date       = date.today(),
-            entry_price      = fill,
+            entry_price      = round(filled_price, 4),
             shares           = shares,
             capital_deployed = round(capital, 2),
             weight_pct       = round(capital / pv * 100, 4) if pv > 0 else 0.0,
