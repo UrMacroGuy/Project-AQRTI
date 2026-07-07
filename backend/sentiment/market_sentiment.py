@@ -104,7 +104,16 @@ def determine_regime(
     bull_breath = breadth_pct is None or breadth_pct > 55
     if bull_sent and bull_price and bull_breath:
         conf = 60 + (score - 60) * 1.5
-        return "BULL MARKET", round(min(95.0, conf), 1)
+        # Must be the canonical "BULL" label — every consumer of
+        # MarketRegime.regime does exact string matching against
+        # "BULL"/"BEAR"/"SIDEWAYS"/"VOLATILE" (strategy_backtester.py's
+        # _should_enter regime gate, fitness_engine.py's
+        # regime_adaptability_score mapping, arena_engine.py's regime
+        # robustness grading, meta_learner._current_regime). "BULL MARKET"
+        # matches none of them, so every one of those consumers silently
+        # falls through to its "unrecognized regime" default/0.0/UNKNOWN
+        # bucket instead of actually treating today as BULL.
+        return "BULL", round(min(95.0, conf), 1)
 
     # BEAR check
     bear_sent  = score < 40
@@ -112,7 +121,7 @@ def determine_regime(
     bear_brd   = breadth_pct is None or breadth_pct < 45
     if bear_sent and bear_price and bear_brd:
         conf = 60 + (40 - score) * 1.5
-        return "BEAR MARKET", round(min(95.0, conf), 1)
+        return "BEAR", round(min(95.0, conf), 1)   # see BULL comment above
 
     return "SIDEWAYS", 55.0
 
