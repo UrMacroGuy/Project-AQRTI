@@ -234,7 +234,16 @@ def promote_strategy(
     log.info("Strategy %s promoted to 'promoted' (fitness=%.1f)", strategy_id, row.fitness_score)
     try:
         from aqrti.alerts.telegram_alerts import alert_algo_promoted
-        alert_algo_promoted(strategy_id, row.sharpe_ratio or 0.0, (row.win_rate or 0.0) * 100)
+        # StrategyV2 has no `sharpe_ratio` column (that's a PerformanceSnapshot
+        # field) — the real column is `sharpe`. Using the wrong attribute
+        # silently evaluated to `None` (AttributeError would only fire on a
+        # class without __getattr__ fallback; SQLAlchemy models raise
+        # AttributeError here, which the bare `except Exception` swallowed,
+        # so no promotion alert was ever sent). Also `row.win_rate` is
+        # already a percent (e.g. 52.3, gated against MIN_WIN_RATE=52.0 in
+        # promotion_config.py) — multiplying by 100 again produced a
+        # nonsense value like "5230.0%" in the alert text.
+        alert_algo_promoted(strategy_id, row.sharpe or 0.0, row.win_rate or 0.0)
     except Exception:
         pass
     return {"success": True, "new_status": "promoted", "fitness": row.fitness_score}

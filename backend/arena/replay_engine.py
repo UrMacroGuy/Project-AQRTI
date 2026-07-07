@@ -44,6 +44,26 @@ RISK_PER_TRADE_PCT = 1.0        # risk 1% of portfolio per trade (position sizin
 MIN_SIGNALS_TO_OPEN = 1         # open if there's at least 1 quality signal
 LOOKBACK_DAYS      = 120        # days of history to fetch per symbol
 
+# NSE delivery-equity round-trip transaction cost (STT + brokerage + exchange
+# charges + stamp duty + GST + slippage) — same 0.28% figure used everywhere
+# else in the system (strategy_backtester.ROUND_TRIP_COST,
+# promotion_config.py's rationale comments). Split ~55/45 buy/sell to match
+# strategy_backtester._transaction_cost's split (buy carries stamp duty).
+#
+# Previously this module applied NO transaction cost at all — every
+# PaperTrade.gross_pnl / gross_pnl_pct here was pure price delta with zero
+# cost drag, and portfolio.current_cash was credited with that same gross
+# PnL. The arena's champion gates (120% return, <25% drawdown, >52% win
+# rate — see arena_engine.MAX_DRAWDOWN_GATE etc.) graded strategies entirely
+# on this gross series, so a high-turnover strategy could clear "champion"
+# purely because costs were never deducted. Every other backtest path in the
+# codebase (strategy_backtester.py, paper_trade.py, continuous_monitor.py —
+# see BUG_HUNTING.md C1) enforces the 0.28% round-trip; the arena replay was
+# the one path where it was silently absent.
+NSE_ROUND_TRIP_COST = 0.0028
+NSE_BUY_COST_PCT    = NSE_ROUND_TRIP_COST * 0.55
+NSE_SELL_COST_PCT   = NSE_ROUND_TRIP_COST * 0.45
+
 
 # ── Portfolio management ───────────────────────────────────────────────────
 
@@ -424,8 +444,14 @@ def _simulate_day(
             exit_reason = "max_hold"
 
         if exit_reason:
-            pnl     = (cur_price - pos.entry_price) * pos.shares
-            pnl_pct = (cur_price - pos.entry_price) / pos.entry_price * 100
+            # NSE round-trip cost: pos.entry_price is already the buy-cost-
+            # loaded fill (see entry section below); exit_fill nets out the
+            # sell-side cost so both gross_pnl/gross_pnl_pct AND the cash
+            # credited to the portfolio are honest NSE-cost-adjusted figures,
+            # matching strategy_backtester.py's treatment.
+            exit_fill = cur_price * (1 - NSE_SELL_COST_PCT)
+            pnl     = (exit_fill - pos.entry_price) * pos.shares
+            pnl_pct = (exit_fill - pos.entry_price) / pos.entry_price * 100
 
             db.add(PaperTrade(
                 portfolio_name   = portfolio_name,
@@ -433,7 +459,7 @@ def _simulate_day(
                 entry_date       = pos.entry_date,
                 exit_date        = sim_date,
                 entry_price      = pos.entry_price,
-                exit_price       = cur_price,
+                exit_price       = exit_fill,
                 shares           = pos.shares,
                 capital_deployed = pos.capital_deployed,
                 gross_pnl        = pnl,
@@ -486,11 +512,17 @@ def _simulate_day(
             if alloc < 500 or alloc > portfolio.current_cash:
                 continue
 
+            # NSE buy-side cost loaded into the stored cost-basis entry_price
+            # (used for PnL/cash accounting) — stop_loss_price/target_price
+            # stay computed off the raw signal price so SL/TP still trigger
+            # against real market prices, matching strategy_backtester.py.
+            entry_fill = entry * (1 + NSE_BUY_COST_PCT)
+
             db.add(PaperPosition(
                 portfolio_name   = portfolio_name,
                 symbol           = sig["symbol"],
                 entry_date       = sim_date,
-                entry_price      = entry,
+                entry_price      = entry_fill,
                 shares           = shares,
                 capital_deployed = alloc,
                 stop_loss_price  = sig["stop_loss"],
