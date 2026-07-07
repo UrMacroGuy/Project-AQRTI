@@ -51,6 +51,10 @@ async function runScreener() {
   if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#666;padding:16px">Loading…</td></tr>';
 
   const data = await Api.screener(params);
+  if (data === null) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:32px">Backend offline — start the backend server to load data.</td></tr>';
+    return;
+  }
   const stocks = data?.stocks || data || [];
   const matchEl = document.getElementById('scr-match');
   const bullEl  = document.getElementById('scr-bull');

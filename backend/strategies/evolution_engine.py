@@ -34,6 +34,7 @@ from strategies.strategy_backtester import backtest_and_update
 from strategies.fitness_engine import score_strategy, compute_fitness
 from strategies.strategy_lifecycle import run_lifecycle_sweep
 from strategies.meta_learner import run_meta_learning, compute_meta_state
+from strategies.strategy_generator import _passes_prescreen
 
 log = get_logger("evolution_engine")
 
@@ -200,30 +201,58 @@ def evolve_population(
     end_date   = date.today()
     start_date = end_date - timedelta(days=backtest_days)
 
+    bad_features   = set(meta_state.get("bad_features", []))   if meta_state else set()
+    bad_conditions = set(meta_state.get("bad_conditions", [])) if meta_state else set()
+    prescreen_rejected = 0
+
     for i in range(n_offspring):
         try:
             parent_a = _tournament_select(parents, rng)
             dsl_a    = StrategyDSL.from_json(parent_a.dsl_json)
 
-            if rng.random() < MUTATION_RATE or len(parents) < 2:
-                # Mutation — pass meta_state so op selection is biased toward best ops
-                child_dsl, op, desc = mutate(dsl_a, rng=rng, meta_state=meta_state)
-                parent_ids          = [parent_a.strategy_id]
-                operation           = f"mutation:{op}"
-            else:
-                # Crossover
-                parent_b = _tournament_select(parents, rng)
-                while parent_b.strategy_id == parent_a.strategy_id and len(parents) > 1:
+            # Mutation/crossover can produce structurally invalid offspring
+            # (e.g. crossover_engine.rule_blend deduplicating both parents'
+            # conditions down to a single shared feature when they overlap,
+            # violating the "≥2 entry conditions" curve-fit guard that fresh
+            # generation always enforces via _passes_prescreen). Retry a
+            # bounded number of times so a bad roll doesn't waste the
+            # offspring slot on a strategy nothing else in the system would
+            # have accepted; if every retry fails structurally, skip the
+            # slot rather than persist a known-invalid child.
+            child_dsl = op = desc = parent_ids = operation = None
+            for _attempt in range(4):
+                if rng.random() < MUTATION_RATE or len(parents) < 2:
+                    # Mutation — pass meta_state so op selection is biased toward best ops
+                    cand_dsl, cand_op, cand_desc = mutate(dsl_a, rng=rng, meta_state=meta_state)
+                    cand_parent_ids              = [parent_a.strategy_id]
+                    cand_operation               = f"mutation:{cand_op}"
+                else:
+                    # Crossover
                     parent_b = _tournament_select(parents, rng)
-                dsl_b = StrategyDSL.from_json(parent_b.dsl_json)
-                child_dsl, op, desc = crossover(
-                    dsl_a, dsl_b,
-                    fitness_a = parent_a.fitness_score or 0.0,
-                    fitness_b = parent_b.fitness_score or 0.0,
-                    rng=rng,
-                )
-                parent_ids = [parent_a.strategy_id, parent_b.strategy_id]
-                operation  = f"crossover:{op}"
+                    while parent_b.strategy_id == parent_a.strategy_id and len(parents) > 1:
+                        parent_b = _tournament_select(parents, rng)
+                    dsl_b = StrategyDSL.from_json(parent_b.dsl_json)
+                    cand_dsl, cand_op, cand_desc = crossover(
+                        dsl_a, dsl_b,
+                        fitness_a = parent_a.fitness_score or 0.0,
+                        fitness_b = parent_b.fitness_score or 0.0,
+                        rng=rng,
+                    )
+                    cand_parent_ids = [parent_a.strategy_id, parent_b.strategy_id]
+                    cand_operation  = f"crossover:{cand_op}"
+
+                ok, reason = _passes_prescreen(cand_dsl, bad_features, bad_conditions)
+                if ok:
+                    child_dsl, op, desc, parent_ids, operation = (
+                        cand_dsl, cand_op, cand_desc, cand_parent_ids, cand_operation
+                    )
+                    break
+                log.debug("Evolution offspring %d attempt %d rejected: %s", i, _attempt, reason)
+
+            if child_dsl is None:
+                prescreen_rejected += 1
+                skipped += 1
+                continue
 
             child_id = child_dsl.strategy_id()
 
@@ -298,8 +327,8 @@ def evolve_population(
     lifecycle = run_lifecycle_sweep(db)
 
     log.info(
-        "Evolution cycle gen=%d: created=%d skipped=%d promoted=%d retired=%d errors=%d meta_insights=%d",
-        next_gen, len(created), skipped,
+        "Evolution cycle gen=%d: created=%d skipped=%d (prescreen_rejected=%d) promoted=%d retired=%d errors=%d meta_insights=%d",
+        next_gen, len(created), skipped, prescreen_rejected,
         len(lifecycle.get("promoted", [])),
         len(lifecycle.get("retired", [])),
         len(errors),
@@ -311,6 +340,7 @@ def evolve_population(
         "n_offspring":   n_offspring,
         "created":       len(created),
         "skipped":       skipped,
+        "prescreen_rejected": prescreen_rejected,
         "errors":        len(errors),
         "promoted":      lifecycle.get("promoted", []),
         "retired":       lifecycle.get("retired", []),

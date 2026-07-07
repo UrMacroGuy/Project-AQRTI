@@ -126,6 +126,7 @@ def find_similar_situations(
     days: int = 1200,
     version: int = 1,
     exclude_same_symbol: bool = False,
+    prebuilt_matrix: Optional[tuple[np.ndarray, list[tuple[str, date]]]] = None,
 ) -> list[dict]:
     """
     Find top_k historical situations most similar to current_features.
@@ -138,6 +139,16 @@ def find_similar_situations(
         top_k:                Number of similar situations to return
         days:                 Historical lookback window
         exclude_same_symbol:  If True, only return matches from OTHER symbols
+        prebuilt_matrix:      Optional (matrix, index) tuple from a prior
+                               build_historical_matrix() call. The historical
+                               matrix is identical across every symbol within
+                               one prediction run (it searches the whole
+                               market, not just `symbol`'s own history), so
+                               callers doing many searches in one run (e.g.
+                               prediction_pipeline.py looping every symbol)
+                               should build it once and pass it here instead
+                               of re-querying+re-pivoting the full universe's
+                               feature history on every call.
 
     Returns:
         List of dicts: {symbol, date, similarity_score, rank}
@@ -149,7 +160,10 @@ def find_similar_situations(
         if fname in feat_idx and fval is not None and not np.isnan(fval):
             current_vec[feat_idx[fname]] = float(fval)
 
-    matrix, index = build_historical_matrix(db, feature_cols, days=days, version=version)
+    if prebuilt_matrix is not None:
+        matrix, index = prebuilt_matrix
+    else:
+        matrix, index = build_historical_matrix(db, feature_cols, days=days, version=version)
 
     if matrix.size == 0:
         log.warning("No historical vectors found for similarity search")

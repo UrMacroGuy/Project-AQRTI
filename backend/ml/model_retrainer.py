@@ -66,14 +66,18 @@ def _save_intermediate_checkpoint(model, iteration: int, next_version: int, labe
         from ml.models.base_model import ML_MODELS_DIR
         inter_dir = Path(backend_dir) / "ml_models" / "intermediate"
         inter_dir.mkdir(parents=True, exist_ok=True)
-        fname = f"{model.model_type}_{model.task}_v{next_version}_iter_{iteration}"
+        # Keyed on label_col, matching base_model.py's save() — model.task
+        # ("direction"/"expected_return") is shared by multiple label_cols
+        # (direction_5d, outperform_binary), so using it here would look for
+        # the wrong saved_path once two label_cols under the same task exist.
+        fname = f"{model.model_type}_{model.label_col}_v{next_version}_iter_{iteration}"
         if label:
             fname += f"_{label}"
         fpath = inter_dir / f"{fname}.pkl"
         model.save()
         # Also copy the saved model to the intermediate dir with the iteration name
         import shutil
-        saved_path = ML_MODELS_DIR / f"{model.model_type}_{model.task}_v{next_version}.pkl"
+        saved_path = ML_MODELS_DIR / f"{model.model_type}_{model.label_col}_v{next_version}.pkl"
         if saved_path.exists():
             shutil.copy2(str(saved_path), str(fpath))
         log.info("Checkpoint saved at iteration %d — %s", iteration, fpath)

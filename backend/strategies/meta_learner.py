@@ -43,6 +43,17 @@ from aqrti.utils.logger import get_logger
 log = get_logger("meta_learner")
 
 # ── Default family weights (baseline from strategy_generator) ─────────
+# Must be kept in sync with strategy_generator._GENERATORS / _FAMILY_WEIGHTS.
+# A family missing from this dict is silently skipped by every adjustment
+# loop below (`if fam not in weights: continue`), which means meta-learning
+# can never boost or suppress it based on graveyard/live-trade evidence —
+# found live: rl_momentum, relative_strength, breadth_momentum, and
+# long_hold_momentum (all added in the GO-5b session) were absent here, so
+# compute_meta_state()'s returned family_weights dict never contained them.
+# generate_candidates() falls back to strategy_generator._FAMILY_WEIGHTS for
+# any family missing from meta's adapted weights, so this didn't zero out
+# generation by itself — but it did mean these 4 families were permanently
+# invisible to the death-suppression / live-performance-boost mechanisms.
 _DEFAULT_FAMILY_WEIGHTS = {
     "momentum":           0.18,
     "mean_reversion":     0.10,
@@ -54,6 +65,10 @@ _DEFAULT_FAMILY_WEIGHTS = {
     "hybrid":             0.08,
     "quality_momentum":   0.12,
     "institutional_flow": 0.08,
+    "rl_momentum":         0.09,
+    "relative_strength":   0.12,
+    "breadth_momentum":    0.09,
+    "long_hold_momentum":  0.14,
 }
 
 # Caps on how far meta-learning can shift a family weight
@@ -157,7 +172,21 @@ def _extract_graveyard_signals(db: Session, days: int = 90) -> dict:
                 thr = cond.get("threshold")
                 if isinstance(thr, (int, float)):
                     thr_bucket = round(thr / 10) * 10   # bucket to nearest 10
-                    bad_condition_counts[(feat, op, thr_bucket)] += 1
+                    # Keyed by (family, feature, operator, threshold-bucket) —
+                    # NOT just (feature, operator, threshold-bucket). A generic
+                    # condition like "rsi_14 > 50" is shared across many
+                    # families (momentum, quality_momentum, breadth_momentum,
+                    # long_hold_momentum, institutional_flow, volume_surge,
+                    # rl_momentum all use an RSI-confirmation gate in this
+                    # range). Without the family key, a handful of dead
+                    # `momentum` strategies poisoned this condition globally,
+                    # and _passes_prescreen then rejected ~100% of candidates
+                    # from every OTHER family sharing the same generic RSI
+                    # gate — even though breadth_momentum/long_hold_momentum
+                    # had ZERO graveyard entries of their own; they were
+                    # zeroed at generation time purely by this cross-family
+                    # leakage. See BUG_HUNTING.md for the live-DB repro.
+                    bad_condition_counts[(fam, feat, op, thr_bucket)] += 1
             # Short holding penalty signal
             if (dsl.get("max_holding_days") or 10) < 4:
                 short_hold_deaths += 1
@@ -194,7 +223,7 @@ def _extract_graveyard_signals(db: Session, days: int = 90) -> dict:
         "regime_deaths":           dict(regime_deaths),
         "family_regime_mortality": family_regime_mortality,
         "bad_feature_counts":      dict(bad_feature_counts),
-        "bad_condition_counts":    {f"{f}|{op}|{thr}": c for (f, op, thr), c in bad_condition_counts.items()},
+        "bad_condition_counts":    {f"{fam}|{f}|{op}|{thr}": c for (fam, f, op, thr), c in bad_condition_counts.items()},
         "short_hold_deaths":       short_hold_deaths,
     }
 
@@ -375,7 +404,12 @@ def _extract_alive_signals(db: Session) -> dict:
                 thr = cond.get("threshold")
                 if isinstance(thr, (int, float)):
                     thr_bucket = round(thr / 10) * 10
-                    good_condition_counts[(feat, op, thr_bucket)] += 1
+                    # Keyed by (family, feature, operator, threshold-bucket) —
+                    # must match bad_condition_counts' key shape (see
+                    # _extract_graveyard_signals) or the dead/alive comparison
+                    # in compute_meta_state compares counts across different
+                    # families and produces a meaningless ratio.
+                    good_condition_counts[(fam, feat, op, thr_bucket)] += 1
         except Exception:
             pass
 
@@ -398,7 +432,7 @@ def _extract_alive_signals(db: Session) -> dict:
     return {
         "param_priors":         param_priors,
         "good_features":        dict(good_features),
-        "good_condition_counts": {f"{f}|{op}|{thr}": c for (f, op, thr), c in good_condition_counts.items()},
+        "good_condition_counts": {f"{fam}|{f}|{op}|{thr}": c for (fam, f, op, thr), c in good_condition_counts.items()},
         "top_count":            len(top),
     }
 
@@ -482,17 +516,23 @@ def compute_meta_state(db: Session) -> dict:
         if dead_count >= 10 and good_count < dead_count * 0.3:
             bad_features.append(feat)
 
-    # ── 2a. Condition-level bad list — (feature, operator, threshold-bucket)
-    # triples, not just the feature name. "rsi_14 > 70" failing and
-    # "rsi_14 < 30" succeeding are now distinguishable instead of both
-    # incrementing the same bad_feature_counts["rsi_14"] bucket.
+    # ── 2a. Condition-level bad list — (family, feature, operator,
+    # threshold-bucket) quadruples, not just feature+operator+threshold.
+    # "rsi_14 > 70" failing and "rsi_14 < 30" succeeding are distinguishable
+    # (that was the original intent), AND now scoped per-family so a generic
+    # condition (e.g. "rsi_14 > 50") dying in one family (e.g. momentum)
+    # doesn't blacklist every OTHER family that happens to share the same
+    # condition shape. Without the family key, this previously zeroed out
+    # breadth_momentum/long_hold_momentum generation entirely even though
+    # those families had never produced a single graveyard entry — see
+    # BUG_HUNTING.md for the confirmed root cause.
     bad_cond_raw  = grave["bad_condition_counts"]
     good_cond_raw = alive["good_condition_counts"]
     bad_conditions = []
     for key, dead_count in bad_cond_raw.items():
         good_count = good_cond_raw.get(key, 0)
         if dead_count >= 5 and good_count < dead_count * 0.3:
-            bad_conditions.append(key)   # "feature|operator|threshold_bucket"
+            bad_conditions.append(key)   # "family|feature|operator|threshold_bucket"
 
     # ── 2b. Build graveyard zones — dead (family, param) clusters across
     # SL, TP, hold-days AND confidence, not just stop_loss_pct. The old

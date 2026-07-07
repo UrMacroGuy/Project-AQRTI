@@ -1,4 +1,77 @@
-﻿## [2026-07-07c] — Decision: CatBoost-only production model, AQRTINet retired
+﻿## [2026-07-07f] — GO-9: UI empty/error state audit and fix across all 14 pages
+
+**Scope:** every page file in `ui/pages/` audited for proper offline/empty states when `apiFetch()` returns null (backend down). 9 files fixed, all bumped to `?v=20260709b`.
+
+**P0 crashes fixed (would crash the page with TypeError on null):**
+- `opportunity.js` `loadTodaySignals`: `data.modelHealth` access when `data` is null → added null guard before accessing any field; catch block now falls through to the null guard instead of an ambiguous "starting up" message.
+
+**P1 silent returns fixed (page stuck on "Loading…" indefinitely):**
+- `risk.js` `hydrateRisk`: `if (!data) return` → now shows offline message in `risk-position-body` and `risk-alerts-body` tables.
+- `opportunity.js` `hydrateOpportunities`: `if (!rawData || !rawData.length) return` → split into null (offline) vs empty (no bullish signals), writes offline message to tbody.
+- `market.js` `hydrateMarket`: `if (!data) return` → now shows offline message in `top-movers-body` and `sector-detail-body`.
+
+**P2 misleading messages fixed (showed "no data" when actually offline):**
+- `overview.js` `hydrateOverviewAlerts`: `data === null` now shows "Backend offline" instead of "No alerts today".
+- `screener.js` `runScreener`: `data === null` now shows "Backend offline" instead of "No stocks match filters".
+- `analytics.js` `loadSectorBreadth`: `data === null` now shows "Backend offline" instead of "Insufficient price data".
+- `analytics.js` `loadCorrelationMatrix`: `data === null` → dedicated offline message before the genuine empty check.
+- `learning.js` failure table: empty `rows` array left tbody blank → now shows "No failure records yet".
+
+**Already correct (no change needed):** arena.js, gonogo hydrate functions (in core.js), paper.js (fixed 2026-07-07d), news.js (fixed 2026-07-07d), sentiment.js (fixed 2026-07-07d), strategy.js (handles null via try/catch + status label), agents.js (safe optional chaining), vault.js (safe `?? '—'` fallbacks), model.js (try/catch + "No model data yet" message), live-prices.js (already null-guards the grid).
+
+**GO-9 checked off in IMPROVEMENTS.md.** Remaining Stage 3 work: PF-1..PF-7 (Personal Portfolio module — needs user to verify instrument tickers before starting).
+
+## [2026-07-07e] — AQRTI_TODO.md items: watchdog Scheduled Tasks, sentiment tz bug (actually) fixed, DEFAULT_TRAINING_WINDOW_DAYS critical bug found+fixed, batched ensemble inference, full-dataset CatBoost benchmark
+
+**Watchdog / auto-restart never actually installed.** `docs/ROAD_TO_REAL.md` marked GO-2 done, but `Get-ScheduledTask` found zero AQRTI tasks registered on this machine — the backend was only ever a plain child process of whatever terminal launched it, with no watchdog actually watching it. Ran `backend/scripts/setup_watchdog_task.ps1` elevated; `AQRTI Backend`, `AQRTI Watchdog`, `AQRTI Scheduler` are now registered (state: Ready), starting at login and auto-restarting on crash/hang going forward.
+
+**C9 (sentiment tz bug) — the previous "fix" was backwards, bug was still live.** `BUG_HUNTING.md`'s C9 entry claimed the fix was `now = datetime.now(timezone.utc)`, but every boot log through this morning still showed `Boot step 4 — Sentiment failed: can't subtract offset-naive and offset-aware datetimes`. Root cause: `NewsEvent.timestamp` is always stored **naive** (`news/news_pipeline.py:89` explicitly strips tzinfo before insert) — the tz-aware `now` was the actual bug, not the fix. Corrected: `now = datetime.utcnow()` in `backend/sentiment/company_sentiment.py:70`, removed the now-unused `timezone` import. Verified: `run_sentiment_pipeline()` now completes with `status: COMPLETED` against the live DB.
+
+**C12 (new, CRITICAL) — `DEFAULT_TRAINING_WINDOW_DAYS=90` silently collapsed training to ~1 symbol.** The 2026-07-07 recent-data-only training policy set a 90-day window with a comment estimating "~57-58 usable rows/symbol... clears MIN_ROWS_PER_SYMBOL=50 with margin" — never verified end-to-end. Measured directly: only ~48 usable rows/symbol survive the full price→features→forward-labels→inner-join pipeline at 90 days, so `build_full_dataset()` silently produced **1 symbol, 50 rows** out of 679 active symbols with no error (the all-fail guard only fires when *every* symbol fails). Raised to 150 days; verified 81-86 rows/symbol across a random 30-symbol sample, and `build_full_dataset()` now returns **352 symbols, 29,044 rows** — matching `PROJECT_DIARY.md`'s documented "352 backtest-eligible" universe count.
+
+**Batched ensemble prediction inference.** `ensemble_engine.py`'s `predict_universe()` was a naive per-symbol loop calling `predict_symbol()` (itself calling `model.predict_proba()` on a single-row DataFrame) — the AQRTI_TODO.md item calling this out was correct. Rewrote `predict_universe()` to build one multi-row DataFrame per model per task across all symbols and call `predict_proba()`/`predict()` once, splitting results back per symbol afterward. `prediction_pipeline.py` now calls `predict_universe()` once instead of looping `predict_symbol()`. Verified: batched inference for 106 symbols completes in ~0.09s (previously the dominant per-symbol cost); confidence-scoring/pattern-search remain correctly per-symbol (genuine per-symbol DB/history lookups, not model inference) and are unaffected by this change.
+
+**Full honest CatBoost benchmark (item #4 from AQRTI_TODO.md).** Ran `scripts/compare_models.py --task direction_5d --models catboost --sample 0` against the full corrected dataset (352 symbols, 29,044 rows, train 23,235 / test 5,809 — only possible after the C12 fix above). Result: accuracy 48.25%, AUC-ROC 0.485, hit_rate 48.25%, positive_precision 51.1%, positive_recall 36.1%. Below coin-flip on AUC — consistent with the TODO's stated reality (0/1224+ algos promoted, population win-rate collapse) rather than a new finding; recorded as the honest baseline now that CatBoost is the sole production model.
+
+**Restored two accidentally-deleted spec docs.** `docs/PERSONAL_PORTFOLIO_PLAN.md` and `docs/OBSIDIAN_INTEGRATION_PLAN.md` were uncommitted-deleted in the working tree (git showed them staged for deletion vs HEAD) while `CLAUDE.md` still references both as active specs. Restored via `git checkout HEAD --`.
+
+**C14/C15 (new, found while verifying the C13 fix) — model registry couldn't handle two label_cols sharing one ml_task.** Retraining after the C13 fix revealed two more bugs, both from the same root assumption (one label_col per task) that broke once `outperform_binary` shared `task="direction"` with `direction_5d`:
+- **C14 — artifact filename collision.** `base_model.py`'s `save()` built filenames from `task` ("direction") not `label_col`, so `direction_5d` and `outperform_binary` saved to the identical `catboost_direction_v1.pkl`, silently overwriting each other. Fixed in `base_model.py` and `aqrtinet_model.py` (keyed on `label_col` now); `model_retrainer.py`'s independent copy of the same pattern updated to match. `ml/confidence/calibration.py`'s `IsotonicCalibrator` left alone — confirmed unused anywhere in the codebase.
+- **C15 — registry lookup + unique constraint both missing `label_col`.** `_register_model_version`'s existing-row lookup filtered on `(model_name, task, version)` only, so `outperform_binary`'s registration found and would have overwritten `direction_5d`'s row. Fixing the lookup then hit the table's own `UNIQUE(model_name, task, version)` constraint, which had the same gap. Added migration `scripts/migrations/0003_fix_model_versions_unique_constraint.py` (SQLite requires a table rebuild for constraint changes) widening it to include `label_col`; updated `ModelVersion.__table_args__` to match. Also added logic to deactivate other active versions of the same `(model_name, label_col)` on every registration — found live that v57 (stale, degenerate) and v1 (fresh) of `catboost/direction_5d` were BOTH `is_active=True` simultaneously, so `load_active_models()` was loading and averaging both, diluting the fresh retrain with the old stale model.
+
+**End-to-end verification after all fixes:** re-ran `scripts/train_models.py` — all 3 tasks (`direction_5d`, `expected_return`, `outperform_binary`) now train, save to distinct files, and register distinct active DB rows with no errors. Re-ran `run_prediction_pipeline()` — 106/106 predictions written, now genuinely varied (12 distinct confidence values, 7 distinct expected_return values, 4/106 symbols correctly classified Bullish vs. the previous 106/106 identical `Neutral`/`0.5002`/`0.0` degenerate output). Model quality itself is still weak (AUC ~0.485, near coin-flip) — consistent with the population's honest 0/1224+ promoted reality, not a new problem this session introduced or was expected to solve.
+
+**Also fixed: desktop launcher double-start race (housekeeping item from AQRTI_TODO.md).** `scripts/start_backend.bat`'s restart-loop only killed port 8000 once at the top, before entering its `:loop`. Launching the script twice meant both copies' loops would independently keep respawning `python main.py` on their own 3-second timers, fighting over port 8000 forever — the likely explanation for "this machine sometimes spawns two Python interpreters for the same process." Added a lock file (`backend/start_backend.lock`) that makes a second launch exit immediately instead of racing; `STOP AQRTI.bat` now clears the lock so the next Start AQRTI works normally.
+
+## [2026-07-07d] — Fix: News Intelligence + Sentiment Center offline state; Paper Trading _set/_showPaperError; 12+ backend pipeline bugs
+
+**News / Sentiment pages** (split from ARCH-5; `ui/pages/news.js`, `ui/pages/sentiment.js`):
+- `hydrateSentiment()`: was `if (!data) return` — left "Loading…" spinner forever when backend offline. Now shows "Backend offline" message in all three panels (`sentiment-velocity-body`, `companySentimentChart`, `sectorSentimentChart`).
+- `hydrateNews()`: null vs empty-array check was combined — offline case now separated and shows "Backend offline" message in both `news-high-impact` and `news-feed`. Previously `news-feed` stayed blank on offline.
+- Version bumped to `?v=20260709b` for news.js, sentiment.js, paper.js in index.html.
+
+**Paper Trading page** (`ui/pages/paper.js`):
+- `_set()` and `showError()` undefined (lost in ARCH-5 split) — caused `ReferenceError` crash on page load, leaving portfolio/trades tables permanently stuck on "Loading...".
+- Fixed: added `_set()` and `_showPaperError()` helpers locally; replaced all `showError` calls.
+
+**Backend pipeline bugs fixed** (across 10+ files in this session):
+- `ml/model_retrainer.py`: save artifact before retiring active models (atomic save-then-swap).
+- `ml/datasets/training_dataset.py`: (1) filter decayed features before IC selection; (2) 5→6-tuple return including `train_weights`; (3) `sample_weights.loc[train_mask]` indexing.
+- `ml/validation/backtest_validator.py`: unpack 6-tuple; pass `sample_weight=w_tr` to model.fit().
+- `aqrti/data/scheduler.py`: warn (not info) on zero predictions written.
+- `learning/model_performance.py`: return zero-filled metrics dict (not `{}`) when no predictions.
+- `learning/feature_importance_tracker.py`: removed 3 lines of dead nonsense code.
+- `ml/validation/metrics.py`: `sharpe_proxy` NaN-guard.
+- `learning/learning_loop.py`: `db.commit()` outside `if filled:` conditional.
+- `ml/ensemble/ensemble_engine.py`: `outperform_binary` weights used for outperform task (not direction weights).
+- `paper_trading/paper_execution.py`: per-iteration commit + stale `db.refresh()` wiped freed cash; fixed to single commit after all closes.
+- `portfolio/position_sizing.py`: `None` confidence value crash.
+- `learning/knowledge_score.py`: delta query could return 4-day-old record.
+- `intelligence/strategy_dna.py`: `avg_drawdown` used wrong calculation; now uses `strategy.max_drawdown`.
+
+**Verified:** `NewsEvent rows: 1263`, `SentimentRecord rows: 474` — data exists in DB; pages will display correctly when backend is running.
+
+## [2026-07-07c] — Decision: CatBoost-only production model, AQRTINet retired
 
 **Decision (user):** Stop developing/using AQRTINet. CatBoost is now the sole
 production model for all algo training going forward — no ensemble, no

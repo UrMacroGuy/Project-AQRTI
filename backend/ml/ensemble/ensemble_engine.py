@@ -197,20 +197,107 @@ class EnsembleEngine:
     def predict_universe(
         self,
         features_by_symbol: dict[str, dict[str, float]],
-    ) -> list[dict]:
+    ) -> dict[str, dict]:
         """
-        Run ensemble prediction for all symbols.
+        Run ensemble prediction for all symbols with one batched
+        predict_proba()/predict() call per model per task, instead of
+        looping model.predict_proba() one row at a time per symbol.
+        CatBoost (and any sklearn-compatible estimator) is optimized for
+        batch inference, so this is materially faster at ~100+ symbols
+        with no change to the per-symbol result values.
 
         Args:
             features_by_symbol: {symbol: {feature_name: value}}
 
-        Returns list of prediction dicts.
+        Returns {symbol: prediction_dict} — same shape as calling
+        predict_symbol() per symbol, minus symbols with no usable features.
         """
-        results = []
-        for symbol, features in features_by_symbol.items():
-            pred = self.predict_symbol(symbol, features)
-            if pred:
-                results.append(pred)
+        if not self.is_ready():
+            log.warning("EnsembleEngine not loaded — call .load() first")
+            return {}
+
+        symbols = [s for s, f in features_by_symbol.items() if f]
+        if not symbols:
+            return {}
+
+        now_iso = datetime.utcnow().isoformat()
+
+        # {task: {model_name: {symbol: pred_value}}}
+        dir_probas_by_symbol: dict[str, dict[str, float]] = {s: {} for s in symbols}
+        ret_preds_by_symbol:  dict[str, dict[str, float]] = {s: {} for s in symbols}
+        op_probas_by_symbol:  dict[str, dict[str, float]] = {s: {} for s in symbols}
+
+        def _batch_predict(models: dict[str, BaseModel], is_proba: bool) -> dict[str, dict[str, float]]:
+            """Run one batched call per model across every symbol with valid features."""
+            out: dict[str, dict[str, float]] = {s: {} for s in symbols}
+            for model_name, model in models.items():
+                rows: dict[str, dict] = {}
+                for symbol in symbols:
+                    feat_df = _features_to_df(features_by_symbol[symbol], model._feature_cols)
+                    if feat_df is not None:
+                        rows[symbol] = feat_df.iloc[0].to_dict()
+                if not rows:
+                    continue
+                batch_symbols = list(rows.keys())
+                batch_df = pd.DataFrame(
+                    [rows[s] for s in batch_symbols], columns=model._feature_cols
+                )
+                try:
+                    preds = (
+                        model.predict_proba(batch_df) if is_proba else model.predict(batch_df)
+                    )
+                except Exception as exc:
+                    log.debug("Batch predict failed (%s): %s", model_name, exc)
+                    continue
+                for symbol, pred in zip(batch_symbols, preds):
+                    out[symbol][model_name] = float(pred)
+            return out
+
+        dir_probas_by_symbol = _batch_predict(self._models.get("direction_5d", {}), is_proba=True)
+        ret_preds_by_symbol  = _batch_predict(self._models.get("expected_return", {}), is_proba=False)
+        op_probas_by_symbol  = _batch_predict(self._models.get("outperform_binary", {}), is_proba=True)
+
+        dir_weights = self._weights.get("direction", EQUAL_WEIGHTS)
+        ret_weights = self._weights.get("expected_return", EQUAL_WEIGHTS)
+        op_weights  = self._weights.get("outperform_binary", EQUAL_WEIGHTS)
+
+        results: dict[str, dict] = {}
+        for symbol in symbols:
+            dir_probas = dir_probas_by_symbol.get(symbol, {})
+            if dir_probas:
+                direction_prob = _weighted_average(dir_probas, dir_weights)
+                agreement      = _model_agreement(list(dir_probas.values()))
+            else:
+                direction_prob = 0.5
+                agreement      = 0.0
+
+            ret_preds = ret_preds_by_symbol.get(symbol, {})
+            expected_return = _weighted_average(ret_preds, ret_weights) if ret_preds else 0.0
+
+            op_probas = op_probas_by_symbol.get(symbol, {})
+            outperform_prob = _weighted_average(op_probas, op_weights) if op_probas else direction_prob
+
+            if direction_prob >= BULLISH_THRESHOLD:
+                direction = "Bullish"
+            elif direction_prob <= BEARISH_THRESHOLD:
+                direction = "Bearish"
+            else:
+                direction = "Neutral"
+
+            results[symbol] = {
+                "symbol":           symbol,
+                "predicted_at":     now_iso,
+                "direction_prob":   round(direction_prob, 4),
+                "expected_return":  round(expected_return, 4),
+                "outperform_prob":  round(outperform_prob, 4),
+                "direction":        direction,
+                "model_agreement":  round(agreement, 4),
+                "models_used": {
+                    "direction":  list(dir_probas.keys()),
+                    "return":     list(ret_preds.keys()),
+                    "outperform": list(op_probas.keys()),
+                },
+            }
         return results
 
 

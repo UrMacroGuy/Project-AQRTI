@@ -1,7 +1,16 @@
 // ui/pages/sentiment.js - split from app.js (ARCH-5), see CHANGELOG
 async function hydrateSentiment() {
   const data = await Api.sentiment();
-  if (!data) return;
+  if (!data) {
+    const offlineMsg = '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">Backend offline — start the backend server to load sentiment data.</div>';
+    const velBody = el('sentiment-velocity-body');
+    if (velBody) velBody.innerHTML = offlineMsg;
+    const compCanvas = el('companySentimentChart');
+    if (compCanvas && compCanvas.parentElement) compCanvas.parentElement.innerHTML = offlineMsg;
+    const secCanvas = el('sectorSentimentChart');
+    if (secCanvas && secCanvas.parentElement) secCanvas.parentElement.innerHTML = offlineMsg;
+    return;
+  }
 
   const { companies = [], sectors = [], market } = data;
 

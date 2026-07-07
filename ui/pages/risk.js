@@ -1,7 +1,14 @@
 // ui/pages/risk.js - split from app.js (ARCH-5), see CHANGELOG
 async function hydrateRisk() {
   const data = await Api.risk();
-  if (!data) return;
+  if (!data) {
+    const offlineMsg = '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">Backend offline — start the backend server to load data.</div>';
+    const posBody = el('risk-position-body');
+    if (posBody) posBody.innerHTML = `<tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">Backend offline — start the backend server to load data.</td></tr>`;
+    const alertBody = el('risk-alerts-body');
+    if (alertBody) alertBody.innerHTML = `<tr><td colspan="4" style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">Backend offline — start the backend server to load data.</td></tr>`;
+    return;
+  }
 
   // Sector exposure doughnut
   if (data.sectorExposure && data.sectorExposure.length) {

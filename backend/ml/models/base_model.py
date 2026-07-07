@@ -180,10 +180,16 @@ class BaseModel(ABC):
     def save(self, fold: Optional[int] = None) -> Path:
         """
         Save model artifact to ml_models/.
-        Filename: {model_type}_{task}_v{version}[_fold{fold}].pkl
+        Filename: {model_type}_{label_col}_v{version}[_fold{fold}].pkl
+
+        Uses label_col (e.g. "direction_5d", "outperform_binary"), not the
+        broader ml `task` ("direction"/"expected_return"/"outperformance") —
+        direction_5d and outperform_binary both have task="direction", so
+        keying the filename on task alone made them collide on the identical
+        path and silently overwrite each other's saved model.
         """
         suffix  = f"_fold{fold}" if fold is not None else ""
-        fname   = f"{self.model_type}_{self.task}_v{self.version}{suffix}.pkl"
+        fname   = f"{self.model_type}_{self.label_col}_v{self.version}{suffix}.pkl"
         fpath   = ML_MODELS_DIR / fname
 
         payload = {

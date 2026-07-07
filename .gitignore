@@ -71,3 +71,7 @@ backend/scripts/__pycache__/
 
 # Strategy population backup snapshots (large JSON, not source)
 backend/strategies_v2_backup_*.json
+
+# Runtime process files
+backend/scheduler.pid
+*.pid

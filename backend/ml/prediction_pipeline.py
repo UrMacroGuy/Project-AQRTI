@@ -216,17 +216,29 @@ def run_prediction_pipeline(version: int = 1) -> dict:
         score_prediction, get_historical_accuracy, get_regime_confidence,
         compute_feature_completeness,
     )
-    from ml.patterns.pattern_engine import run_pattern_search
+    from ml.patterns.pattern_engine import run_pattern_search, LOOKBACK_DAYS
+    from ml.patterns.similarity_search import build_historical_matrix
 
     with get_db() as db:
         features_by_symbol = _load_all_latest_features(db, version)
 
         log.info("Loaded features for %d symbols", len(features_by_symbol))
 
+        # One batched predict_proba()/predict() call per model per task across
+        # all symbols, instead of looping model inference one row at a time —
+        # CatBoost (like any sklearn-compatible estimator) is far more
+        # efficient run in batch than per-symbol.
+        ensemble_results = engine.predict_universe(features_by_symbol)
+
+        # Pattern search scans the whole market's historical feature vectors,
+        # which is identical for every symbol in this run — build it once and
+        # reuse it, instead of every run_pattern_search() call below re-querying
+        # and re-pivoting the full universe's feature history from the DB.
+        pattern_matrix = build_historical_matrix(db, required_cols, days=LOOKBACK_DAYS, version=version)
+
         for symbol, features in features_by_symbol.items():
             try:
-                # Ensemble prediction
-                ensemble_result = engine.predict_symbol(symbol, features)
+                ensemble_result = ensemble_results.get(symbol)
                 if not ensemble_result:
                     skipped += 1
                     continue
@@ -255,11 +267,12 @@ def run_prediction_pipeline(version: int = 1) -> dict:
 
                 # Pattern search (lightweight, no model needed)
                 pattern = run_pattern_search(
-                    symbol       = symbol,
-                    features     = features,
-                    feature_cols = required_cols,
-                    version      = version,
-                    save_to_db   = False,   # will write via db session below
+                    symbol          = symbol,
+                    features        = features,
+                    feature_cols    = required_cols,
+                    version         = version,
+                    save_to_db      = False,   # will write via db session below
+                    prebuilt_matrix = pattern_matrix,
                 )
 
                 # Write to DB

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -67,7 +67,7 @@ def compute_company_sentiment(db: Session, symbol: str) -> Optional[SentimentRes
     if not rows:
         return None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
 
     # Compute recency-weighted and impact-weighted sentiment
     weighted_scores: list[tuple[float, float]] = []  # (score_0_100, weight)

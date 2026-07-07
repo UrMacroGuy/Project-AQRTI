@@ -938,7 +938,7 @@ class AQRTINet(BaseModel):
             try:
                 for col in self._stacking_feature_cols:
                     prefix = col.replace("meta_", "")
-                    pkls = sorted(ML_MODELS_DIR.glob(f"{prefix}_direction_v*.pkl"))
+                    pkls = sorted(ML_MODELS_DIR.glob(f"{prefix}_direction_5d_v*.pkl"))
                     if not pkls:
                         continue
                     if prefix == "catboost":
@@ -1074,7 +1074,10 @@ class AQRTINet(BaseModel):
 
     def save(self, fold: Optional[int] = None) -> Path:
         suffix = f"_fold{fold}" if fold is not None else ""
-        fpath  = ML_MODELS_DIR / f"{self.model_type}_{self.task}_v{self.version}{suffix}.pkl"
+        # Keyed on label_col, not task — see base_model.py's save() for why
+        # (direction_5d and outperform_binary share task="direction" and
+        # would otherwise collide on the same filename).
+        fpath  = ML_MODELS_DIR / f"{self.model_type}_{self.label_col}_v{self.version}{suffix}.pkl"
         payload = {
             "model_type":            self.model_type,
             "task":                  self.task,

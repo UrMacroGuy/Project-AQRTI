@@ -161,10 +161,16 @@ def _quarantine_stats(db: Session, strategy_id: str) -> dict[str, Any]:
 
     days_in_q = (now - algo.promoted_at).days if algo.promoted_at else 0
 
+    # Must match ONLY the strategy's own shadow-runner portfolio
+    # ("strat_<id>", written by strategy_shadow_runner.py). Filtering by
+    # PaperTrade.strategy_id alone also pulls in "default"-portfolio
+    # ML-driven trades that merely borrow this strategy's SL/TP params —
+    # not evidence the strategy's own DSL rules work forward. Same bug
+    # class as the go_nogo.py quarantine-evidence mismatch.
     closed_trades = (
         db.query(PaperTrade)
         .filter(
-            PaperTrade.strategy_id == strategy_id,
+            PaperTrade.portfolio_name == f"strat_{strategy_id}",
             PaperTrade.is_open == False,  # noqa: E712
         )
         .all()

@@ -408,10 +408,15 @@ class MarketRegime(Base):
 # ══════════════════════════════════════════════════════════════
 
 class ModelVersion(Base):
-    """Registry of trained model artifacts — one row per (model_name, task, version)."""
+    """Registry of trained model artifacts — one row per (model_name, task, label_col, version).
+
+    label_col is part of the uniqueness key, not just task: direction_5d and
+    outperform_binary both have task="direction", so (model_name, task,
+    version) alone collided between them — see migration 0003 / BUG_HUNTING.md C13.
+    """
     __tablename__ = "model_versions"
     __table_args__ = (
-        UniqueConstraint("model_name", "task", "version", name="uq_mv_name_task_ver"),
+        UniqueConstraint("model_name", "task", "label_col", "version", name="uq_mv_name_task_label_ver"),
     )
 
     id              = Column(Integer,    primary_key=True, autoincrement=True)

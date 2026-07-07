@@ -11,7 +11,13 @@
 async function hydrateNews() {
   const data = await Api.news({ limit: 50, hours: 168 });
 
-  if (!data || !Array.isArray(data) || !data.length) {
+  if (!data) {
+    const msg = '<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">Backend offline — start the backend server to load news data.</div>';
+    const hi = el('news-high-impact'); if (hi) hi.innerHTML = msg;
+    const feed = el('news-feed'); if (feed) feed.innerHTML = msg;
+    return;
+  }
+  if (!Array.isArray(data) || !data.length) {
     setDataPoint('news-kpi-count', '0', 'news');
     setDataPoint('news-kpi-high-impact', '0', 'news');
     setDataPoint('news-kpi-entities', '0', 'news');

@@ -668,19 +668,27 @@ def _passes_prescreen(strategy: StrategyDSL, bad_features: set,
         if all(f in bad_features for f in entry_feats):
             return False, f"all entry features in bad_features set: {entry_feats}"
 
-    # Condition-level rejection: (feature, operator, threshold-bucket) triples
-    # that meta_learner flagged as high-failure. Catches cases the plain
-    # feature-name check misses — e.g. "rsi_14 > 70" specifically fails while
-    # "rsi_14 < 30" specifically succeeds; the old feature-only check treated
-    # both as the same "rsi_14" signal.
+    # Condition-level rejection: (family, feature, operator, threshold-bucket)
+    # quadruples that meta_learner flagged as high-failure. Catches cases the
+    # plain feature-name check misses — e.g. "rsi_14 > 70" specifically fails
+    # while "rsi_14 < 30" specifically succeeds; the old feature-only check
+    # treated both as the same "rsi_14" signal. Scoped by family (not just
+    # feature/operator/threshold) because a generic condition like
+    # "rsi_14 > 50" is shared across many families — without the family key,
+    # a handful of dead `momentum` strategies with that condition blacklisted
+    # it for every other family too, silently zeroing out breadth_momentum
+    # and long_hold_momentum generation entirely even though neither family
+    # had ever produced a single graveyard entry of its own. See
+    # BUG_HUNTING.md for the confirmed root cause and live-DB reproduction.
     if bad_conditions:
+        family = strategy.family or ""
         for c in (getattr(strategy.entry_conditions, "conditions", None) or []):
             feat = getattr(c, "feature", None)
             op   = getattr(c, "operator", None)
             thr  = getattr(c, "threshold", None)
             if feat and op and isinstance(thr, (int, float)):
                 thr_bucket = round(thr / 10) * 10
-                key = f"{feat}|{op}|{thr_bucket}"
+                key = f"{family}|{feat}|{op}|{thr_bucket}"
                 if key in bad_conditions:
                     return False, f"condition matches known-bad zone: {key}"
 

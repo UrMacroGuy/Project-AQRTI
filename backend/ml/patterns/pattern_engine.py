@@ -25,7 +25,7 @@ import numpy as np
 
 from aqrti.database.engine import get_db
 from aqrti.utils.logger import get_logger
-from ml.patterns.similarity_search import find_similar_situations
+from ml.patterns.similarity_search import find_similar_situations, build_historical_matrix
 
 log = get_logger("pattern_engine")
 
@@ -159,9 +159,19 @@ def run_pattern_search(
     feature_cols: list[str],
     version: int = 1,
     save_to_db: bool = True,
+    prebuilt_matrix: Optional[tuple] = None,
 ) -> dict:
     """
     Full pattern search pipeline for one symbol.
+
+    Args:
+        prebuilt_matrix: Optional (matrix, index) from build_historical_matrix(),
+            reused across every symbol in the same run — see
+            find_similar_situations()'s docstring. Callers running this for many
+            symbols in one pass (prediction_pipeline.py) should build this once
+            via build_historical_matrix(db, feature_cols, days=LOOKBACK_DAYS,
+            version=version) instead of letting each call rebuild it from the DB,
+            since the search scans the whole market and is identical per run.
 
     Returns:
         {
@@ -178,6 +188,7 @@ def run_pattern_search(
             top_k            = TOP_K,
             days             = LOOKBACK_DAYS,
             version          = version,
+            prebuilt_matrix  = prebuilt_matrix,
         )
 
         if not similar:

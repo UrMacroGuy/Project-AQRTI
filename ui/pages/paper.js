@@ -154,6 +154,15 @@ async function triggerPaperCycleForStrategy() {
   }
 }
 
+// ── Local helpers (were lost during app.js split) ────────────
+function _set(id, val) { const e = document.getElementById(id); if (e) e.textContent = val; }
+function _showPaperError(msg) {
+  const pbody = document.getElementById('pp-full-positions-body');
+  if (pbody) pbody.innerHTML = `<tr><td colspan="13" style="color:var(--text-muted);text-align:center;padding:20px">${msg}</td></tr>`;
+  const tbody = document.getElementById('pp-trades-body');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="13" style="color:var(--text-muted);text-align:center;padding:20px">${msg}</td></tr>`;
+}
+
 // ── Live hydration ────────────────────────────────────────────
 async function hydratePaperPortfolio() {
   // Silently backfill equity curve from trade history on first load (idempotent)
@@ -162,7 +171,7 @@ async function hydratePaperPortfolio() {
   }
 
   const [pp, perf, curve, alloc, trades, btStatus] = await Promise.all([
-    Api.paperPortfolio().catch(() => { showError('Failed to load portfolio'); return null; }),
+    Api.paperPortfolio().catch(() => null),
     Api.performance().catch(() => null),
     Api.equityCurve(90).catch(() => null),
     Api.paperAllocation().catch(() => null),
@@ -171,7 +180,7 @@ async function hydratePaperPortfolio() {
   ]);
 
   if (!pp || !pp.positions) {
-    showError('Portfolio API returned no positions data');
+    _showPaperError('Backend offline — start the backend server to load portfolio data.');
     return;
   }
 

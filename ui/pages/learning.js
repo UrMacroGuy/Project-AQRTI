@@ -175,7 +175,8 @@ async function renderLearning() {
   if (tbody) {
     const rows = failures.length ? failures : [];
     const sevColor = { critical: '#ef4444', high: '#f59e0b', medium: '#60a5fa', low: '#6b7280' };
-    tbody.innerHTML = rows.map(f => `
+    if (!rows.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No failure records yet</td></tr>'; }
+    else tbody.innerHTML = rows.map(f => `
       <tr>
         <td>${f.date || '—'}</td>
         <td><strong>${f.symbol || '—'}</strong></td>

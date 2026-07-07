@@ -33,7 +33,14 @@ async function hydrateMarket() {
   hydrateMarketRegime();  // update regime badge
 
   const data = await Api.market();
-  if (!data) return;
+  if (!data) {
+    const offlineRow = '<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text-muted);font-size:0.78rem">Backend offline — start the backend server to load data.</td></tr>';
+    const moversBody = el('top-movers-body');
+    if (moversBody) moversBody.innerHTML = offlineRow;
+    const sectorDetail = el('sector-detail-body');
+    if (sectorDetail) sectorDetail.innerHTML = offlineRow;
+    return;
+  }
 
   // NIFTY / BANKNIFTY — topbar ticker + market page KPI cards
   const { indices, sectorStrength, topMovers } = data;

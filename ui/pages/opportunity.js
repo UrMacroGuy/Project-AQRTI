@@ -12,7 +12,11 @@ async function loadTodaySignals() {
   try {
     data = await apiFetch('/predictions/today');
   } catch (e) {
-    grid.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;grid-column:1/-1">Could not load signals. Backend may be starting up.</div>';
+    data = null;
+  }
+
+  if (!data) {
+    grid.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center;grid-column:1/-1">Backend offline — start the backend server to load signals.</div>';
     return;
   }
 
@@ -101,7 +105,12 @@ async function loadTodaySignals() {
 // ── Opportunity Rankings — live prediction hydration ─────────
 async function hydrateOpportunities() {
   const rawData = await Api.predictions({ limit: 50 });
-  if (!rawData || !rawData.length) return;
+  if (!rawData) {
+    const tbody = el('opportunity-body');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);text-align:center;padding:32px">Backend offline — start the backend server to load data.</td></tr>';
+    return;
+  }
+  if (!rawData.length) return;
 
   // Only show bullish/buy signals as investable opportunities
   const data = rawData.filter(p => {

@@ -84,11 +84,19 @@ def get_go_nogo(db: Session = Depends(get_db_dependency)) -> dict[str, Any]:
         else:
             days_in_q = 0
 
-        # Shadow trades (closed paper trades for this strategy)
+        # Shadow trades (closed paper trades for this strategy).
+        # Must match ONLY the strategy's own shadow-runner portfolio
+        # ("strat_<id>", written by strategy_shadow_runner.py — the
+        # strategy's own DSL exercised forward). Filtering by
+        # PaperTrade.strategy_id alone also pulls in "default"-portfolio
+        # ML-driven trades (paper_trade.py / continuous_monitor.py) that
+        # merely borrow this strategy's SL/TP params — not evidence the
+        # strategy's own rules work. See strategies.py's /activate endpoint,
+        # which already gates on portfolio_name correctly.
         closed_trades = (
             db.query(PaperTrade)
             .filter(
-                PaperTrade.strategy_id == algo.strategy_id,
+                PaperTrade.portfolio_name == f"strat_{algo.strategy_id}",
                 PaperTrade.is_open == False,  # noqa: E712
             )
             .all()
@@ -348,11 +356,15 @@ def get_monthly_review(db: Session = Depends(get_db_dependency)) -> dict[str, An
     algo_reviews: list[dict] = []
 
     for algo in promoted_algos:
-        # Closed shadow trades in the last 30 days
+        # Closed shadow trades in the last 30 days. Must match ONLY the
+        # strategy's own shadow-runner portfolio ("strat_<id>") — filtering
+        # by PaperTrade.strategy_id alone also pulls in "default"-portfolio
+        # ML-driven trades that merely borrow this strategy's SL/TP params,
+        # which is not "shadow trading activity" as this report claims.
         recent_trades = (
             db.query(PaperTrade)
             .filter(
-                PaperTrade.strategy_id == algo.strategy_id,
+                PaperTrade.portfolio_name == f"strat_{algo.strategy_id}",
                 PaperTrade.is_open == False,  # noqa: E712
                 PaperTrade.exit_date >= month_ago,
             )

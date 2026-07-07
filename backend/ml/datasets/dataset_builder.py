@@ -175,12 +175,19 @@ def build_symbol_dataset(
     return merged
 
 
-DEFAULT_TRAINING_WINDOW_DAYS = 90  # 2026-07-07 policy: train on recent data only
-                                    # (~62-63 trading days, ~57-58 usable rows/symbol
-                                    # after the 5-day forward-label truncation — clears
-                                    # MIN_ROWS_PER_SYMBOL=50 with margin). Also keeps
-                                    # per-symbol DataFrames small -> lower peak RAM than
-                                    # building full 2021->now history for every symbol.
+DEFAULT_TRAINING_WINDOW_DAYS = 150  # 2026-07-07 policy: train on recent data only.
+                                    # Was 90 (~62-63 trading days) but measured
+                                    # end-to-end (price -> features -> forward
+                                    # labels -> inner join) only ~48 usable
+                                    # rows/symbol survived — BELOW MIN_ROWS_PER_SYMBOL=50,
+                                    # so build_full_dataset silently dropped ~678/679
+                                    # symbols and training collapsed to ~1 symbol.
+                                    # 150 days (~100 trading days) measured at
+                                    # ~81-86 usable rows/symbol across a random
+                                    # 30-symbol sample — real margin above the floor.
+                                    # Still much smaller than full 2021->now history
+                                    # per symbol, so the original RAM-saving intent
+                                    # is preserved.
 
 
 def build_full_dataset(version: int = 1, days_back: Optional[int] = DEFAULT_TRAINING_WINDOW_DAYS) -> pd.DataFrame:

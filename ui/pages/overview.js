@@ -5,6 +5,10 @@ async function hydrateOverviewAlerts() {
   const body = el('alerts-body');
   if (!body) return;
   const data = await Api.findingsSummary(3);
+  if (data === null) {
+    body.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:12px 0">Backend offline</div>';
+    return;
+  }
   const items = [...(data?.critical || []), ...(data?.high || [])].slice(0, 6);
   const ICONS = { critical: '▲', high: '◎', normal: '◆', low: '◇' };
   const CLASS = { critical: 'critical', high: 'warning' };

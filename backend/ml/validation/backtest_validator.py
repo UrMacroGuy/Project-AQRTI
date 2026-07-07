@@ -126,9 +126,31 @@ def _register_model_version(
         from aqrti.database.models import ModelVersion
 
         with get_db() as db:
+            # Deactivate any other active version for this exact (model,
+            # label_col) pair first. Without this, an older is_active=True
+            # row with a different `version` number (e.g. v57 from a stale
+            # training run) stays active forever alongside a freshly-trained
+            # v1 — load_active_models() then loads BOTH and averages their
+            # predictions, silently diluting the new model with a stale one
+            # instead of replacing it (found live: v57 + v1 both active for
+            # catboost/direction after a retrain, degenerate v57 output
+            # dominating the ensemble average).
+            db.query(ModelVersion).filter(
+                ModelVersion.model_name == model_name,
+                ModelVersion.label_col  == label_col,
+                ModelVersion.version    != version,
+                ModelVersion.is_active  == True,
+            ).update({"is_active": False})
+
+            # Must include label_col here, not just (model_name, task, version):
+            # direction_5d and outperform_binary share the same ml_task
+            # ("direction"), so filtering on task+version alone found the
+            # OTHER label_col's row and silently overwrote its artifact_path/
+            # metrics in place — outperform_binary's registration was lost
+            # entirely because this lookup matched direction_5d's existing row.
             existing = (
                 db.query(ModelVersion)
-                .filter_by(model_name=model_name, task=task, version=version)
+                .filter_by(model_name=model_name, task=task, label_col=label_col, version=version)
                 .first()
             )
             # Primary metric
@@ -175,13 +197,30 @@ def run_full_training(version: int = 1) -> dict:
         log.info("=== Training task: %s (ml_task=%s) ===", label_col, ml_task)
         try:
             dataset = prepare_training_dataset(label_col=label_col, version=version)
-            if dataset.df.empty or not dataset.folds:
-                log.warning("Skipping %s — no data or folds", label_col)
+            if dataset.df.empty:
+                log.warning("Skipping %s — no data", label_col)
                 results[label_col] = {"status": "skipped", "reason": "no_data"}
                 continue
 
-            # Walk-forward validation
-            wf_results = run_walk_forward_validation(dataset, version=version)
+            # Walk-forward validation needs WF_TRAIN_YEARS (1yr) of history per
+            # fold, which the recent-data-only DEFAULT_TRAINING_WINDOW_DAYS
+            # policy (150 days) can never satisfy — 0 folds here is expected
+            # under that policy, not a failure. train_final_model() doesn't
+            # depend on folds (it does its own chronological train/test split),
+            # so skip only the walk-forward diagnostic step and still train +
+            # register the production model — this was previously skipping
+            # ALL training whenever folds was empty, silently leaving the
+            # production model permanently stale once the recent-data-only
+            # policy was introduced.
+            wf_results = {}
+            if dataset.folds:
+                wf_results = run_walk_forward_validation(dataset, version=version)
+            else:
+                log.info(
+                    "%s: 0 walk-forward folds (window too short for WF_TRAIN_YEARS=1yr) "
+                    "— skipping walk-forward validation, training final model directly",
+                    label_col,
+                )
 
             # Train final production models
             trained_models = {}
@@ -252,6 +291,13 @@ def load_active_models() -> dict[str, dict[str, BaseModel]]:
         log.error("load_active_models failed: %s", exc)
 
     # ── Fallback: scan ml_models/ when DB registry is empty ──────
+    # NOTE: this fallback only recognizes the old {model}_{task}_v{n}.pkl
+    # naming (task = "direction"/"expected_return"). Artifacts saved after
+    # the C13/filename-collision fix use {model}_{label_col}_v{n}.pkl (e.g.
+    # "..._direction_5d_v1.pkl", "..._outperform_binary_v1.pkl") and won't be
+    # found by this scan. Not fixed here since the DB registry is the primary,
+    # always-populated path in practice — this scan is a last-resort fallback
+    # for an empty model_versions table, which is not the normal case.
     if not active:
         log.warning(
             "model_versions table empty — scanning %s for .pkl files", ML_MODELS_DIR

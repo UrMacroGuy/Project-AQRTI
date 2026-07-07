@@ -8,6 +8,11 @@ async function hydrateAnalytics() {
 
 async function loadSectorBreadth() {
   const data    = await Api.sectorBreadth();
+  if (data === null) {
+    const tbody = document.getElementById('breadth-table-body');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px">Backend offline — start the backend server to load data.</td></tr>';
+    return;
+  }
   const sectors = data?.sectors || [];
 
   const labels   = sectors.map(s => s.name.replace(' & ', '/').substring(0, 12));
@@ -60,6 +65,10 @@ async function loadCorrelationMatrix() {
   container.innerHTML = '<div style="text-align:center;color:#666;padding:16px">Computing correlations…</div>';
 
   const data = await Api.correlationMatrix(days);
+  if (data === null) {
+    container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px">Backend offline — start the backend server to load data.</div>';
+    return;
+  }
   if (!data || !data.symbols || !data.symbols.length) {
     container.innerHTML = '<div style="text-align:center;color:#444;padding:20px">Insufficient price data for correlation</div>';
     return;
