@@ -81,7 +81,7 @@ def compute_weights_from_metrics(
     return {m: w / total for m, w in floored.items()}
 
 
-def load_dynamic_weights(task: str, version: int = 1) -> dict[str, float]:
+def load_dynamic_weights(task: str, version: int = 1, label_col: str | None = None) -> dict[str, float]:
     """
     Load latest walk-forward metrics from DB and compute dynamic weights.
     Falls back to equal weights if no data exists.
@@ -99,13 +99,16 @@ def load_dynamic_weights(task: str, version: int = 1) -> dict[str, float]:
             scores = {}
             for model_name in model_names:
                 # Most recent test-fold metric
-                row = (
-                    db.query(ModelMetric)
-                    .filter_by(model_name=model_name, task=task, version=version,
-                               metric_name=primary, split="test")
-                    .order_by(ModelMetric.computed_at.desc())
-                    .first()
+                q = db.query(ModelMetric).filter(
+                    ModelMetric.model_name == model_name,
+                    ModelMetric.task == task,
+                    ModelMetric.version == version,
+                    ModelMetric.metric_name == primary,
+                    ModelMetric.split == "test",
                 )
+                if label_col is not None:
+                    q = q.filter(ModelMetric.label_col == label_col)
+                row = q.order_by(ModelMetric.computed_at.desc()).first()
                 if row:
                     scores[model_name] = float(row.metric_value)
 

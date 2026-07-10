@@ -72,8 +72,6 @@ class TimeMachine:
                 rows = db.execute("SELECT symbol FROM stocks WHERE active = 1").fetchall()
                 symbols = [r[0] for r in rows]
 
-            label_date = target_date + timedelta(days=horizon_days + 2)
-
             samples = []
             for symbol in symbols:
                 context = reconstruct_full_context(target_date, symbol, db)

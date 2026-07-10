@@ -85,8 +85,31 @@ def run_symbol_features(symbol: str, version: int = 1) -> dict[str, Optional[flo
             return {}
         universe_dfs = {s: _normalize_dates(df) for s, df in universe_dfs.items()}
         nifty_df     = _normalize_dates(nifty_df)
+
+        # Point-in-time slice: find latest common date across all symbols
+        latest_dates = [df["date"].max() for df in universe_dfs.values() if not df.empty]
+        if latest_dates:
+            latest_common = min(latest_dates)
+            for s in universe_dfs:
+                mask = universe_dfs[s]["date"] <= latest_common
+                universe_dfs[s] = universe_dfs[s][mask].reset_index(drop=True)
+            nifty_mask = nifty_df["date"] <= latest_common
+            nifty_df = nifty_df[nifty_mask].reset_index(drop=True)
+
         stock_df = universe_dfs[symbol]
-        return _compute_all_features(symbol, stock_df, nifty_df, universe_dfs, sector_map)
+
+        # Build breadth_snapshot for this date (same pattern as _generate_all)
+        breadth_snapshot = {}
+        for s, df in universe_dfs.items():
+            if df.empty:
+                continue
+            curr = float(df["close"].iloc[-1])
+            ema50  = float(df["close"].ewm(span=50, adjust=False).mean().iloc[-1]) if len(df) >= 50 else None
+            ema200 = float(df["close"].ewm(span=200, adjust=False).mean().iloc[-1]) if len(df) >= 200 else None
+            breadth_snapshot[s] = (curr, ema50, ema200)
+
+        return _compute_all_features(symbol, stock_df, nifty_df, universe_dfs, sector_map,
+                                     breadth_snapshot=breadth_snapshot)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -111,32 +134,48 @@ def _load_universe_data(
     sector_map: dict[str, str] = {}
 
     stocks = db.query(Stock).filter(Stock.active == True).all()
+    symbols = [s.symbol for s in stocks]
     for stock in stocks:
         sector_map[stock.symbol] = stock.sector or "Unknown"
-        rows = (
-            db.query(DailyPrice)
-            .filter(DailyPrice.symbol == stock.symbol, DailyPrice.date >= cutoff)
-            .order_by(DailyPrice.date.asc())
+
+    # Single bulk, column-projected query instead of one full-ORM-entity
+    # query per symbol — avoids materializing ~389 separate SQLAlchemy
+    # round trips and full DailyPrice model instances (11 mapped columns
+    # each) just to read 7 fields; column projection returns lightweight
+    # Row tuples instead. Same pattern as strategy_backtester._preload_prices.
+    rows_by_symbol: dict[str, list] = {}
+    if symbols:
+        all_rows = (
+            db.query(
+                DailyPrice.symbol, DailyPrice.date, DailyPrice.open, DailyPrice.high,
+                DailyPrice.low, DailyPrice.close, DailyPrice.volume,
+                DailyPrice.delivery_volume, DailyPrice.daily_return,
+            )
+            .filter(DailyPrice.symbol.in_(symbols), DailyPrice.date >= cutoff)
+            .order_by(DailyPrice.symbol, DailyPrice.date.asc())
             .all()
         )
-        if rows:
-            df_tmp = pd.DataFrame([
-                {
-                    "date":            r.date,
-                    "open":            pd.to_numeric(r.open, errors="coerce"),
-                    "high":            pd.to_numeric(r.high, errors="coerce"),
-                    "low":             pd.to_numeric(r.low, errors="coerce"),
-                    "close":           pd.to_numeric(r.close, errors="coerce"),
-                    "volume":          pd.to_numeric(r.volume, errors="coerce"),
-                    "delivery_volume": pd.to_numeric(r.delivery_volume, errors="coerce"),
-                    "daily_return":    pd.to_numeric(r.daily_return, errors="coerce"),
-                }
-                for r in rows
-            ])
-            # Drop rows with no close price — feature modules require valid close
-            df_tmp = df_tmp.dropna(subset=["close"]).reset_index(drop=True)
-            if not df_tmp.empty:
-                universe_dfs[stock.symbol] = df_tmp
+        for r in all_rows:
+            rows_by_symbol.setdefault(r.symbol, []).append(r)
+
+    for symbol, rows in rows_by_symbol.items():
+        df_tmp = pd.DataFrame([
+            {
+                "date":            r.date,
+                "open":            pd.to_numeric(r.open, errors="coerce"),
+                "high":            pd.to_numeric(r.high, errors="coerce"),
+                "low":             pd.to_numeric(r.low, errors="coerce"),
+                "close":           pd.to_numeric(r.close, errors="coerce"),
+                "volume":          pd.to_numeric(r.volume, errors="coerce"),
+                "delivery_volume": pd.to_numeric(r.delivery_volume, errors="coerce"),
+                "daily_return":    pd.to_numeric(r.daily_return, errors="coerce"),
+            }
+            for r in rows
+        ])
+        # Drop rows with no close price — feature modules require valid close
+        df_tmp = df_tmp.dropna(subset=["close"]).reset_index(drop=True)
+        if not df_tmp.empty:
+            universe_dfs[symbol] = df_tmp
 
     # Load NIFTY50
     nifty_rows = (

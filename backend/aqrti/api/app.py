@@ -246,11 +246,11 @@ def _run_boot_sequence():
     # Step 5 — Predictions (skip if today's predictions already exist)
     _boot_step("predictions", "running")
     ok, res = _run_with_timeout("predictions", lambda: _boot_predictions())
-    if ok:
+    if ok and isinstance(res, dict):
         _boot_step("predictions", "done", f"written={res.get('predictions_written',0)}")
         api_logger.info("Boot step 5 — Predictions: written=%d", res.get("predictions_written", 0))
-    elif res and "skip" in str(res):
-        _boot_step("predictions", "done", f"cached (skipped)")
+    elif ok:
+        _boot_step("predictions", "done", str(res))
         api_logger.info("Boot step 5 — Predictions: %s", res)
     else:
         _boot_step("predictions", "error", str(res))
@@ -259,13 +259,13 @@ def _run_boot_sequence():
     # Step 6 — Paper Trading (skip if already ran today)
     _boot_step("paper_trading", "running")
     ok, res = _run_with_timeout("paper_trading", lambda: _boot_paper_trading())
-    if ok:
+    if ok and isinstance(res, dict):
         _boot_step("paper_trading", "done",
                    f"opened={len(res.get('opened',[]))} value={res.get('portfolioValue',0):.0f}")
         api_logger.info("Boot step 6 — Paper trading: opened=%d value=%.2f",
                         len(res.get("opened", [])), res.get("portfolioValue", 0))
-    elif res and "skip" in str(res):
-        _boot_step("paper_trading", "done", res)
+    elif ok:
+        _boot_step("paper_trading", "done", str(res))
         api_logger.info("Boot step 6 — Paper trading: %s", res)
     else:
         _boot_step("paper_trading", "error", str(res))
@@ -351,6 +351,8 @@ def create_app() -> FastAPI:
             _run_boot_sequence()
         t = threading.Thread(target=_deferred_boot, name="boot-sequence", daemon=True)
         t.start()
+        # Markov module runs as its own standalone process (markov/app.py,
+        # separate port) — not started from here. See scripts/start_markov.py.
 
     @app.on_event("shutdown")
     async def on_shutdown():
@@ -495,6 +497,9 @@ def create_app() -> FastAPI:
     # ── GO-7: Morning Decision Screen ────────────────────────────
     from aqrti.api.routes import morning as morning_router
     app.include_router(morning_router.router, prefix=PREFIX, tags=["Morning Decision"])
+
+    # Markov module is its own standalone process/port — see markov/app.py.
+    # Not mounted here; the UI talks to it directly on its own port.
 
     # ── System Status (boot progress) ────────────────────────────
     @app.get("/api/v1/system/status", tags=["System"])
@@ -922,12 +927,12 @@ def create_app() -> FastAPI:
         """
         import sys, os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-        from datetime import date, datetime, timedelta, timezone
+        from datetime import date, datetime, timedelta
         from aqrti.database.engine import get_db
         from aqrti.database.models import DailyPrice, FeatureValue, KnowledgeEvent, StrategyV2
 
         result = {"status": "ok", "version": "0.8.0"}
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.utcnow()
         result["server_time"] = now_utc.isoformat()
         problems = []
         try:

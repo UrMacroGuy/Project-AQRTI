@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "npx serve ui -p 3000 --no-clipboard",
-    "backend": "cd backend && .venv\\Scripts\\python -m uvicorn aqrti.api.app:app --host 0.0.0.0 --port 8000 --reload"
+    "backend": "cd backend && .venv\\Scripts\\python -m uvicorn aqrti.api.app:app --host 0.0.0.0 --port 8000 --reload",
+    "markov": "cd backend && .venv\\Scripts\\python -m uvicorn markov.app:app --host 0.0.0.0 --port 8001 --reload"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -56,6 +56,16 @@
       </button>
     </div>
   </div>
+  <script>
+    // Independent safety net — does not depend on core.js loading/executing
+    // correctly. Guarantees the overlay never blocks the app forever, even
+    // if core.js fails to load, throws before its own boot-poller IIFE runs,
+    // or a stale cached copy without the dismiss-on-offline fix is served.
+    setTimeout(function () {
+      var ov = document.getElementById('boot-overlay');
+      if (ov && ov.style.display !== 'none') ov.style.display = 'none';
+    }, 12000);
+  </script>
 
   <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
        SIDEBAR NAVIGATION
@@ -181,6 +191,14 @@
           <span class="nav-icon">â¬¡</span>
           <span class="nav-label">Risk Center</span>
           <span class="nav-badge alert" id="badge-risk">2</span>
+        </li>
+      </ul>
+
+      <div class="nav-group-label">MARKOV (EXPERIMENTAL)</div>
+      <ul>
+        <li class="nav-item" data-page="markov">
+          <span class="nav-icon">â—‡</span>
+          <span class="nav-label">Markov Regime</span>
         </li>
       </ul>
     </nav>
@@ -3099,11 +3117,48 @@
     <div id="gonogo-risk-rails" style="padding:8px 0"></div>
   </section>
 
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- MARKOV REGIME MODULE (experimental, isolated from strategy pipeline) -->
+  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <section class="page" id="page-markov">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Markov Regime (Experimental)</div>
+        <div class="page-subtitle">Standalone regime-switching research module â€” fully isolated from Algo Research / Arena / promotion pipeline. Not eligible for promotion or paper trading.</div>
+      </div>
+      <button id="markov-refresh-btn" class="btn btn-secondary" onclick="markovRefresh()">Refresh</button>
+    </div>
+
+    <div class="section-header"><span>Regime Status</span></div>
+    <div id="markov-status-body" style="padding:8px 0"></div>
+
+    <div class="section-header" style="margin-top:20px"><span>Watchlist</span></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <input id="markov-add-symbol-input" type="text" placeholder="e.g. RELIANCE" style="padding:6px 10px;border-radius:4px;border:1px solid var(--border-faint);background:var(--card-bg);color:var(--text-primary)">
+      <button class="btn btn-secondary" onclick="markovAddSymbol()">Add</button>
+    </div>
+    <div id="markov-watchlist-body" style="padding:8px 0"></div>
+
+    <div class="section-header" style="margin-top:20px"><span>Candidate Strategies</span></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <input id="markov-gen-symbol-input" type="text" placeholder="Symbol (default RELIANCE)" style="padding:6px 10px;border-radius:4px;border:1px solid var(--border-faint);background:var(--card-bg);color:var(--text-primary)">
+      <button id="markov-generate-btn" class="btn btn-secondary" onclick="markovGenerateStrategies()">Generate</button>
+    </div>
+    <div class="table-container">
+      <table>
+        <thead><tr><th>Strategy ID</th><th>Family</th><th>Sharpe</th><th>Win Rate</th><th>Trades</th></tr></thead>
+        <tbody id="markov-strategies-body">
+          <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">Not generated yetâ€¦</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <script src="api.js?v=20260709a"></script>
-  <script src="core.js?v=20260709a"></script>
+  <script src="core.js?v=20260709c"></script>
   <script src="pages/news.js?v=20260709b"></script>
   <script src="pages/sentiment.js?v=20260709b"></script>
-  <script src="pages/market.js?v=20260709b"></script>
+  <script src="pages/market.js?v=20260709c"></script>
   <script src="pages/opportunity.js?v=20260709b"></script>
   <script src="pages/paper.js?v=20260709b"></script>
   <script src="pages/strategy.js?v=20260709a"></script>
@@ -3120,6 +3175,7 @@
   <script src="pages/analytics.js?v=20260709b"></script>
   <script src="pages/screener.js?v=20260709b"></script>
   <script src="pages/arena.js?v=20260709a"></script>
+  <script src="pages/markov.js?v=20260709a"></script>
 </body>
 </html>
 

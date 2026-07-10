@@ -1,6 +1,6 @@
 """
 OpenRouter LLM client — thin httpx wrapper, OpenAI-compatible API.
-Default model: tencent/hy3:free (HunyuanLarge free tier).
+Default model: nousresearch/hermes-3-llama-3.1-70b:free (Hermes 3 free tier).
 
 Usage:
     from aqrti.llm.openrouter import ask, chat

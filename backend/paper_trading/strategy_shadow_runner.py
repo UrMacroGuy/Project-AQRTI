@@ -159,12 +159,13 @@ def run_shadow_paper_cycle() -> dict:
                         if fv and exit_conds.evaluate(fv):
                             reason = "exit_rule"
                     if reason:
-                        net_pct = pnl_pct - NSE_SELL_COST * 100
+                        exit_price = cur * (1 - NSE_SELL_COST)
+                        net_pnl_pct = (exit_price - t.entry_price) / t.entry_price * 100
                         t.exit_date     = today
-                        t.exit_price    = cur
-                        t.gross_pnl_pct = round(net_pct, 4)
-                        t.gross_pnl     = round(t.capital_deployed * net_pct / 100, 2)
-                        t.actual_return = round(net_pct, 4)
+                        t.exit_price    = round(exit_price, 4)
+                        t.gross_pnl_pct = round(net_pnl_pct, 4)
+                        t.gross_pnl     = round(t.capital_deployed * net_pnl_pct / 100, 2)
+                        t.actual_return = round(net_pnl_pct, 4)
                         t.exit_reason   = reason
                         t.is_open       = False
                         t.holding_days  = held_days

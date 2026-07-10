@@ -292,8 +292,9 @@ def _extract_live_trade_signals(db: Session, days: int = 30) -> dict:
     family_trades:  defaultdict[str, list[float]] = defaultdict(list)
 
     for t in closed:
-        # Trace back to strategy — join via strategy_id on the trade
-        sid = getattr(t, "strategy_id", None)
+        # Trace back to strategy — portfolio_name = "strat_<strategy_id>"
+        pname = t.portfolio_name if hasattr(t, "portfolio_name") else None
+        sid = pname[6:] if pname and pname.startswith("strat_") else None
         if not sid:
             continue
         strat = db.query(StrategyV2.family).filter(StrategyV2.strategy_id == sid).first()

@@ -169,7 +169,7 @@ def run_walk_forward_validation(
     )
 
     if save_to_db:
-        _persist_results(all_results, aggregated, version, ml_task)
+        _persist_results(all_results, aggregated, version, ml_task, task)
 
     log.info("Walk-forward complete. Best model: %s (primary=%s)", best_model, primary_key)
     return {
@@ -185,6 +185,7 @@ def _persist_results(
     aggregated:  dict[str, dict],
     version:     int,
     task:        str,
+    label_col:   str = "",
 ) -> None:
     """Persist walk-forward results to walk_forward_folds and model_metrics tables."""
     try:
@@ -200,6 +201,7 @@ def _persist_results(
                     stmt = sqlite_insert(WalkForwardFold).values(
                         model_name  = model_name,
                         task        = task,
+                        label_col   = label_col,
                         version     = version,
                         fold        = r["fold"],
                         train_start = r["train_start"],
@@ -210,7 +212,7 @@ def _persist_results(
                         test_rows   = r["test_rows"],
                         status      = "complete",
                     ).on_conflict_do_update(
-                        index_elements=["model_name", "task", "version", "fold"],
+                        index_elements=["model_name", "task", "label_col", "version", "fold"],
                         set_={
                             "train_start": r["train_start"],
                             "train_end":   r["train_end"],
@@ -227,6 +229,7 @@ def _persist_results(
                         db.add(ModelMetric(
                             model_name   = model_name,
                             task         = task,
+                            label_col    = label_col,
                             version      = version,
                             fold         = r["fold"],
                             metric_name  = metric_name,

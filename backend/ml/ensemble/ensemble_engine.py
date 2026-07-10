@@ -76,7 +76,7 @@ class EnsembleEngine:
         """Load all active models and their weights from DB/disk."""
         self._models  = load_active_models()
         self._weights = {
-            "direction":       load_dynamic_weights("direction",       self.version),
+            "direction":       load_dynamic_weights("direction",       self.version, label_col="direction_5d"),
             "expected_return": load_dynamic_weights("expected_return", self.version),
         }
         self._loaded_at = datetime.utcnow()

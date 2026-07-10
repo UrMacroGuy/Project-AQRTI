@@ -28,6 +28,22 @@ from strategies.mutation_engine import _collect_conditions
 log = get_logger("crossover_engine")
 
 
+def _nudge_entry_condition(child: StrategyDSL, rng: random.Random) -> None:
+    """Nudge one entry condition threshold so child gets a unique strategy_id()."""
+    conds = _collect_conditions(child.entry_conditions)
+    nudged = False
+    for c in conds:
+        if isinstance(c.threshold, (int, float)):
+            factor = 1.0 + rng.uniform(-0.15, 0.15)
+            c.threshold = round(c.threshold * factor, 4) if isinstance(c.threshold, float) else int(c.threshold * factor)
+            nudged = True
+            break
+    if not nudged:
+        child.entry_conditions.conditions.append(
+            Condition(feature="volume_ratio_20d", operator=">", threshold=0.01)
+        )
+
+
 def crossover(
     parent_a:     StrategyDSL,
     parent_b:     StrategyDSL,
@@ -75,10 +91,12 @@ def crossover(
         child.max_holding_days = max(1, int((parent_a.max_holding_days + parent_b.max_holding_days) / 2))
         desc = (f"param_blend: sl={child.stop_loss_pct} tp={child.take_profit_pct} "
                 f"conf={child.min_confidence} hold={child.max_holding_days}")
+        _nudge_entry_condition(child, rng)
 
     elif method == "regime_union":
         child.allowed_regimes = sorted(set(parent_a.allowed_regimes) | set(parent_b.allowed_regimes))
         desc = f"regime_union: {child.allowed_regimes}"
+        _nudge_entry_condition(child, rng)
 
     elif method == "regime_intersect":
         intersection = sorted(set(parent_a.allowed_regimes) & set(parent_b.allowed_regimes))
@@ -88,6 +106,7 @@ def crossover(
         else:
             child.allowed_regimes = parent_a.allowed_regimes if fitness_a >= fitness_b else parent_b.allowed_regimes
             desc = "regime_intersect: empty — used dominant parent regimes"
+        _nudge_entry_condition(child, rng)
 
     elif method == "family_dominant":
         # Better parent contributes entry, worse contributes exit
@@ -97,6 +116,7 @@ def crossover(
         child.exit_conditions  = copy.deepcopy(sub.exit_conditions) if sub.exit_conditions else None
         child.family           = dom.family
         desc = f"family_dominant: entry from {dom.family}, exit from {sub.family}"
+        _nudge_entry_condition(child, rng)
 
     # Child name and family
     child.name   = f"X_{parent_a.name[:8]}_{parent_b.name[:8]}"

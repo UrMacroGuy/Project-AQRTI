@@ -68,8 +68,23 @@ def _get_next_lottery_schedule() -> dict:
         "seconds_until_next": int((target - now_ist).total_seconds()),
     }
 
+_SHARPE_CACHE_MAXSIZE = 256   # bounded — see note below on why this can't be @lru_cache
+
 _nifty_sharpe_cache: dict = {}
 _index_futures_sharpe_cache: dict = {}
+
+
+def _cache_put(cache: dict, key, val, maxsize: int = _SHARPE_CACHE_MAXSIZE) -> None:
+    """Bounded insert with FIFO eviction. These caches are keyed by
+    (start, end) backtest-window tuples, not by db Session (unhashable and
+    irrelevant to the result), so functools.lru_cache can't wrap the
+    functions directly — this is the manual equivalent, sized generously
+    above the handful of distinct windows seen in practice so it only ever
+    evicts under genuinely unbounded key growth (e.g. per-strategy rolling
+    walk-forward windows), not normal operation."""
+    if len(cache) >= maxsize:
+        cache.pop(next(iter(cache)))
+    cache[key] = val
 
 
 def _nifty_benchmark_sharpe(db: Session, start, end) -> float:
@@ -88,7 +103,7 @@ def _nifty_benchmark_sharpe(db: Session, start, end) -> float:
     )
     rets = [r[0] for r in rows if r[0] is not None]
     val = compute_sharpe(rets) if len(rets) >= 20 else 0.0
-    _nifty_sharpe_cache[key] = val
+    _cache_put(_nifty_sharpe_cache, key, val)
     return val
 
 
@@ -122,7 +137,7 @@ def _own_instrument_benchmark_sharpe(db: Session, index_name: str, start, end) -
         for i in range(1, len(closes)) if closes[i - 1]
     ]
     val = compute_sharpe(rets) if len(rets) >= 20 else 0.0
-    _index_futures_sharpe_cache[key] = val
+    _cache_put(_index_futures_sharpe_cache, key, val)
     return val
 
 

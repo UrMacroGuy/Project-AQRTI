@@ -23,7 +23,7 @@ def get_portfolio_summary(db: Session) -> dict:
     paper = db.query(PaperPortfolio).filter_by(portfolio_name="default").first()
     if paper:
         open_count = db.query(PaperTrade).filter(PaperTrade.is_open == True).count()
-        invested = paper.initial_capital - paper.current_cash
+        invested = paper.total_value - paper.current_cash
         return {
             "portfolioValue":   paper.total_value,
             "paperCapitalStart": paper.initial_capital,

@@ -84,23 +84,23 @@ def record_strategy_live_day(
     day_trades = (
         db.query(PaperTrade)
         .filter(
-            PaperTrade.strategy_id == strategy_id,
-            PaperTrade.is_open     == False,
-            PaperTrade.exit_date   == on_date,
+            PaperTrade.portfolio_name == f"strat_{strategy_id}",
+            PaperTrade.is_open       == False,
+            PaperTrade.exit_date     == on_date,
         )
         .all()
     )
     opened_today = db.query(PaperTrade).filter(
-        PaperTrade.strategy_id == strategy_id,
-        PaperTrade.entry_date  == on_date,
+        PaperTrade.portfolio_name == f"strat_{strategy_id}",
+        PaperTrade.entry_date    == on_date,
     ).count()
 
     # Cumulative across all time
     all_closed = (
         db.query(PaperTrade)
         .filter(
-            PaperTrade.strategy_id == strategy_id,
-            PaperTrade.is_open     == False,
+            PaperTrade.portfolio_name == f"strat_{strategy_id}",
+            PaperTrade.is_open        == False,
         )
         .all()
     )
@@ -226,8 +226,8 @@ def _check_live_divergence(db: Session, strategy_id: str) -> dict:
     closed = (
         db.query(PaperTrade)
         .filter(
-            PaperTrade.strategy_id == strategy_id,
-            PaperTrade.is_open     == False,
+            PaperTrade.portfolio_name == f"strat_{strategy_id}",
+            PaperTrade.is_open        == False,
         )
         .all()
     )
@@ -304,11 +304,11 @@ def get_live_validation_summary(db: Session, strategy_id: str) -> dict:
 
     closed = (
         db.query(PaperTrade)
-        .filter(PaperTrade.strategy_id == strategy_id, PaperTrade.is_open == False)
+        .filter(PaperTrade.portfolio_name == f"strat_{strategy_id}", PaperTrade.is_open == False)
         .all()
     )
     open_cnt = db.query(PaperTrade).filter(
-        PaperTrade.strategy_id == strategy_id, PaperTrade.is_open == True
+        PaperTrade.portfolio_name == f"strat_{strategy_id}", PaperTrade.is_open == True
     ).count()
 
     if not closed:

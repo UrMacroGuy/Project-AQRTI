@@ -175,7 +175,7 @@ def _parse_chain(data: dict, symbol: str) -> dict | None:
             put_oi_by_strike[sp]  = p_oi
 
             if sp == atm_strike:
-                atm_iv = ce.get("impliedVolatility") or pe.get("impliedVolatility")
+                atm_iv = ce.get("impliedVolatility") if ce.get("impliedVolatility") is not None else pe.get("impliedVolatility")
 
         pcr_oi = total_put_oi / total_call_oi if total_call_oi > 0 else None
 

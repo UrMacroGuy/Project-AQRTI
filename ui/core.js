@@ -11,16 +11,28 @@
 // CHART.JS GLOBAL DEFAULTS — Dark Terminal Theme
 // ═══════════════════════════════════════════════════════════════
 // Bloomberg black/amber palette
-Chart.defaults.color          = '#444444';
-Chart.defaults.borderColor    = '#1a1a1a';
-Chart.defaults.font.family    = "'JetBrains Mono', monospace";
-Chart.defaults.font.size      = 10;
-Chart.defaults.plugins.tooltip.backgroundColor = '#0d0d0d';
-Chart.defaults.plugins.tooltip.borderColor     = '#2a2a2a';
-Chart.defaults.plugins.tooltip.borderWidth     = 1;
-Chart.defaults.plugins.tooltip.titleColor      = '#ff8c00';
-Chart.defaults.plugins.tooltip.bodyColor       = '#888888';
-Chart.defaults.plugins.legend.labels.color     = '#444444';
+// Guarded: if the Chart.js <script> tag failed to load (blocked/offline CDN,
+// network-restricted dev environment), `Chart` is undefined here. Without
+// this guard, the line below throws synchronously and aborts the rest of
+// this file's execution — including the DOMContentLoaded listener that
+// wires up nav clicks and hydrates every page. That failure is invisible
+// (no console access needed to notice "the whole app does nothing") and is
+// completely independent of backend availability, so it must never be able
+// to take down anything past this point.
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color          = '#444444';
+  Chart.defaults.borderColor    = '#1a1a1a';
+  Chart.defaults.font.family    = "'JetBrains Mono', monospace";
+  Chart.defaults.font.size      = 10;
+  Chart.defaults.plugins.tooltip.backgroundColor = '#0d0d0d';
+  Chart.defaults.plugins.tooltip.borderColor     = '#2a2a2a';
+  Chart.defaults.plugins.tooltip.borderWidth     = 1;
+  Chart.defaults.plugins.tooltip.titleColor      = '#ff8c00';
+  Chart.defaults.plugins.tooltip.bodyColor       = '#888888';
+  Chart.defaults.plugins.legend.labels.color     = '#444444';
+} else {
+  console.error('[AQRTI] Chart.js failed to load — charts will be unavailable, but the rest of the app will still work.');
+}
 
 // ═══════════════════════════════════════════════════════════════
 // CHART REGISTRY — prevents "Canvas already in use" errors
@@ -1059,6 +1071,7 @@ function renderPage(pageId) {
     risk:       renderRisk,
     paper:      renderPaperPortfolio,
     gonogo:     () => {},  // rendered entirely by hydrate* functions
+    markov:     () => {},  // rendered entirely by hydrateMarkov (isolated module)
   };
   if (renderers[pageId]) renderers[pageId]();
 }
@@ -1113,6 +1126,12 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
   if (!overlay) return;   // overlay already removed (unlikely on first load)
 
   let pollInterval = null;
+  let consecutiveFailures = 0;
+  // Main backend may legitimately be off (e.g. running the Markov module
+  // standalone) — don't block the whole UI behind a full-screen overlay for
+  // 15 minutes waiting for it. After a handful of failed polls, dismiss and
+  // let the app render in a degraded "main backend offline" state instead.
+  const MAX_CONSECUTIVE_FAILURES = 5;
 
   function updateOverlay(status) {
     const steps  = status.steps || {};
@@ -1151,9 +1170,12 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
 
   async function poll() {
     try {
-      const resp = await fetch('http://localhost:8000/api/v1/system/status');
-      if (!resp.ok) return;
+      const resp = await fetch('http://localhost:8000/api/v1/system/status', {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const status = await resp.json();
+      consecutiveFailures = 0;
       updateOverlay(status);
       if (status.done) {
         // Show 100% for a moment then dismiss
@@ -1161,7 +1183,15 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
         setTimeout(dismiss, 800);
       }
     } catch (_) {
-      // Backend not yet up — keep showing overlay
+      // Backend not yet up — keep showing overlay, up to MAX_CONSECUTIVE_FAILURES
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        if (stepLbl) {
+          stepLbl.textContent = 'Main backend offline — showing app in degraded mode';
+          stepLbl.style.color = '#ef4444';
+        }
+        setTimeout(dismiss, 1000);
+      }
     }
   }
 
@@ -1249,6 +1279,7 @@ function renderPage(pageId) {
   if (pageId === 'analytics')        hydrateAnalytics();
   if (pageId === 'arena')            hydrateArena();
   if (pageId === 'gonogo')           { hydrateMorningDecision(); hydrateGoNogo(); hydrateGoNogoUptime(); hydrateGoNogoRiskRails(); hydrateGoNogoMonthlyReview(); }
+  if (pageId === 'markov')           hydrateMarkov();
 }
 
 // ── Nav Badges — live counts from backend ────────────────────

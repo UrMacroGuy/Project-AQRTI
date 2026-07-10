@@ -10,6 +10,13 @@ const API_CONFIG = {
   TIMEOUT:  10000,
 };
 
+// Markov module runs as its own standalone backend process (backend/markov/app.py),
+// on its own port — genuinely separate from the main backend above.
+const MARKOV_API_CONFIG = {
+  BASE:    'http://localhost:8001/api/v1/markov',
+  TIMEOUT: 10000,
+};
+
 
 // ── Local Data Cache ─────────────────────────────────────────
 // Stores last-known API responses so panels show stale data when backend is offline
@@ -78,6 +85,39 @@ async function apiPost(endpoint, body = {}) {
     return await res.json();
   } catch (err) {
     console.warn(`[AQRTI API POST] ${endpoint} failed:`, err.message);
+    return null;
+  }
+}
+
+// ── Markov backend (separate process/port) fetch helpers ──────
+// Deliberately not sharing _cache/apiFetch's localStorage keys with the main
+// backend — a stale Markov response should never be mistaken for main-backend
+// data or vice versa.
+async function markovFetch(endpoint, params = {}) {
+  const url = new URL(`${MARKOV_API_CONFIG.BASE}${endpoint}`);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  try {
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(MARKOV_API_CONFIG.TIMEOUT) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`[Markov API] ${endpoint} failed:`, err.message);
+    return null;
+  }
+}
+
+async function markovPost(endpoint, body = {}) {
+  try {
+    const res = await fetch(`${MARKOV_API_CONFIG.BASE}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(MARKOV_API_CONFIG.TIMEOUT),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.warn(`[Markov API POST] ${endpoint} failed:`, err.message);
     return null;
   }
 }
@@ -383,6 +423,17 @@ const Api = {
     return apiPost('/morning/act', { strategy_id: strategyId, symbol, action, note });
   },
   async morningActLog(limit) { return apiFetch('/morning/act-log', { limit }); },
+
+  // ── Markov regime module — separate backend process, port 8001 ─
+  async markovStatus()  { return markovFetch('/status'); },
+  async markovRefresh() { return markovPost('/refresh'); },
+  async markovWatchlist()               { return markovFetch('/watchlist'); },
+  async markovWatchlistAdd(symbol)      { return markovPost(`/watchlist/add?symbol=${symbol}`); },
+  async markovWatchlistRemove(symbol)   { return markovPost(`/watchlist/remove?symbol=${symbol}`); },
+  async markovStrategies(family)        { return markovFetch('/strategies', family ? { family } : {}); },
+  async markovGenerateStrategies(symbol, n = 20) {
+    return markovPost(`/strategies/generate?symbol=${symbol}&n=${n}`);
+  },
 };
 
 // ── Legacy uppercase API shim (used in intelligence-lab + replay) ──

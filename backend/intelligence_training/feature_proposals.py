@@ -62,6 +62,7 @@ def approve_proposal(proposal_id: str, db=None) -> bool:
         return True
     except Exception as exc:
         logger.error("Failed to approve proposal %s: %s", proposal_id, exc)
+        db.rollback()
         return False
     finally:
         if own_session:
@@ -82,6 +83,7 @@ def reject_proposal(proposal_id: str, reason: str = "", db=None) -> bool:
         return result.rowcount > 0
     except Exception as exc:
         logger.error("Failed to reject proposal %s: %s", proposal_id, exc)
+        db.rollback()
         return False
     finally:
         if own_session:

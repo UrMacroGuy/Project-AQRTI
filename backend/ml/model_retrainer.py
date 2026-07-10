@@ -414,13 +414,13 @@ def _run_training_pipeline(db: Session, trigger_reason: str) -> dict:
             saved.append((model, metrics, artifact_path))
 
         current_active = db.query(ModelVersion).filter(
-            ModelVersion.task == "direction", ModelVersion.is_active == True
+            ModelVersion.label_col == "direction_5d", ModelVersion.is_active == True
         ).all()
         for m in current_active:
             m.is_active = False
 
         db.query(ModelVersion).filter(
-            ModelVersion.task == "direction",
+            ModelVersion.label_col == "direction_5d",
             ModelVersion.version == next_version,
         ).delete(synchronize_session=False)
         db.flush()

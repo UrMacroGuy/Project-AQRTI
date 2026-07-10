@@ -296,8 +296,8 @@ def _upsert_rows(db: Session, rows: list[dict], our_symbols: set[str]) -> tuple[
                 high            = row.get('high'),
                 low             = row.get('low'),
                 close           = close,
-                volume          = int(row['volume']) if row.get('volume') else None,
-                delivery_volume = int(row['delivery_volume']) if row.get('delivery_volume') else None,
+                volume          = int(row['volume']) if row.get('volume') is not None else None,
+                delivery_volume = int(row['delivery_volume']) if row.get('delivery_volume') is not None else None,
                 daily_return    = round(daily_ret, 6) if daily_ret is not None else None,
             )
             db.add(dp)

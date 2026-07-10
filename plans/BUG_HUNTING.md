@@ -7,13 +7,13 @@
 | Severity | Count | Fixed |
 |----------|-------|-------|
 | CRITICAL | 18 | 15* |
-| HIGH     | 24 | 23** |
-| MEDIUM   | 20 | 20 |
-| LOW      | 10 | 10 |
-| **Total**| **72** | **68** |
+| HIGH     | 29 | 28** |
+| MEDIUM   | 29 | 29 |
+| LOW      | 11 | 11 |
+| **Total**| **87** | **83** |
 
 *\* CRITICAL: 15 fixed + 3 false positive (C2, C4, C5)*
-*\*\* HIGH: 23 fixed + 1 false positive (H28)*
+*\*\* HIGH: 23 fixed + 1 false positive (H28) + 5 fixed (H35-H39, 2026-07-08).*
 
 ## Rules
 
@@ -371,6 +371,46 @@
 - **Verified:** 2026-07-07 — confirmed via live DB query and direct attribute access that `StrategyV2` (table `strategies_v2`) has no `sharpe_ratio` column (`sqlite3` `PRAGMA table_info` and a live ORM row both confirm only `sharpe` exists); reproduced the swallowed `AttributeError` by accessing `row.sharpe_ratio` directly against a real row (`row.sharpe=-4.0, row.win_rate=64.0`), confirming the exact failure the old code silently ate.
 - **Fixed:** 2026-07-07
 
+## H35 — 4/5 crossover methods never alter `entry_conditions`, so all offspring survive with a strategy_id that already exists
+
+- **File:** `backend/strategies/crossover_engine.py:49` (and lines 71-99 for the 4 dead methods)
+- **Root cause:** `crossover()` deep-copies the dominant parent (line 49). Methods `param_blend` (lines 71-77), `regime_union` (79-81), `regime_intersect` (83-90), and `family_dominant` (92-99) modify only SL/TP/conf/hold/allowed_regimes/exit_conditions — they never change `entry_conditions` from those of the dominant parent. `StrategyDSL.strategy_id()` is an MD5 hash of `entry_conditions`, so the child's ID equals the dominant parent's ID, which already exists in `StrategyV2`. `evolve_population` then hits the `already exists` skip every time. Only `rule_blend` (lines 55-69) rewrites `entry_conditions` and can produce a new ID.
+- **Impact:** 80% of crossover attempts silently waste their offspring slot. Mutation (which always changes the ID via its threshold-nudge fallback) is the only reliable offspring source, starving the population of genetic diversity from param/regime/family cross-combinations.
+- **Fix:** Added `_nudge_entry_condition(child, rng)` helper that picks a random entry condition and nudges its threshold ±5-15%. Called at the end of all 4 dead method blocks. Verified: strategy_id now differs from parent for all crossover methods.
+- **Fixed:** 2026-07-08
+
+## H36 — `model_retrainer` retires BOTH `direction_5d` and `outperform_binary` when retraining only `direction_5d`
+
+- **File:** `backend/ml/model_retrainer.py:416-418`
+- **Root cause:** The retrain/activate loop filters `ModelVersion.task == "direction"` (line 417) to find existing active versions. Both `direction_5d` and `outperform_binary` have `task="direction"`, so this sets `is_active=False` on both. The replacement `ModelVersion` is then registered for `label_col="direction_5d"` only (line 432) — `outperform_binary` gets no replacement. The DELETE at line 422-425 has the same `task == "direction"` filter, so `outperform_binary`'s next-version row is also deleted.
+- **Impact:** Every retrain of the `direction_5d` task silently deactivates the `outperform_binary` model with no replacement. The system serves no `outperform_binary` predictions until the next `outperform_binary` retrain happens to run later in the same batch, and if it doesn't, `outperform_binary` is permanently unserved. Confirmed by reading the code: the filters use `task` instead of `label_col`, repeating the exact pattern C15 fixed for `backtest_validator.py`.
+- **Fix:** Changed both filters to `ModelVersion.label_col == "direction_5d"`. Verified: retraining direction_5d no longer deactivates outperform_binary.
+- **Fixed:** 2026-07-08
+
+## H37 — `ModelMetric` and `WalkForwardFold` tables lack a `label_col` column, so `direction_5d` and `outperform_binary` per-fold metrics write to and overwrite each other's rows
+
+- **File:** `backend/aqrti/database/models.py:436-452` (`ModelMetric`), `455-459` (`WalkForwardFold`)
+- **Root cause:** `ModelMetric.__tablename__ = "model_metrics"` has no `label_col` column. Its indexes are `("model_name", "task")`. `WalkForwardFold`'s `UniqueConstraint` is `("model_name", "task", "version", "fold")`. Both `direction_5d` and `outperform_binary` store `task="direction"`, so `walk_forward._persist_results` writes their metrics under identical keys — whichever writes second overwrites the first. `ensemble_engine.load_dynamic_weights("outperform_binary")` then queries `ModelMetric` with `task="outperform_binary"` (which gets zero rows, silently falling back to equal weights) while `load_dynamic_weights("direction")` returns whatever metric was written last (possibly `outperform_binary`'s AUC instead of `direction_5d`'s).
+- **Impact:** Same table-level root cause as C15 (which fixed `model_versions`), now confirmed unfixed for `model_metrics` and `walk_forward_folds`. Outperform binary ensemble weights silently use equal-weight fallback. Direction ensemble weights read polluted metrics. Fix requires a migration (`ALTER TABLE` + `UNIQUE` rebuild) for both tables.
+- **Fix:** Added `label_col` column to both `ModelMetric` and `WalkForwardFold` in models.py. Updated indexes and unique constraints to include `label_col`. Created migration `0004_add_label_col_to_model_metric_and_walk_forward_folds.py`. Updated `walk_forward._persist_results` to pass `label_col` to all inserts and update conflict targets. Updated `model_weighting.load_dynamic_weights` query to filter by `label_col`. Updated `ensemble_engine` to pass `label_col` to weight loader.
+- **Fixed:** 2026-07-08
+
+## H38 — `live_validator` and `meta_learner` attribute non-evidentiary `default`-portfolio trades as shadow-trade evidence
+
+- **Files:** `backend/strategies/live_validator.py:84-106, 226-233, 305-312`, `backend/strategies/meta_learner.py:299-300`
+- **Root cause:** `record_strategy_live_day` (line 84-106), `_check_live_divergence` (226-233), and `get_live_validation_summary` (305-312) all filter `PaperTrade.strategy_id == strategy_id` to count shadow trades. But `PaperTrade.strategy_id` is also set on `default`-portfolio trades that merely borrow a promoted strategy's SL/TP — these never exercise the strategy's own entry/exit DSL and are not forward evidence. The correct filter (already used by `strategies.py::_quarantine_status`) is `PaperTrade.portfolio_name == f"strat_{strategy_id}"`. Same defect in `meta_learner._extract_live_trade_signals` (line 299-300), biasing family-generation weights with non-evidentiary trades.
+- **Impact:** When a strategy reaches promoted/active status, these three live-validator functions (which drive the demotion-to-shadow gate on divergence) and the meta-learner's live-trade signal extraction silently blend default-portfolio trades — which never run the strategy's DSL — into the shadow-trade count, win rate, and cumulative P&L. Same bug class as the already-fixed H32 (API endpoints), but unfixed for the actual *demotion* path and family-weighting pipeline. H32 fixed only read-only reporting; this is where trades affect lifecycle and breeding decisions.
+- **Fix:** Changed all 6 `PaperTrade.strategy_id == strategy_id` filters in `live_validator.py` to `PaperTrade.portfolio_name == f"strat_{strategy_id}"`. Changed `meta_learner.py:296` to derive strategy ID from `portfolio_name` prefix. Verified: no stale `strategy_id`-only filters remain in either file.
+- **Fixed:** 2026-07-08
+
+## H39 — Evolution parent-pool queries never filter `asset_class`, mixing index-futures strategies with stock universe
+
+- **File:** `backend/strategies/evolution_engine.py:121-133, 135-146, 162-173`
+- **Root cause:** All three parent-pool queries (strict floor, relaxed positive-Sharpe, bootstrap) filter on `trade_count`, `fitness_score`, `sharpe`, `dsl_json`, `family` — but never filter `StrategyV2.asset_class == "stock"`. Index-futures strategies are persisted with `asset_class="index_futures"` and their own DSLs (using index-only features like `basis_pct`, `return_5d`). If any index-futures strategy qualifies on the numeric gates, it becomes a parent; its offspring are backtested by `backtest_and_update` → `strategy_backtester.get_backtest_universe` (a STOCK universe), and the child's `asset_class` defaults to `"stock"` via the `upsert_strategy` default.
+- **Impact:** Direct violation of the convention that index-futures and stock populations must never mix. Index-futures DSLs get graded against stock price data, producing invalid backtest metrics for all offspring. Fix: add `.filter(StrategyV2.asset_class == "stock")` to all three parent-pool queries.
+- **Fix:** Added `.filter(StrategyV2.asset_class == "stock")` to all three parent-pool query blocks in `evolution_engine.py`. Verified: index-futures strategies can no longer be selected as parents.
+- **Fixed:** 2026-07-08
+
 ## Noted, not fixed — shadow/backtest exit checks skip entirely on missing close price
 
 - **Files:** `backend/paper_trading/strategy_shadow_runner.py`, `backend/strategies/strategy_backtester.py`
@@ -501,6 +541,78 @@
 - **Detail:** The number of trading days for backtest is hardcoded. If the available price data is shorter, the backtest crashes.
 - **Fixed:** 2026-07-06 (no longer applicable after refactor)
 
+## M21 — `feature_proposals.approve_proposal` / `reject_proposal` missing `db.rollback()` after failed commit
+
+- **File:** `backend/intelligence_training/feature_proposals.py:57, 81`
+- **Root cause:** `db.commit()` at lines 57/81 is inside try/except that logs the error and returns `False`, but never calls `db.rollback()`. When the caller passes an external session (not `own_session`), that session remains poisoned for all subsequent queries — the documented crash pattern from the 2026-07-03e backend crash (C10's root cause class).
+- **Impact:** After any commit failure in feature proposal approval/rejection, any later DB operation on the same external session fails with "This session is in a 'inactive' state". Contrast with the correct pattern in `earnings_scraper.py:407` which rolls back on exception.
+- **Fix:** Added `db.rollback()` to both except blocks before `return False`.
+- **Fixed:** 2026-07-08
+
+## M22 — `strategy_shadow_runner` exit cost applied as flat additive percentage on P&L, not multiplicatively on fill price
+
+- **File:** `backend/paper_trading/strategy_shadow_runner.py:162`
+- **Root cause:** `net_pct = pnl_pct - NSE_SELL_COST * 100` — the sell cost is subtracted as a flat additive percentage from the PnL percentage. Every other cost path (`paper_trade.py`, `continuous_monitor.py`, `replay_engine.py`, `strategy_backtester.py`) applies NSE sell cost multiplicatively on the exit fill: `exit_price * (1 - NSE_SELL_COST_PCT)`. The additive form overstates winners by `pnl% × 0.126%` vs the multiplicative form.
+- **Impact:** The shadow-runner path (which produces the forward evidence used by the quarantine gate after H32's fix to use `portfolio_name` filter) computes net P&L on a different cost basis from every other engine in the system. Violates the "0.28% round-trip must always apply consistently" rule.
+- **Fix:** Changed to multiplicative cost: `exit_price = cur * (1 - NSE_SELL_COST_PCT)`, `net_pnl_pct = (exit_price - entry_price) / entry_price * 100` matching `continuous_monitor.py`'s pattern after C1 fix.
+- **Fixed:** 2026-07-08
+
+## M23 — `get_portfolio_summary` understates `deployedCapital` when the paper book is profitable
+
+- **File:** `backend/aqrti/data/portfolio.py:26`
+- **Root cause:** `invested = paper.initial_capital - paper.current_cash`. When the paper portfolio is profitable, realized P&L accumulates into `current_cash`, so `current_cash > initial_capital → invested` goes negative → clamped to 0 by `max(invested, 0.0)`. Correct deployed capital is `paper.total_value - paper.current_cash` (total portfolio minus cash).
+- **Impact:** The main portfolio summary endpoint shows `deployedCapital: 0` or understated whenever the book is profitable, misleading the user about capital deployment.
+- **Fix:** Changed to `invested = paper.total_value - paper.current_cash`. Verified: portfolio summary now correctly reports deployed capital in profitable books.
+- **Fixed:** 2026-07-08
+
+## M24 — `clip_label_outliers` applied before chronological train/test split, leaking label distribution from future into training
+
+- **File:** `backend/ml/datasets/dataset_builder.py:135` (call site), `backend/ml/datasets/label_generator.py:238` (function)
+- **Root cause:** `clip_label_outliers(labels_df)` is called with the full per-symbol label DataFrame before any chronological split. Its clip bounds (`mean ± 3σ`) are computed over the entire label history including rows that later become validation/test in `get_final_train_test` / walk-forward. This leaks future-label distribution statistics into the training labels — the same data-leakage class as C3 (PercentileRanker on full dataset).
+- **Impact:** Training labels for directions/returns are already weakly clipped (continuous labels only, 3σ is a wide bound), but the clip bounds are computed from a distribution that includes future observations the model shouldn't see. Most impact on recent high-volatility periods whose outlier labels are visible in the clip thresholds.
+- **Fix:** Removed the global `clip_label_outliers()` call from `dataset_builder.py:135`. The function remains defined in `label_generator.py` for potential per-fold use.
+- **Fixed:** 2026-07-08
+
+## M25 — `bhavcopy_scraper` falsy-zero: valid volume of 0 is silently set to `None`
+
+- **File:** `backend/data_supremacy/bhavcopy_scraper.py:299-300`
+- **Root cause:** `row.get('volume')` returns `0.0` when a stock trades zero shares, and Python's `0.0 or None` evaluates to `None` because 0.0 is falsy. Same bug on line 300 for `delivery_volume`.
+- **Impact:** A stock that genuinely traded zero shares on a given day has its volume stored as `None` instead of `0`. This `None` then propagates into feature computation (`volume_ratio_20d`, etc.) where it may cause silent skips or NaN features.
+- **Fix:** Changed `if row.get('volume')` to `if row.get('volume') is not None` on both lines.
+- **Fixed:** 2026-07-08
+
+## M26 — `options_scraper` falsy-zero in ATM implied volatility selection
+
+- **File:** `backend/data_supremacy/options_scraper.py:178`
+- **Root cause:** `ce.get("impliedVolatility") or pe.get("impliedVolatility")` — if the call side's implied volatility is genuinely `0.0` (flat skew), the `or` operator short-circuits to put-side IV instead. Should use `ce.get("iv") if ce.get("iv") is not None else pe.get("iv")`.
+- **Impact:** ATM IV is incorrectly sourced from the put side when call IV is zero. Visible in the options-chain snapshot and any downstream vol surface computation.
+- **Fix:** Changed to `ce.get("impliedVolatility") if ce.get("impliedVolatility") is not None else pe.get("impliedVolatility")`.
+- **Fixed:** 2026-07-08
+
+## M27 — `/health` endpoint uses timezone-aware datetime to filter timezone-naive DB columns
+
+- **File:** `backend/aqrti/api/app.py:930, 961, 981, 986, 1003, 1006`
+- **Root cause:** `now_utc = datetime.now(timezone.utc)` (tz-aware) at line 930. `dt_cutoff` / `arena_cutoff` derive from this, then filter `StrategyV2.promoted_at >= dt_cutoff` (line 981), `StrategyV2.created_at >= dt_cutoff` (line 986), and `ArenaRun.completed_at >= arena_cutoff` (line 1006). All those columns are `default=datetime.utcnow` (naive) — in SQLite TEXT comparisons, the tz-aware bound serializes with `+00:00` suffix sorting after naive values, so rows inside the cutoff's ~10-hour morning window are excluded. Contrast with `go_nogo.py:78/172`, `morning.py:152`, `system_health.py` which correctly use naive `datetime.utcnow()`.
+- **Impact:** `new_candidates_last_3d`, `new_promotions_last_3d`, and `runs_last_6h` in `/health` undercount their true values. Evolution/arena stalls may be falsely flagged.
+- **Fix:** Changed `now_utc = datetime.now(timezone.utc)` to `datetime.utcnow()`. Removed unused `timezone` import.
+- **Fixed:** 2026-07-08
+
+## M28 — `run_symbol_features` passes full-history breadth data without point-in-time slicing
+
+- **File:** `backend/features/feature_generator.py:76-89`
+- **Root cause:** `run_symbol_features` loads full-history `universe_dfs` and passes them to `_compute_all_features` without slicing to the symbol's queried date. Inside `compute_market_features`, breadth features (`breadth_pct_above_ema50/ema200`), peer ranks, and sector features are computed from `df["close"].iloc[-1]` (the latest close of every stock), not the close as of the queried date. The backfill path (`_generate_all`) correctly slices to `feat_date` for breadth snapshots.
+- **Impact:** When `run_symbol_features` is called for any historical date (not just the latest), breadth/peer-rank/sector features leak future cross-sectional data.
+- **Fix:** `run_symbol_features` now slices `universe_dfs` to the latest common date and builds a dated `breadth_snapshot` dict, matching `_generate_all`'s pattern.
+- **Fixed:** 2026-07-08
+
+## M29 — `snapshot_manager` `nifty_ret5d` uses 4-trading-day window mislabeled as 5-day
+
+- **File:** `backend/vault/snapshot_manager.py:83-84`
+- **Root cause:** `nifty_ret5d` uses `IndexData.date < target_date` with `.order_by(desc).offset(4).first()`, which yields the 5th most-recent row ≈ only 4 trading intervals back, because `<` excludes the current date itself and `.offset(4)` skips the next 4 rows. The actual return span is ~4 trading days, not 5.
+- **Impact:** Archived market snapshots have `nifty_ret5d` computed over the wrong window, deviating from the 5-day label implied by the field name. Low impact since no decision logic consumes this field.
+- **Fix:** Changed `.offset(4)` to `.offset(5)` so the 6th most-recent row gives 5 trading intervals.
+- **Fixed:** 2026-07-08
+
 ---
 
 # LOW (10 items)
@@ -564,12 +676,22 @@
 - **Detail:** Exceeds recommended method length by 3×. Should be refactored into sub-methods.
 - **Fixed:** 2026-07-06 (already refactored in previous work)
 
+## L11 — `time_machine.py` `label_date` variable assigned but never used
+
+- **File:** `backend/intelligence_training/time_machine.py:75`
+- **Root cause:** `label_date = target_date + timedelta(days=horizon_days + 2)` is computed and assigned but never referenced in any subsequent code. The actual forward return is computed via raw SQL `OFFSET` instead of calendar-based lookup.
+- **Impact:** Dead code that confuses readers about how forward-return windows are actually computed.
+- **Fix:** Removed the dead assignment.
+- **Fixed:** 2026-07-08
+
 ---
 
 # Session Log
 
 | Date | Change |
 |------|--------|
+| 2026-07-07 (Batch 9) | Full codebase audit via parallel review agents. New: H35-H39 (5 HIGH — crossover offspring never unique, model_retrainer task collision, ModelMetric/WalkForwardFold label_col gap, live_validator non-evidentiary trade filter, evolution parent-pool asset_class mix). New: M21-M29 (9 MEDIUM — feature_proposals rollback, shadow runner cost additive, portfolio deployedCapital, clip_label_outliers leakage, bhavcopy/options falsy-zero, health tz-mismatch, feature breadth PIT, nifty_ret5d window). New: L11 (dead variable). |
+| 2026-07-08 (Batch 10) | Fixed all 15 bugs from Batch 9 via parallel fix agents. H35-H39 fixed, M21-M29 fixed, L11 fixed. H35: crossover engine now nudges entry_conditions for all methods. H36: model_retrainer filters by label_col. H37: label_col added to ModelMetric/WalkForwardFold + migration + all writers updated. H38: live_validator/meta_learner use portfolio_name filter. H39: evolution_engine parent pool filters asset_class. M21: db.rollback() in feature_proposals. M22: multiplicative cost in shadow_runner. M23: fixed portfolio deployedCapital calc. M24: removed global clip_label_outliers. M25/M26: falsy-zero fixes. M27: naive datetime in /health. M28: point-in-time breadth in run_symbol_features. M29: offset(5) for nifty_ret5d. L11: removed dead var.
 | 2026-07-06 | Batch 1: C1, C6, C7, C8, C9, C10, C11 — 7 CRITICAL. H11, H12 — 2 HIGH. |
 | 2026-07-06 | Batch 2: H13, H14, H17, H18, H22, H23, H24, H25, H31 — 9 HIGH. |
 | 2026-07-06 | Batch 3: M1-M20 — 14 MEDIUM (M3/M7/M10/M13/M14/M20 N/A). L1-L10 — 5 LOW. |

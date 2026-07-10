@@ -165,6 +165,7 @@ async function hydrateMarket() {
 async function loadUniverseSummary() {
   try {
     const summary = await Api.universeSummary();
+    if (!summary) return;
     setDataPoint('uni-total',    (summary.universe_size || 0).toLocaleString(), 'market');
     setDataPoint('uni-indb',     (summary.stocks_in_db  || 0).toLocaleString(), 'market');
     setDataPoint('uni-withdata', (summary.symbols_with_data || 0).toLocaleString(), 'market');

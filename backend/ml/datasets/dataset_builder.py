@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from aqrti.database.engine import get_db
 from aqrti.database.models import DailyPrice, IndexData, Stock
 from aqrti.utils.logger import get_logger
-from ml.datasets.label_generator import generate_labels, clip_label_outliers, LABEL_COLUMNS
+from ml.datasets.label_generator import generate_labels, LABEL_COLUMNS
 
 log = get_logger("dataset_builder")
 
@@ -132,7 +132,6 @@ def build_symbol_dataset(
 
     # Generate forward labels from raw prices (no leakage)
     labels_df = generate_labels(price_df, nifty_df)
-    labels_df = clip_label_outliers(labels_df)
 
     if labels_df.empty:
         log.debug("Skipping %s — no labeled rows", symbol)

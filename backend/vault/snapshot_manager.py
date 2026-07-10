@@ -77,7 +77,7 @@ def archive_market_snapshot(db: Session, target_date: date) -> dict:
                 IndexData.date < target_date,
             )
             .order_by(IndexData.date.desc())
-            .offset(4)
+            .offset(5)
             .first()
         )
         if prev5 and prev5.close and nifty_close:

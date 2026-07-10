@@ -437,13 +437,14 @@ class ModelMetric(Base):
     """Per-fold metric storage from walk-forward validation."""
     __tablename__ = "model_metrics"
     __table_args__ = (
-        Index("ix_mm_model_task",    "model_name", "task"),
-        Index("ix_mm_computed_at",   "computed_at"),
+        Index("ix_mm_model_task_label", "model_name", "task", "label_col"),
+        Index("ix_mm_computed_at",      "computed_at"),
     )
 
     id           = Column(Integer,    primary_key=True, autoincrement=True)
     model_name   = Column(String(20), nullable=False)
     task         = Column(String(30), nullable=False)
+    label_col    = Column(String(40), nullable=False, default="")
     version      = Column(Integer,    nullable=False, default=1)
     fold         = Column(Integer,    nullable=True)
     metric_name  = Column(String(40), nullable=False)    # accuracy|auc_roc|ic|mae|…
@@ -456,12 +457,13 @@ class WalkForwardFold(Base):
     """Metadata for each walk-forward fold."""
     __tablename__ = "walk_forward_folds"
     __table_args__ = (
-        UniqueConstraint("model_name", "task", "version", "fold", name="uq_wff_model_task_ver_fold"),
+        UniqueConstraint("model_name", "task", "label_col", "version", "fold", name="uq_wff_model_task_label_ver_fold"),
     )
 
     id          = Column(Integer,    primary_key=True, autoincrement=True)
     model_name  = Column(String(20), nullable=False)
     task        = Column(String(30), nullable=False)
+    label_col   = Column(String(40), nullable=False, default="")
     version     = Column(Integer,    nullable=False, default=1)
     fold        = Column(Integer,    nullable=False)
     train_start = Column(String(12), nullable=True)   # ISO date string

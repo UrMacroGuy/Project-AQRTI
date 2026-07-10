@@ -121,6 +121,7 @@ def evolve_population(
     parents = (
         db.query(StrategyV2)
         .filter(
+            StrategyV2.asset_class == "stock",
             StrategyV2.trade_count    >= MIN_BACKTEST_TRADES,
             StrategyV2.fitness_score  >= MIN_PARENT_FITNESS,
             StrategyV2.sharpe         >= MIN_PARENT_SHARPE,
@@ -135,6 +136,7 @@ def evolve_population(
         parents = (
             db.query(StrategyV2)
             .filter(
+                StrategyV2.asset_class == "stock",
                 StrategyV2.trade_count   >= MIN_BACKTEST_TRADES,
                 StrategyV2.sharpe        > 0.0,   # positive honest edge, any size
                 StrategyV2.dsl_json.isnot(None),
@@ -162,6 +164,7 @@ def evolve_population(
         parents = (
             db.query(StrategyV2)
             .filter(
+                StrategyV2.asset_class == "stock",
                 StrategyV2.trade_count   >= MIN_BACKTEST_TRADES,
                 StrategyV2.sharpe.isnot(None),
                 StrategyV2.dsl_json.isnot(None),
