@@ -53,7 +53,7 @@ async function hydrateMarket() {
       const niftyEl = el('nifty-value');
       if (niftyEl) niftyEl.textContent = fmt;
       setDataPoint('market-nifty-val', fmt, 'market');
-      const pct = (nifty.returns || 0) * 100;
+      const pct = nifty.returns || 0; // IndexData.returns is already a percentage
       const chgText = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
       const chgCls  = pct >= 0 ? 'positive' : 'negative';
       const niftyChg = el('nifty-change');
@@ -66,7 +66,7 @@ async function hydrateMarket() {
       const bankEl = el('banknifty-value');
       if (bankEl) bankEl.textContent = fmt;
       setDataPoint('market-banknifty-val', fmt, 'market');
-      const pct = (bank.returns || 0) * 100;
+      const pct = bank.returns || 0; // IndexData.returns is already a percentage
       const chgText = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
       const chgCls  = pct >= 0 ? 'positive' : 'negative';
       const bankChg = el('banknifty-change');
@@ -143,7 +143,9 @@ async function hydrateMarket() {
   if (moversBody) {
     if (topMovers && topMovers.length) {
       moversBody.innerHTML = topMovers.map(m => {
-        const pct = (m.change || 0) * 100;
+        // m.change (daily_return) is already a percentage at the source
+        // (aqrti/data/market_data.py: pct_change() * 100) — do not rescale.
+        const pct = m.change || 0;
         return `
           <tr>
             <td><strong>${m.symbol}</strong></td>

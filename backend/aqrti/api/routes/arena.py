@@ -63,7 +63,7 @@ def get_runs(
     db: Session = Depends(get_db_dependency),
 ):
     """All arena runs — for the history table in the UI."""
-    q = db.query(ArenaRun).order_by(ArenaRun.created_at.desc())
+    q = db.query(ArenaRun).order_by(ArenaRun.started_at.desc())
     if status != "all":
         q = q.filter(ArenaRun.status == status)
     runs = q.limit(limit).all()

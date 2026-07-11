@@ -714,7 +714,7 @@ def get_arena_status(db) -> dict:
 
     recent = (
         db.query(ArenaRun)
-        .order_by(ArenaRun.created_at.desc())
+        .order_by(ArenaRun.started_at.desc())
         .limit(20)
         .all()
     )

@@ -1223,6 +1223,19 @@ function renderPage(pageId) {
   if (pageId === 'cockpit')     hydrateCockpit();
 }
 
+// _initialBoot() must run through the fully-wrapped renderPage() above (not
+// _renderPageOnce), so trigger it here — after renderPage's final
+// definition — rather than immediately after _initialBoot's own definition.
+// DOMContentLoaded may have already fired by the time this script runs
+// (cached/instant navigations, some automation contexts); addEventListener
+// would then silently never call the handler. Check readyState and run
+// immediately in that case instead of only listening for the event.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _initialBoot);
+} else {
+  _initialBoot();
+}
+
 // ── Nav Badges — live counts from backend ────────────────────
 async function refreshNavBadges() {
   const _b = (id, val) => { const e = el(id); if (e && val != null) e.textContent = val; };
