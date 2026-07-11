@@ -7,9 +7,9 @@
  * reuse errors.
  */
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // CHART.JS GLOBAL DEFAULTS — Dark Terminal Theme
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // Bloomberg black/amber palette
 // Guarded: if the Chart.js <script> tag failed to load (blocked/offline CDN,
 // network-restricted dev environment), `Chart` is undefined here. Without
@@ -34,9 +34,9 @@ if (typeof Chart !== 'undefined') {
   console.error('[AQRTI] Chart.js failed to load — charts will be unavailable, but the rest of the app will still work.');
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // CHART REGISTRY — prevents "Canvas already in use" errors
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 const ChartRegistry = (() => {
   const instances = {};
   return {
@@ -57,9 +57,9 @@ const ChartRegistry = (() => {
   };
 })();
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // HELPERS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 function el(id) { return document.getElementById(id); }
 
 function setDataPoint(id, value, source, timestamp) {
@@ -93,7 +93,7 @@ function riskBadge(risk) {
 }
 
 function statusBadge(status) {
-  const labels = { institutional: 'â˜… Institutional', production: 'Production', paper: 'Paper', shadow: 'Shadow', retired: 'Retired' };
+  const labels = { institutional: '★ Institutional', production: 'Production', paper: 'Paper', shadow: 'Shadow', retired: 'Retired' };
   return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
 }
 
@@ -103,9 +103,9 @@ function sentColor(val) {
   return 'negative';
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // CLOCK
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 function updateClock() {
   const now = new Date();
   const hh = String(now.getHours()).padStart(2,'0');
@@ -125,9 +125,9 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // NAVIGATION
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 const pageSubtitles = {
   cockpit:             'Portfolio Cockpit',
   market:              'Market',
@@ -171,9 +171,9 @@ function activatePage(pageId) {
   _session.save(pageId);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 // SESSION PERSISTENCE — survive dev server restarts
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 const _session = {
   KEY: 'aqrti_session',
 
@@ -261,7 +261,7 @@ function _sessionToast(session) {
   `;
   toast.innerHTML = `
     <style>@keyframes slideUp{from{transform:translateX(-50%) translateY(20px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}</style>
-    <span style="color:var(--accent,#ff9500);font-size:1.2rem">â—ˆ</span>
+    <span style="color:var(--accent,#ff9500);font-size:1.2rem">◈</span>
     <div style="flex:1">
       <div style="color:#f1f5f9;font-weight:700;letter-spacing:0.08em;font-size:0.75rem">SESSION FOUND</div>
       <div style="color:rgba(255,255,255,0.5);margin-top:3px;font-size:0.7rem">
@@ -277,7 +277,7 @@ function _sessionToast(session) {
     </button>
     <button onclick="document.getElementById('aqrti-session-toast').remove()"
       style="background:transparent;border:none;color:rgba(255,255,255,0.35);
-             cursor:pointer;font-size:1.1rem;padding:0 4px;line-height:1">âœ•</button>
+             cursor:pointer;font-size:1.1rem;padding:0 4px;line-height:1">✕</button>
   `;
   document.body.appendChild(toast);
 
@@ -303,9 +303,9 @@ function _sessionToast(session) {
   setTimeout(() => { if (toast.parentNode) toast.remove(); }, 30000);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 // COMMAND PALETTE — Bloomberg-style GO function
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 const CMD_PAGES = [
   { icon: '◈', label: 'Portfolio Cockpit',     hint: '12-symbol overview',    page: 'cockpit' },
   { icon: '◎', label: 'Market',                hint: 'Indices · Sectors',     page: 'market' },
@@ -406,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// â”€â”€ Bloomberg F-key physical keyboard shortcuts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Bloomberg F-key physical keyboard shortcuts ───────────────
 const _fkeyPageMap = {
   F1:  'cockpit',  F2: 'market',   F3: 'analytics', F4: 'news',
   F5:  'agents',   F6: 'strategy', F7: 'arena',      F8: 'gonogo',
@@ -421,7 +421,7 @@ document.addEventListener('keydown', (e) => {
   if (page) { e.preventDefault(); activatePage(page); renderPage(page); }
 });
 
-// â”€â”€ Bloomberg GO> command bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Bloomberg GO> command bar ─────────────────────────────────
 // Behaves like Bloomberg terminal: type a mnemonic and press Enter
 const _bbgCommands = {
   // Page mnemonics
@@ -485,9 +485,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 // NEWS TICKER STRIP — Bloomberg amber bar hydration
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 async function hydratePipelineHealthBanner() {
   const banner = el('pipeline-fail-banner');
   const detail = el('pipeline-fail-detail');
@@ -528,9 +528,9 @@ async function hydrateWatchdogRestartPill() {
   }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 // GO-1 / GO-7 / GO-8: Go/No-Go Scorecard hydration
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════
 
 async function hydrateGoNogo() {
   const scoreEl   = el('gonogo-scorecard-card');
@@ -958,7 +958,7 @@ async function hydrateNewsStrip() {
     const sym  = n.symbol || n.entities?.[0] || 'NSE';
     const headline = (n.headline || n.title || '').slice(0, 90);
     const sent = n.sentiment_label || n.sentimentLabel || '';
-    const sentIcon = sent === 'positive' ? 'â–²' : sent === 'negative' ? 'â–¼' : 'â—†';
+    const sentIcon = sent === 'positive' ? '▲' : sent === 'negative' ? '▼' : '◆';
     return `<span class="news-strip-item"><span class="strip-sym">${sym}</span><span class="strip-sep">·</span>${sentIcon} ${headline}</span>`;
   });
 
@@ -972,11 +972,11 @@ async function hydrateNewsStrip() {
   inner.style.animationDuration = `${duration}s`;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // PAGE RENDERERS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 
-// â”€â”€ MARKET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── MARKET ────────────────────────────────────────────────────
 function renderMarket() {
   // Delegate to live hydration — hydrateMarket() renders all charts/tables
   const moversBody = el('top-movers-body');
@@ -985,7 +985,7 @@ function renderMarket() {
   if (derivBody) derivBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:16px">No options data — run Options Intelligence scraper</td></tr>';
 }
 
-// â”€â”€ RESEARCH (merged News + Sentiment) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── RESEARCH (merged News + Sentiment) ───────────────────────
 function renderNews() {
   // Delegate to hydrateNews() + hydrateSentiment() + hydrateResearchSynthesis()
   // — all live data from backend. Page id stays "news" for backward
@@ -1002,24 +1002,24 @@ function renderNews() {
   if (synthBody) synthBody.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px">Loading…</div>';
 }
 
-// â”€â”€ STRATEGY LAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── STRATEGY LAB ──────────────────────────────────────────────
 function renderStrategy() {
   // Delegate to hydrateStrategyResearch() — live backend data
   const tbody = el('strategy-body');
   if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);text-align:center;padding:16px">Loading strategies…</td></tr>';
 }
 
-// â”€â”€ RISK CENTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── RISK CENTER ───────────────────────────────────────────────
 function renderRisk() {
   // Delegate entirely to hydrateRisk() -- live backend data only, no mock data
   hydrateRisk();
 }
 
 // LAZY RENDER — Render page on first activation
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 const rendered = new Set();
 
-function renderPage(pageId) {
+function _renderPageOnce(pageId) {
   if (rendered.has(pageId)) return;
   rendered.add(pageId);
   const renderers = {
@@ -1038,9 +1038,9 @@ function renderPage(pageId) {
   if (renderers[pageId]) renderers[pageId]();
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // ANIMATED KPI COUNTER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 function animateCounter(element, target, prefix = '', suffix = '', duration = 800) {
   const start = 0;
   const startTime = performance.now();
@@ -1062,7 +1062,7 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
 
 
 
-// â”€â”€ Boot sequence poller â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Boot sequence poller ──────────────────────────────────────────────────────
 (function bootPoller() {
   const STEP_LABELS = {
     market_data:       'Pulling market data (OHLCV)…',
@@ -1076,7 +1076,7 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
     learning:          'Running learning & scoring loop…',
   };
   const STEP_ORDER = Object.keys(STEP_LABELS);
-  const ICONS = { pending: 'â¬¡', running: 'â—ˆ', done: 'â—†', error: 'âœ—' };
+  const ICONS = { pending: '⬡', running: '◈', done: '◆', error: '✗' };
   const COLORS = { pending: '#3a3a3e', running: '#ff9500', done: '#22c55e', error: '#ef4444' };
 
   const overlay  = document.getElementById('boot-overlay');
@@ -1164,7 +1164,7 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
   // Safety fallback: if backend never responds with done=true after 15 min, dismiss anyway
   setTimeout(dismiss, 15 * 60 * 1000);
 })();
-window.addEventListener('DOMContentLoaded', () => {
+function _initialBoot() {
   // Read previous session BEFORE renderPage() overwrites it
   const prevSession = _session.load();
 
@@ -1200,15 +1200,14 @@ window.addEventListener('DOMContentLoaded', () => {
   if (prevSession && prevSession.page) {
     setTimeout(() => _sessionToast(prevSession), 500);
   }
-});
+}
 
 // ── TODAY'S TRADES — Top-5 signals with SL/TP/strategy ────────
 // Patch nav to trigger live hydration on every page visit
-const _originalRenderPage = renderPage;
 const _liveHydrated = new Set(); // kept for manual cache-busting by action buttons
 
 function renderPage(pageId) {
-  _originalRenderPage(pageId);
+  _renderPageOnce(pageId);
 
   if (pageId === 'news')        { hydrateNews(); hydrateSentiment(); hydrateResearchSynthesis(); }
   if (pageId === 'market')      { hydrateMarket(); loadUniverseSummary().catch(()=>{}); }

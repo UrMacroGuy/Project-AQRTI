@@ -21,34 +21,28 @@ from typing import Optional
 # Variants are checked as case-insensitive substrings in headlines.
 # ══════════════════════════════════════════════════════════════
 ENTITY_MAP: dict[str, tuple[str, list[str]]] = {
-    "RELIANCE":   ("Energy",    ["Reliance", "Reliance Industries", "RIL", "Jio"]),
-    "TCS":        ("IT",        ["TCS", "Tata Consultancy", "Tata Consultancy Services"]),
-    "INFY":       ("IT",        ["Infosys", "INFY"]),
+    # Curated 9-symbol NSE universe (see docs/RESEARCH_DRIVEN_REARCHITECTURE.md
+    # §1) — previously this map was entirely from the old ~950-symbol era
+    # with zero entries for BEL/NTPC/CDSL/DRREDDY/LT/HAL, so news about
+    # those companies never got symbol-tagged and their research synthesis
+    # stayed permanently empty (no NewsEvent rows to cite). HDFCBANK/
+    # ICICIBANK/INFY are kept since they overlap with both eras.
+    "BEL":        ("Defence",   ["Bharat Electronics", "BEL", "Bharat Electronics Ltd"]),
     "HDFCBANK":   ("Banking",   ["HDFC Bank", "HDFCBank"]),
+    "NTPC":       ("Power",     ["NTPC", "NTPC Ltd", "National Thermal Power"]),
     "ICICIBANK":  ("Banking",   ["ICICI Bank", "ICICIBank", "ICICI"]),
-    "WIPRO":      ("IT",        ["Wipro"]),
-    "AXISBANK":   ("Banking",   ["Axis Bank", "AxisBank"]),
-    "LTM":        ("IT",        ["LTM", "LTM Limited", "LTIMindtree", "LTI Mindtree", "LTIM"]),
-    "NESTLEIND":  ("FMCG",      ["Nestle India", "Nestlé", "Nestle"]),
-    "BAJFINANCE": ("NBFC",      ["Bajaj Finance", "BajFinance"]),
-    "MARUTI":     ("Auto",      ["Maruti", "Maruti Suzuki", "MSIL"]),
-    "SUNPHARMA":  ("Pharma",    ["Sun Pharma", "Sun Pharmaceutical", "SUNPHARMA"]),
-    "TATASTEEL":  ("Metal",     ["Tata Steel", "TataSteel"]),
-    "TMPV":       ("Auto",      ["TMPV", "Tata Motors", "TataMotors", "Tata Motors Passenger Vehicles"]),
-    "KOTAKBANK":  ("Banking",   ["Kotak", "Kotak Mahindra", "Kotak Bank"]),
-    "TITAN":      ("Consumer",  ["Titan"]),
-    "ONGC":       ("Energy",    ["ONGC", "Oil and Natural Gas", "Oil & Natural Gas"]),
-    "HINDALCO":   ("Metal",     ["Hindalco"]),
-    "SBIN":       ("Banking",   ["SBI", "State Bank", "State Bank of India"]),
-    "BHARTIARTL": ("Telecom",   ["Bharti Airtel", "Airtel", "Bharti"]),
+    "INFY":       ("IT",        ["Infosys", "INFY"]),
+    "CDSL":       ("Financial Services", ["CDSL", "Central Depository Services"]),
+    "DRREDDY":    ("Pharma",    ["Dr Reddy", "Dr. Reddy", "Dr Reddy's", "Dr. Reddy's", "Dr Reddys", "Dr Reddys Laboratories"]),
+    "LT":         ("Infra",     ["L&T", "Larsen", "Larsen & Toubro", "Larsen and Toubro"]),
+    "HAL":        ("Defence",   ["Hindustan Aeronautics", "HAL", "Hindustan Aeronautics Ltd"]),
     # Sector-level entities (mapped to a pseudo-symbol for aggregation)
     "__IT__":     ("IT",        ["IT sector", "tech sector", "information technology sector"]),
     "__BANKING__":("Banking",   ["banking sector", "bank stocks", "PSU banks", "private banks"]),
     "__PHARMA__": ("Pharma",    ["pharma sector", "pharmaceutical sector"]),
-    "__AUTO__":   ("Auto",      ["auto sector", "automobile sector", "EV sector"]),
-    "__FMCG__":   ("FMCG",      ["FMCG sector", "consumer staples"]),
-    "__METAL__":  ("Metal",     ["metal sector", "steel sector"]),
-    "__ENERGY__": ("Energy",    ["energy sector", "oil sector", "upstream oil"]),
+    "__DEFENCE__":("Defence",   ["defence sector", "defense sector", "defence stocks"]),
+    "__POWER__":  ("Power",     ["power sector", "power stocks", "energy sector"]),
+    "__INFRA__":  ("Infra",     ["infra sector", "infrastructure sector", "capital goods"]),
 }
 
 # Pre-compile variant→symbol lookup for O(1) matching

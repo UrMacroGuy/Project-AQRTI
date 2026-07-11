@@ -31,9 +31,9 @@ Verified: `research_synthesis` table has rows only for HDFCBANK (2), ICICIBANK (
 1. Backend: hit each Go/No-Go endpoint (`Api.goNogo()`, `goNogoUptimeLog()`, morning-briefing, monthly-review) with the backend running and check for 500s — post-prune, queries touching truncated tables (old strategies/predictions) are the likely breakage.
 2. Frontend: apply the established GO-9 pattern — every panel must resolve to exactly one of: data / "Backend offline" / honest empty state ("no promoted algos yet"). No panel may remain on "Loading…" after hydration completes.
 
-## 5. Mojibake (`â€"`, `Â·`, `âœ…`, `âŸ³`) — confirmed in MULTIPLE files
+## 5. Mojibake (`â€"`, `·`, `✅`, `⟳`) — confirmed in MULTIPLE files
 
-Verified: `ui/index.html` contains 290 double-encoded sequences AND `ui/core.js` is also affected (e.g. `âœ…` where ✅ belongs, `â€"` in offline messages). The corruption is baked into file bytes (UTF-8 read as CP-1252, re-saved as UTF-8) — the `<meta charset>` is fine, `cockpit.js` is clean. Fix: run an encoding repair across ALL `ui/` files (reverse the double-encoding: bytes → decode UTF-8 → encode CP-1252 → decode UTF-8, applied only to files that contain the marker sequences), then verify `grep -rc "â€" ui/` returns zero. Add that grep to the pre-commit verification list so it can't return silently.
+Verified: `ui/index.html` contains 290 double-encoded sequences AND `ui/core.js` is also affected (e.g. `✅` where ✅ belongs, `â€"` in offline messages). The corruption is baked into file bytes (UTF-8 read as CP-1252, re-saved as UTF-8) — the `<meta charset>` is fine, `cockpit.js` is clean. Fix: run an encoding repair across ALL `ui/` files (reverse the double-encoding: bytes → decode UTF-8 → encode CP-1252 → decode UTF-8, applied only to files that contain the marker sequences), then verify `grep -rc "â€" ui/` returns zero. Add that grep to the pre-commit verification list so it can't return silently.
 
 ## 6. Already fixed — do not re-open
 

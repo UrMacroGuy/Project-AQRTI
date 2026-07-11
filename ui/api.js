@@ -18,7 +18,7 @@ const MARKOV_API_CONFIG = {
 };
 
 
-// â”€â”€ Local Data Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Local Data Cache ─────────────────────────────────────────
 // Stores last-known API responses so panels show stale data when backend is offline
 const _cache = {
   PREFIX: 'aqrti_cache_',
@@ -41,7 +41,7 @@ const _cache = {
   },
 };
 
-// â”€â”€ Fetch Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Fetch Helper ──────────────────────────────────────────────
 async function apiFetch(endpoint, params = {}) {
   const url = new URL(`${API_CONFIG.BASE}${endpoint}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -89,7 +89,7 @@ async function apiPost(endpoint, body = {}) {
   }
 }
 
-// â”€â”€ Markov backend (separate process/port) fetch helpers â”€â”€â”€â”€â”€â”€
+// ── Markov backend (separate process/port) fetch helpers ──────
 // Deliberately not sharing _cache/apiFetch's localStorage keys with the main
 // backend — a stale Markov response should never be mistaken for main-backend
 // data or vice versa.
@@ -138,7 +138,7 @@ async function apiPostRaw(url, body = {}) {
 }
 
 
-// â”€â”€ API object (used by most of app.js) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── API object (used by most of app.js) ──────────────────────
 const Api = {
 
   async overview()                      { return apiFetch('/overview'); },
@@ -295,7 +295,7 @@ const Api = {
   },
   async stressTestPresets()              { return apiFetch('/stress-test/presets'); },
 
-  // â”€â”€ Historical Backtest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Historical Backtest ────────────────────────────────────────
   async runBacktest(strategyId = null, years = 2) {
     const params = years !== 2 ? `?years=${years}` : '';
     const path   = strategyId
@@ -310,7 +310,7 @@ const Api = {
     return apiFetch(path);
   },
 
-  // â”€â”€ Arena â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Arena ──────────────────────────────────────────────────────
   async arenaStatus()          { return apiFetch('/arena'); },
   async arenaChampions()       { return apiFetch('/arena/champions'); },
   async arenaRuns(limit = 100, status = 'all') {
@@ -355,13 +355,13 @@ const Api = {
   async systemHealth()                { return apiFetch('/system-health'); },
   async systemRestartLog()            { return apiFetch('/system/restart-log'); },
 
-  // â”€â”€ Go/No-Go Scorecard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Go/No-Go Scorecard ────────────────────────────────────────
   async goNogo()          { return apiFetch('/go-nogo'); },
   async goNogoUptimeLog() { return apiFetch('/go-nogo/uptime-log'); },
   async goNogoRiskRails()     { return apiFetch('/go-nogo/risk-rails'); },
   async goNogoMonthlyReview() { return apiFetch('/go-nogo/monthly-review'); },
 
-  // â”€â”€ GO-7: Morning Decision Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── GO-7: Morning Decision Screen ─────────────────────────────
   async morningDecision() { return apiFetch('/morning/decision'); },
   async morningAct(strategyId, symbol, action, note) {
     return apiPost('/morning/act', { strategy_id: strategyId, symbol, action, note });
@@ -380,8 +380,8 @@ const Api = {
   },
 };
 
-// â”€â”€ Legacy uppercase API shim (used in intelligence-lab + replay) â”€â”€
-// Maps API.get(url) / API.post(url, body) â†’ apiFetch / apiPost
+// ── Legacy uppercase API shim (used in intelligence-lab + replay) ──
+// Maps API.get(url) / API.post(url, body) → apiFetch / apiPost
 const API = {
   async get(url) {
     // strip base prefix if present, else use raw path after /api/v1
@@ -397,7 +397,7 @@ const API = {
 };
 
 
-// â”€â”€ Connection Status Banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Connection Status Banner ──────────────────────────────────
 async function initConnectionBanner() {
   const alive = await Api.checkBackend();
   const sysLabel = document.getElementById('sys-status-label');

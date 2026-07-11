@@ -1,6 +1,6 @@
 ﻿// ui/pages/agents.js - split from app.js (ARCH-5), see CHANGELOG
 // RESEARCH OPERATIONS CENTER — Phase 7
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 
 async function hydrateResearchOps() {
   const el = id => document.getElementById(id);
@@ -15,7 +15,7 @@ async function hydrateResearchOps() {
     setDataPoint('roc-kpi-agent-status', 'BACKEND OFFLINE', 'agents');
   }
 
-  // â”€â”€ KPIs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── KPIs ──────────────────────────────────────────────────────
   const agents = agentData?.agents || [];
   const errored = agents.filter(a => a.status === 'error').length;
   setDataPoint('roc-kpi-agents', agents.length, 'agents');
@@ -26,7 +26,7 @@ async function hydrateResearchOps() {
   setDataPoint('roc-kpi-brief-date', briefData?.brief_date || '—', 'agents');
   setDataPoint('roc-kpi-messages', (msgData?.messages || []).length, 'agents');
 
-  // â”€â”€ Daily Brief â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Daily Brief ───────────────────────────────────────────────
   const briefBody = el('roc-brief-body');
   if (briefBody && briefData) {
     const tag = el('roc-brief-date-tag');
@@ -36,7 +36,7 @@ async function hydrateResearchOps() {
       if (briefCreated) {
         const ageMs  = Date.now() - new Date(briefCreated).getTime();
         const ageH   = ageMs / 3600000;
-        if (ageH > 4) staleLabel = ` âš  ${ageH >= 24 ? Math.floor(ageH/24) + 'd' : Math.round(ageH) + 'h'} ago`;
+        if (ageH > 4) staleLabel = ` ⚠ ${ageH >= 24 ? Math.floor(ageH/24) + 'd' : Math.round(ageH) + 'h'} ago`;
       }
       tag.textContent = (briefData.brief_date || '—') + staleLabel;
       if (staleLabel) tag.style.color = 'var(--amber-dim, #fbbf24)';
@@ -69,7 +69,7 @@ async function hydrateResearchOps() {
     briefBody.innerHTML = '<div style="color:var(--text-muted)">No brief generated today. Click Generate.</div>';
   }
 
-  // â”€â”€ Agent Health Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Agent Health Table ────────────────────────────────────────
   const agentTableBody = el('roc-agent-table-body');
   if (agentTableBody) {
     const STATUS_COLORS = { idle: 'positive', running: 'accent', error: 'negative', disabled: '' };
@@ -87,7 +87,7 @@ async function hydrateResearchOps() {
     }).join('') || '<tr><td colspan="6" style="color:var(--text-muted);text-align:center">No agents registered</td></tr>';
   }
 
-  // â”€â”€ Research Findings Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Research Findings Table ───────────────────────────────────
   const findingsBody = el('roc-findings-body');
   if (findingsBody) {
     const allFindings = [...(findingsData?.critical || []), ...(findingsData?.high || [])];
@@ -102,7 +102,7 @@ async function hydrateResearchOps() {
     </tr>`).join('') || '<tr><td colspan="5" style="color:var(--text-muted);text-align:center">No findings today</td></tr>';
   }
 
-  // â”€â”€ Messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Messages ──────────────────────────────────────────────────
   const msgBody = el('roc-messages-body');
   if (msgBody) {
     const msgs = (msgData?.messages || []).slice(0, 10);
@@ -112,7 +112,7 @@ async function hydrateResearchOps() {
         <span style="color:${MTYPE_COLOR[m.message_type]||'#8b8b93'};font-size:0.65rem;font-family:var(--font-mono);white-space:nowrap;padding-top:1px">${(m.message_type||'').toUpperCase()}</span>
         <div style="flex:1;min-width:0">
           <div style="font-size:0.72rem;font-weight:500">${m.subject || '—'}</div>
-          <div style="font-size:0.68rem;color:var(--text-muted)">${m.from_agent} â†’ ${m.to_agent}</div>
+          <div style="font-size:0.68rem;color:var(--text-muted)">${m.from_agent} → ${m.to_agent}</div>
         </div>
       </div>
     `).join('') || '<div style="color:var(--text-muted)">No messages</div>';
@@ -161,8 +161,8 @@ async function hydrateResearchOps() {
       .filter(item => !item.includes('Critical Decay') && !item.includes('strategy_research:'))
       .slice(0, 6)
       .map(item => {
-        const isUrgent = item.includes('URGENT') || item.includes('ðŸ”´') || item.includes('[CRITICAL]');
-        const isWarn   = item.includes('ðŸŸ¡') || item.includes('REVIEW');
+        const isUrgent = item.includes('URGENT') || item.includes('🔴') || item.includes('[CRITICAL]');
+        const isWarn   = item.includes('🟡') || item.includes('REVIEW');
         return `<div style="padding:7px 10px;margin-bottom:5px;border-radius:4px;font-size:0.73rem;
           background:${isUrgent ? 'rgba(239,68,68,0.06)' : isWarn ? 'rgba(251,191,36,0.05)' : 'rgba(255,255,255,0.03)'};
           border:1px solid ${isUrgent ? 'rgba(239,68,68,0.18)' : isWarn ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.07)'}">
@@ -174,7 +174,7 @@ async function hydrateResearchOps() {
       '<div style="color:var(--positive);font-size:0.8rem;padding:8px">All clear — no action required</div>';
   }
 
-  // â”€â”€ Agent Performance Chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Agent Performance Chart ───────────────────────────────────
   if (perfData && perfData.length) {
     ChartRegistry.create('rocAgentPerfChart', {
       type: 'bar',
@@ -198,9 +198,9 @@ async function hydrateResearchOps() {
   }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // ACTION ITEMS — RETIRE STRATEGIES
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 
 async function retireSingleStrategy(strategyId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Retiring…'; }
@@ -235,9 +235,9 @@ async function retireAllDecayedStrategies() {
   if (retireAllBtn) { retireAllBtn.disabled = false; retireAllBtn.textContent = 'Retire All Bad'; retireAllBtn.style.display = 'none'; }
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 // LIVE MARKET NEWS FEED — auto-refreshes every 5 min
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ═══════════════════════════════════════════════════════════════
 
 let _newsRefreshTimer = null;
 

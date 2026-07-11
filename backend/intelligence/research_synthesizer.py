@@ -441,6 +441,15 @@ def synthesize_all(
 
 
 if __name__ == "__main__":
+    # backend/.env is only auto-loaded by main.py/app.py's load_dotenv() call
+    # (see docs/RESEARCH_DRIVEN_REARCHITECTURE.md's ".env loading" pitfall
+    # note) — running this module standalone otherwise silently falls back
+    # to AQRTI_LLM_PROVIDER's default (openrouter, usually unconfigured)
+    # instead of the .env-configured provider.
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
     _db = get_session_factory()()
     try:
         print(synthesize_all(_db))

@@ -1,4 +1,12 @@
-﻿## [2026-07-11e] — Markov Regime + Go/No-Go pages restyled per docs/UI_SPEC.md; gonogo "stuck on Loading…" bug fixed
+﻿## [2026-07-11f] — Strategy lab: full R&D cycle on real DB data — candidate FAILED OOS honestly; docs/STRATEGY_LAB.md written; repo pushed to GitHub (with .env untracked); gstack fixed
+
+**Strategy R&D (docs/STRATEGY_LAB.md, harness pinned at backend/scripts/strategy_lab/):** literature research (NSE momentum/pullback evidence via web) → 5 candidate rule-sets screened on train (≤2024-12-31) only → pre-registered finalist (RSI3<15 pullback in uptrend, 74.5% WR / +1.41% avg on train, parameter-grid robust) → **single OOS shot 2025-26: FAILED** (61.7% WR but -0.71%/trade, PF 0.69, -20% worst — loss tail exploded in the 2025-26 regime; WR floor alone proved insufficient, expectancy died while WR stayed "good"). One principled post-OOS revision (NIFTY-regime filter + fast 5DMA exit, labeled contaminated): full-period PF 1.60 but the entire edge is 2024; 2025-26 nets -0.09%/trade. **Verdict: not tradeable today — published as a validated negative per the quant bar, not tweaked until it passed.** Transferable findings: hard stops degrade this family on NSE (confirmed, matches published US results); momentum (43.8% WR, +3.6%/trade) is the strongest raw edge but structurally fails the 50%-WR floor — flagged for a user decision on low-WR/high-payoff families. Costs 0.28%, next-open fills, no look-ahead throughout.
+
+**GitHub push (a0f78eb):** committed the full re-architecture (136 files) and pushed to UrMacroGuy/Project-AQRTI (main). **SECURITY: the repo is PUBLIC and backend/.env with real API keys was committed in f0ab958 — keys are exposed; untracked .env from git in this commit, added .env.example, gitignored runtime locks/briefs. USER MUST ROTATE: OpenRouter, NVIDIA NIM, Finnhub keys.** README rewritten for the new architecture (concurrent session's version kept, public-repo wording + .env.example step added); GitHub repo description updated via API.
+
+**gstack fixed (machine-level, not repo):** three stacked causes — (1) a zombie `browse.exe` (PID 26980, running since ~Jun 27) held a stale server so every CLI call timed out ("Server failed to start within 15s"); (2) bun was not installed (gstack's build/runtime — installed 1.3.14 to ~/.bun/bin, on user PATH); (3) gstack was 5 minor versions stale — upgraded 1.55.0→1.60.1 via git + ./setup, rebuilt browse dist (first rebuild hit EPERM from the zombie exe lock; killed processes, rebuilt clean). Verified end-to-end: goto https://example.com (200), text extraction, screenshot to allowed path.
+
+## [2026-07-11e] — Markov Regime + Go/No-Go pages restyled per docs/UI_SPEC.md; gonogo "stuck on Loading…" bug fixed
 
 **Scope:** UI-only (no backend files touched). Implemented `docs/UI_SPEC.md` §1–§3 for the two remaining unstyled pages, plus the FIX.md §4 frontend fix.
 
@@ -8,7 +16,7 @@
 
 **Shared components added to `ui/style.css`:** `.btn`/`.btn-secondary`/`.btn-primary`, `.card`/`.card-title`/`.card-grid-2`, `.section-header`, `.table-container`, `.info-strip`, `.pill`/`.pill-pass`/`.pill-fail`/`.pill-pending`, `.loading-text`/`.offline-text`/`.empty-text`. These classes were referenced throughout `index.html` (`class="btn"`, `class="section-header"`, etc.) but had **no CSS definitions at all** — confirmed via grep before writing — meaning the Go/No-Go and Markov pages really were rendering literal browser-default buttons/tables as UI_SPEC described; every other page uses `.data-table`/`.panel` which already existed. All new classes reuse existing `:root` tokens (`--positive`/`--negative`/`--warning`/`--accent`/`--border-*`/`--bg-*`), no new colors introduced.
 
-**Mojibake:** `grep -c "â€"` was already 0 in `core.js`/`index.html`/`markov.js`/`style.css` (the FIX.md §5 double-encoding pattern was fully repaired in `2026-07-11d`). Found and fixed 3 separate leftover corrupted glyphs in the nav-icon array (`core.js` ~line 310-317: `â—ˆ`→`◈` ×2, `âš”`→`⚔`, `âœ…`→`✅`) while rewriting the Go/No-Go nav entry — same root cause, different character class than the `â€` sweep, so it wasn't caught by the earlier grep.
+**Mojibake:** `grep -c "â€"` was already 0 in `core.js`/`index.html`/`markov.js`/`style.css` (the FIX.md §5 double-encoding pattern was fully repaired in `2026-07-11d`). Found and fixed 3 separate leftover corrupted glyphs in the nav-icon array (`core.js` ~line 310-317: `◈`→`◈` ×2, `⚔`→`⚔`, `✅`→`✅`) while rewriting the Go/No-Go nav entry — same root cause, different character class than the `â€` sweep, so it wasn't caught by the earlier grep.
 
 **Verified:** `node --check` passes on `core.js` and `pages/markov.js`; `grep -c "â€"` = 0 on all 4 touched files; every id referenced by `getElementById`/`el()` in the gonogo/morning/markov code paths (16 total) exists in `index.html` and vice versa; all 5 gonogo hydration functions confirmed via script to contain both a try/catch and an offline/empty-state branch. Not run against a live backend (out of scope per task — UI-only, no dev server started); a live check of the actual API response shapes for `/gonogo` and `/morning-decision` against these new render functions is still recommended before considering this fully closed.
 
@@ -16,7 +24,7 @@
 
 **Scope:** executed a final pass over the re-architecture plan; confirmed every section (§1–§8) already implemented across sessions `2026-07-11a/b/c` — verified live: 52/52 tests passing, `stocks` = the 9 curated symbols, `research_synthesis` accumulating (4 rows), `strategies_v2` repopulating from the 6 templates (596 rows).
 
-**One regression found:** the §7.0 mojibake verification (`grep -rc "â€" ui/` must be zero) failed — 159 double-encoded sequences (`â€”`, `Â·`, etc.) present in `ui/api.js` (8), `ui/core.js` (87), `ui/style.css` (45), `ui/pages/agents.js` (19). The `2026-07-11b` repair covered `index.html` only; these four files carried the same UTF-8→CP-1252 round-trip corruption. Repaired via line-by-line `encode('cp1252').decode('utf-8')` reversal (line-by-line because the files mix clean UTF-8 with mojibake). **Verified:** `grep "â€|Â·"` across `ui/` now returns zero matches; `node --check` passes on all three repaired JS files. Side effect: the repair normalized those 4 files' line endings CRLF→LF (git will re-normalize on next touch; content diff beyond mojibake is nil).
+**One regression found:** the §7.0 mojibake verification (`grep -rc "â€" ui/` must be zero) failed — 159 double-encoded sequences (`—`, `·`, etc.) present in `ui/api.js` (8), `ui/core.js` (87), `ui/style.css` (45), `ui/pages/agents.js` (19). The `2026-07-11b` repair covered `index.html` only; these four files carried the same UTF-8→CP-1252 round-trip corruption. Repaired via line-by-line `encode('cp1252').decode('utf-8')` reversal (line-by-line because the files mix clean UTF-8 with mojibake). **Verified:** `grep "â€|·"` across `ui/` now returns zero matches; `node --check` passes on all three repaired JS files. Side effect: the repair normalized those 4 files' line endings CRLF→LF (git will re-normalize on next touch; content diff beyond mojibake is nil).
 
 **Still-pending items (unchanged, tracked in `docs/RESEARCH_DRIVEN_REARCHITECTURE.md`):** VOO/QQQ price feed (monitor-only, labeled "PRICE FEED PENDING"); periodic re-run of `walk_forward_templates.py` as research history accumulates (0/6 pass is the current honest baseline).
 
@@ -2834,7 +2842,8 @@ Verified live on DB: 12 findings, 5 actionable recommendations including critica
 ## [2026-06-24] — Bloomberg v2 Upgrade Session
 
 ### Fixed
-- **Vault archive_strategies**: StrategyV2 has no acktest_json/egime_fit_json — now builds JSON from metric columns
+- **Vault archive_strategies**: StrategyV2 has no acktest_json/
+egime_fit_json — now builds JSON from metric columns
 - **Learning loop PatternMatch**: PatternMatch.date → search_date/computed_at (field renamed in model)
 - **Learning loop step isolation**: each of 8 steps now catches its own exception; loop completes even if one step fails
 - **Strategy population stats**: added promoted, max_generation, graveyard_count to API response (both strategy_store and strategy_registry)
@@ -2855,7 +2864,7 @@ Verified live on DB: 12 findings, 5 actionable recommendations including critica
 # AQRTI Changelog
 
 > **Purpose:** Every Claude session records what was added, changed, or removed here.
-> A new session should **read this file first** to catch up instantly â€” no need to scan the whole codebase.
+> A new session should **read this file first** to catch up instantly — no need to scan the whole codebase.
 >
 > Format per entry:
 > - **Session date** + brief title
@@ -2864,78 +2873,78 @@ Verified live on DB: 12 findings, 5 actionable recommendations including critica
 
 ---
 
-## 2026-06-24 â€” Agent Pipeline Overhaul: All 7 Agents Rewritten for Real Data
+## 2026-06-24 — Agent Pipeline Overhaul: All 7 Agents Rewritten for Real Data
 
 ### Files Changed
-- `backend/agents/market_research_agent.py` â€” full rewrite
-- `backend/agents/news_research_agent.py` â€” full rewrite
-- `backend/agents/model_research_agent.py` â€” full rewrite
-- `backend/agents/risk_research_agent.py` â€” full rewrite
-- `backend/agents/strategy_research_agent.py` â€” full rewrite
-- `backend/agents/pattern_research_agent.py` â€” full rewrite
-- `backend/agents/cro_agent.py` â€” minor fix (subcategory None guard)
+- `backend/agents/market_research_agent.py` — full rewrite
+- `backend/agents/news_research_agent.py` — full rewrite
+- `backend/agents/model_research_agent.py` — full rewrite
+- `backend/agents/risk_research_agent.py` — full rewrite
+- `backend/agents/strategy_research_agent.py` — full rewrite
+- `backend/agents/pattern_research_agent.py` — full rewrite
+- `backend/agents/cro_agent.py` — minor fix (subcategory None guard)
 
 ### What Changed Per Agent
 
 **Market Research Agent**
-- Was: only queried MarketRegime + SentimentRecord (both often empty) â†’ 0 findings on fresh install
+- Was: only queried MarketRegime + SentimentRecord (both often empty) → 0 findings on fresh install
 - Now: queries `index_data` (NIFTY50 1d/20d returns, annualised vol), `daily_prices` (5-day breadth across 20 stocks, sector rotation by avg 5d return). All 5 analyses produce real computed numbers, not placeholders.
 
 **News Research Agent**
-- Was: queried NewsEvent + SentimentRecord (both empty) â†’ 0 findings always
-- Now: falls back to price-based news proxies from `daily_prices` â€” large single-day moves (â‰¥3%), volume spikes (â‰¥2.5x 20d avg), gap opens (â‰¥2.5%), 52-week highs/lows. DB-based news analysis still runs if `news_events` is populated.
+- Was: queried NewsEvent + SentimentRecord (both empty) → 0 findings always
+- Now: falls back to price-based news proxies from `daily_prices` — large single-day moves (≥3%), volume spikes (≥2.5x 20d avg), gap opens (≥2.5%), 52-week highs/lows. DB-based news analysis still runs if `news_events` is populated.
 
 **Model Research Agent**
-- Was: queried ModelDriftHistory, FeatureDecayHistory, KnowledgeScore (all likely empty) â†’ meaningless findings
+- Was: queried ModelDriftHistory, FeatureDecayHistory, KnowledgeScore (all likely empty) → meaningless findings
 - Now: queries `model_versions` (active count, staleness, best accuracy), `predictions` (volume, confidence distribution, direction bias, win rate from `success` field), `performance_snapshots` (win_rate_pct). Falls back gracefully when empty.
 
 **Risk Research Agent**
-- Was: queried PerformanceSnapshot, PaperTrade, EquityCurvePoint (all empty on fresh install) â†’ 0 findings
-- Now: supplements with market-level risk from `daily_prices` â€” parametric 95% 1-day VaR from 20-stock return distribution, annualised volatility, worst single-day loss. NIFTY negative session count. Portfolio analysis runs when trades exist.
+- Was: queried PerformanceSnapshot, PaperTrade, EquityCurvePoint (all empty on fresh install) → 0 findings
+- Now: supplements with market-level risk from `daily_prices` — parametric 95% 1-day VaR from 20-stock return distribution, annualised volatility, worst single-day loss. NIFTY negative session count. Portfolio analysis runs when trades exist.
 
 **Strategy Research Agent**
-- Was: returned "critical" urgency when strategy population empty â†’ alarming for fresh installs
+- Was: returned "critical" urgency when strategy population empty → alarming for fresh installs
 - Now: "normal" urgency for empty population (expected state). Added prediction-based signal analysis: persistent symbol+direction combos from `predictions`, bullish win rate. Regime mismatch and resurrection candidates still run when data exists.
 
 **Pattern Research Agent**
-- Was: queried PatternOutcome + PatternMatch (both empty) â†’ 0 findings
-- Now: computes RSI(14) from closes (overbought â‰¥75, oversold â‰¤25), EMA20/EMA50 crossovers, 10-day volume accumulation/distribution ratio, NIFTY-vs-breadth divergence. All computed live from `daily_prices`.
+- Was: queried PatternOutcome + PatternMatch (both empty) → 0 findings
+- Now: computes RSI(14) from closes (overbought ≥75, oversold ≤25), EMA20/EMA50 crossovers, 10-day volume accumulation/distribution ratio, NIFTY-vs-breadth divergence. All computed live from `daily_prices`.
 
 **CRO Agent**
-- Fixed: `f.subcategory.lower()` crash when `subcategory` is None â€” now guards with `if f.subcategory` before calling `.lower()`
+- Fixed: `f.subcategory.lower()` crash when `subcategory` is None — now guards with `if f.subcategory` before calling `.lower()`
 - Added: "No reports yet" message in market summary when pipeline hasn't run
 
 ### Verified
 - All 7 agents import cleanly: `7/7 OK` (tested with `backend/.venv/Scripts/python.exe`)
-- No placeholder/hardcoded mock values in any agent â€” all numbers computed from DB
+- No placeholder/hardcoded mock values in any agent — all numbers computed from DB
 - All agents handle empty tables gracefully (try/except + low-urgency fallback finding)
 
 ---
 
-## 2026-06-24 â€” Blank Page Fixes: Sentiment, Model Center, Opportunities, Data Intelligence
+## 2026-06-24 — Blank Page Fixes: Sentiment, Model Center, Opportunities, Data Intelligence
 
 ### Files Changed
-- `ui/app.js` â€” Fixed 5 bugs across 3 hydrator functions + DI action buttons
-- `ui/index.html` â€” DI action buttons now pass `this` for loading state
+- `ui/app.js` — Fixed 5 bugs across 3 hydrator functions + DI action buttons
+- `ui/index.html` — DI action buttons now pass `this` for loading state
 
 ### Bug Fixes
 
-**`hydrateSentiment()` â€” blank when DB has no sentiment data:**
-- Was: KPI cards only populated when `companies.length > 0`. Empty DB = all KPIs stay `â€”`, charts show nothing
+**`hydrateSentiment()` — blank when DB has no sentiment data:**
+- Was: KPI cards only populated when `companies.length > 0`. Empty DB = all KPIs stay `—`, charts show nothing
 - Fix: Now reads `data.market.label/score/fearGreed` directly from API response first; falls back to company-derived values only if market object missing
 - Fix: Added empty-state message (`No sentiment data in database`) to company chart, velocity table, and sector chart containers when arrays are empty (instead of silently leaving mock HTML)
 
-**`hydrateModelCenter()` â€” crash when model task field is null:**
+**`hydrateModelCenter()` — crash when model task field is null:**
 - Was: `m.task.slice(0,3)` throws TypeError if task is null
 - Fix: `(m.task || 'unk').slice(0,3)` and `m.task || 'model'` in table row
 
-**`hydrateOpportunities()` â€” null horizon rendered as literal "null":**
-- Was: `${best.horizon || '10d'}` â€” but `p.horizon` is `null` from DB, `|| '10d'` fallback wasn't used in all places
+**`hydrateOpportunities()` — null horizon rendered as literal "null":**
+- Was: `${best.horizon || '10d'}` — but `p.horizon` is `null` from DB, `|| '10d'` fallback wasn't used in all places
 - Fix: Best symbol KPI now conditionally appends horizon only if non-null
 
-**Data Intelligence action buttons â€” no visual feedback:**
-- Was: buttons had no disabled/loading state during async fetch â†’ appeared broken
-- Fix: `_withBtnLoading(btn, fn)` helper added; all 6 DI buttons (Run Pipeline, Scrape Corp Filings, Scrape FII/DII, Compute Breadth, Compute Sectors, Run Quality Checks) now show "Runningâ€¦" + disabled state while POST is in flight
+**Data Intelligence action buttons — no visual feedback:**
+- Was: buttons had no disabled/loading state during async fetch → appeared broken
+- Fix: `_withBtnLoading(btn, fn)` helper added; all 6 DI buttons (Run Pipeline, Scrape Corp Filings, Scrape FII/DII, Compute Breadth, Compute Sectors, Run Quality Checks) now show "Running…" + disabled state while POST is in flight
 
 ### What's Still Blank (Data Issue, Not Code)
 - News Intelligence: `news_events` table has 0 rows. Shows "No news articles in database" message. To populate: run ingestion from Research Ops page.
@@ -2943,52 +2952,52 @@ Verified live on DB: 12 findings, 5 actionable recommendations including critica
 
 ---
 
-## 2026-06-24 â€” Bloomberg Terminal Redesign + Bug Fixes
+## 2026-06-24 — Bloomberg Terminal Redesign + Bug Fixes
 
 ### Files Changed
-- `ui/style.css` â€” Full Bloomberg-inspired redesign
-- `ui/index.html` â€” Topbar, news strip, command palette overlay
-- `ui/app.js` â€” News strip hydration, command palette, chart colors, VIX/USDINR live tickers
-- `backend/aqrti/api/routes/market.py` â€” Added HTTPException import, India VIX to live map, improved yfinance fallback
+- `ui/style.css` — Full Bloomberg-inspired redesign
+- `ui/index.html` — Topbar, news strip, command palette overlay
+- `ui/app.js` — News strip hydration, command palette, chart colors, VIX/USDINR live tickers
+- `backend/aqrti/api/routes/market.py` — Added HTTPException import, India VIX to live map, improved yfinance fallback
 
 ### Design Changes (Bloomberg-Inspired)
-- **Color system:** Pure black (`#000`) background, amber (`#ff8c00`) as primary accent â€” replaces dark navy + teal
+- **Color system:** Pure black (`#000`) background, amber (`#ff8c00`) as primary accent — replaces dark navy + teal
 - **Typography:** Full monospace everywhere (JetBrains Mono), tighter font sizes (13px base vs 14px)
-- **Spacing:** Reduced all padding/gaps by ~25% â€” more information per screen
-- **KPI cards:** No border-radius (2px), no hover lift â€” flat Bloomberg terminal style
+- **Spacing:** Reduced all padding/gaps by ~25% — more information per screen
+- **KPI cards:** No border-radius (2px), no hover lift — flat Bloomberg terminal style
 - **Panel headers:** Amber uppercase labels instead of white mixed-weight
 - **Sidebar:** Compact 210px, amber active state with left border, reduced nav-item height
 - **Topbar:** Black background, amber breadcrumb in uppercase, tighter tickers
 - **Scrollbars:** 3px, amber on hover
 
 ### New Features
-- **Bloomberg amber news ticker strip:** 26px amber bar below topbar â€” scrolls live headlines continuously; hydrated from `/news` API; pauses on hover
-- **Command Palette (Ctrl+K / Cmd+K):** Bloomberg-style "GO" function â€” type to filter all 15 pages, arrow keys + Enter to navigate; amber overlay
-- **VIX live price:** Added `^INDIAVIX` to `/market/live` backend map â€” now shows in topbar VIX ticker
+- **Bloomberg amber news ticker strip:** 26px amber bar below topbar — scrolls live headlines continuously; hydrated from `/news` API; pauses on hover
+- **Command Palette (Ctrl+K / Cmd+K):** Bloomberg-style "GO" function — type to filter all 15 pages, arrow keys + Enter to navigate; amber overlay
+- **VIX live price:** Added `^INDIAVIX` to `/market/live` backend map — now shows in topbar VIX ticker
 - **USDINR/VIX topbar:** `hydrateTopbarLive()` now populates all 4 topbar tickers (NIFTY, BANKNIFTY, VIX, USDINR) from real-time `/live` endpoint
 
 ### Bug Fixes
 - `market.py`: Missing `HTTPException` import added (would crash `/live` on yfinance ImportError)
 - `app.js`: Breadcrumb now uppercase (Bloomberg style)
 - `app.js`: Chart.js global tooltip colors updated to black/amber
-- All chart colors: teal (`#00d4aa`) â†’ amber (`#ff8c00`), indigo â†’ blue (`#00aaff`)
+- All chart colors: teal (`#00d4aa`) → amber (`#ff8c00`), indigo → blue (`#00aaff`)
 
 ---
 
-## 2026-06-24 â€” Git Agent: Auto Commit + Push on File Changes
+## 2026-06-24 — Git Agent: Auto Commit + Push on File Changes
 
 ### Files Added
-- `scripts/git_agent.py` â€” Python watcher daemon
-- `scripts/start_git_agent.bat` â€” double-click launcher
-- `scripts/register_startup.bat` â€” registers agent to run at Windows login via Task Scheduler
-- `scripts/unregister_startup.bat` â€” removes startup registration
+- `scripts/git_agent.py` — Python watcher daemon
+- `scripts/start_git_agent.bat` — double-click launcher
+- `scripts/register_startup.bat` — registers agent to run at Windows login via Task Scheduler
+- `scripts/unregister_startup.bat` — removes startup registration
 
 ### How It Works
 1. Polls `git status --porcelain` every 30 seconds
 2. Ignores: `.db-wal`, `.db-shm`, `.log`, `.pyc`, `__pycache__` (noisy runtime files)
-3. Waits 120 seconds of no new changes (quiet period) before committing â€” batches a full coding session
+3. Waits 120 seconds of no new changes (quiet period) before committing — batches a full coding session
 4. Generates smart commit message: categorises files by folder (UI, API routes, ML, paper trading, etc.)
-5. `git add <specific files>` â†’ `git commit` â†’ `git push origin main`
+5. `git add <specific files>` → `git commit` → `git push origin main`
 6. On Ctrl+C: commits any pending changes before exiting
 
 ### Usage
@@ -3002,11 +3011,11 @@ Verified live on DB: 12 findings, 5 actionable recommendations including critica
 
 ---
 
-## 2026-06-24 â€” Live Data Bug Fix: All Pages Now Show Real Backend Data
+## 2026-06-24 — Live Data Bug Fix: All Pages Now Show Real Backend Data
 
 ### Problem
 Every KPI card, sub-label, and topbar ticker across all 14 pages showed hardcoded mock/placeholder values instead of live backend data. Root causes were:
-1. HTML elements had no `id` attributes â†’ JS hydrators' `el()` calls returned null
+1. HTML elements had no `id` attributes → JS hydrators' `el()` calls returned null
 2. Field name mismatches (backend camelCase vs JS snake_case)
 3. Hydrators never called on initial load (only on page navigation)
 4. `_liveHydrated` set prevented re-hydration if backend was offline on first visit
@@ -3020,14 +3029,14 @@ Every KPI card, sub-label, and topbar ticker across all 14 pages showed hardcode
 
 **Topbar:**
 - Added `id="nifty-value"`, `id="nifty-change"`, `id="banknifty-value"`, `id="banknifty-change"` to ticker spans
-- Added `id="vix-value"`, `id="vix-change"`, `id="usdinr-value"`, `id="usdinr-change"` (show `â€”` until backend provides data)
-- Fixed `id="regime-label"` â†’ `id="topbar-regime"` (JS referenced `topbar-regime`, HTML had wrong ID)
+- Added `id="vix-value"`, `id="vix-change"`, `id="usdinr-value"`, `id="usdinr-change"` (show `—` until backend provides data)
+- Fixed `id="regime-label"` → `id="topbar-regime"` (JS referenced `topbar-regime`, HTML had wrong ID)
 - Regime badge container kept as `id="regime-pill"`
 
 **Overview page (`page-overview`):**
-- `kpi-portfolio`: `â‚¹1,04,328` â†’ `â€”`
-- `kpi-daily-pnl`: `+â‚¹1,284` â†’ `â€”`; `kpi-daily-pct`: `+1.25%` â†’ `â€”`
-- Added `id="kpi-avg-conf"` to Active Predictions sub-label; default `Avg Conf: â€”`
+- `kpi-portfolio`: `₹1,04,328` → `—`
+- `kpi-daily-pnl`: `+₹1,284` → `—`; `kpi-daily-pct`: `+1.25%` → `—`
+- Added `id="kpi-avg-conf"` to Active Predictions sub-label; default `Avg Conf: —`
 - Added `id="kpi-deployed"` to Open Positions sub
 - Added `id="kpi-trades-30d"` to Win Rate sub
 - Added `id="kpi-knowledge-sub"` to Knowledge Score sub
@@ -3037,94 +3046,94 @@ Every KPI card, sub-label, and topbar ticker across all 14 pages showed hardcode
 - Added: `id="market-nifty-val"`, `id="market-nifty-chg"`, `id="market-banknifty-val"`, `id="market-banknifty-chg"`
 - Added: `id="market-breadth-val"`, `id="market-breadth-sub"`, `id="market-vix-val"`, `id="market-vix-sub"`
 - Added: `id="market-crude-val"`, `id="market-crude-sub"`, `id="market-bond-val"`, `id="market-bond-sub"`
-- All defaults changed from hardcoded numbers to `â€”`
+- All defaults changed from hardcoded numbers to `—`
 
 **News Intelligence page (`page-news`):**
 - 4 KPI cards had hardcoded values (`184`, `3`, `+0.48`, `67`) with no IDs
 - Added: `id="news-kpi-count"`, `id="news-kpi-high-impact"`, `id="news-kpi-avg-sentiment"`, `id="news-kpi-sentiment-sub"`, `id="news-kpi-entities"`
-- All defaults â†’ `â€”`
+- All defaults → `—`
 
 **Opportunity Rankings page (`page-opportunity`):**
-- 4 KPI cards had hardcoded values (`7`, `76.8%`, `+4.1%`, `Lowâ€“Med`) with no IDs
+- 4 KPI cards had hardcoded values (`7`, `76.8%`, `+4.1%`, `Low–Med`) with no IDs
 - Added: `id="opp-kpi-strong"`, `id="opp-kpi-avg-conf"`, `id="opp-kpi-best-return"`, `id="opp-kpi-best-symbol"`, `id="opp-kpi-risk"`
-- All defaults â†’ `â€”`
+- All defaults → `—`
 
 **Sentiment Center page (`page-sentiment`):**
 - 4 KPI cards had hardcoded values (`Optimistic`, `63`, `RELIANCE`, `WIPRO`) with no IDs
 - Added: `id="sent-kpi-market"`, `id="sent-kpi-market-sub"`, `id="sent-kpi-fear-greed"`, `id="sent-kpi-fear-greed-sub"`
 - Added: `id="sent-kpi-best"`, `id="sent-kpi-best-score"`, `id="sent-kpi-worst"`, `id="sent-kpi-worst-score"`
-- All defaults â†’ `â€”`
+- All defaults → `—`
 
 **Model Center page (`page-model`):**
 - All 6 KPI cards had hardcoded values (`61.8%`, `LightGBM`, `0.034`, `5`, `Today`, `312`) with no IDs
 - Added: `id="model-ensemble-acc"`, `id="model-ensemble-acc-sub"`, `id="model-best-name"`, `id="model-best-acc"`
 - Added: `id="model-calibration-ece"`, `id="model-active-count"`, `id="model-active-sub"`
 - Added: `id="model-last-retrain"`, `id="model-last-retrain-sub"`, `id="model-features-count"`, `id="model-features-sub"`
-- All defaults â†’ `â€”`
+- All defaults → `—`
 
 **Risk Center page (`page-risk`):**
 - All 6 KPI cards had no IDs
 - Added: `id="risk-exposure"`, `id="risk-var-daily"`, `id="risk-var-pct"`, `id="risk-max-dd"`, `id="risk-sharpe"`
 - Added: `id="risk-largest-pos"`, `id="risk-largest-weight"`, `id="circuit-breaker-status"`
-- All defaults â†’ `â€”`
+- All defaults → `—`
 
 **Research Ops page (`page-agents`):**
-- `roc-kpi-agents`: hardcoded `7` â†’ `â€”`
+- `roc-kpi-agents`: hardcoded `7` → `—`
 
 **Intelligence Lab page (`page-intelligence-lab`):**
-- `il-kpi-regimes`: hardcoded `10` â†’ `â€”`
+- `il-kpi-regimes`: hardcoded `10` → `—`
 
 ---
 
 #### `ui/app.js`
 
-**`hydrateMarket()` â€” full rewrite:**
+**`hydrateMarket()` — full rewrite:**
 - Now populates both topbar tickers AND market page KPI cards from the same API call
 - New IDs targeted: `market-nifty-val`, `market-nifty-chg`, `market-banknifty-val`, `market-banknifty-chg`
 - Calls `Api.marketBreadth()` separately to populate `market-breadth-val`, `market-breadth-sub`
 - Color class on change elements set correctly (`positive`/`negative`)
 
-**`hydrateMarketRegime()` â€” regime badge clobber fix:**
+**`hydrateMarketRegime()` — regime badge clobber fix:**
 - Removed `badge.textContent = data.regime` which destroyed inner `<span class="regime-dot">`
 - Now only sets `el('topbar-regime').textContent` and `pill.className`
 
-**`hydrateOverview()` â€” same regime badge fix + sub-labels:**
+**`hydrateOverview()` — same regime badge fix + sub-labels:**
 - Same `.textContent` clobber fix
 - Added `kpi-deployed`, `kpi-trades-30d` population from `ov.deployedCapital` / `ov.totalTrades30d`
 - `kpi-daily-pnl` and `kpi-daily-pct` now set with correct sign/color
 
-**`hydrateOverviewPredictions()` â€” same regime badge fix + avg conf prefix:**
+**`hydrateOverviewPredictions()` — same regime badge fix + avg conf prefix:**
 - `confEl.textContent = \`Avg Conf: ${summary.avgConfidence}%\`` (was missing "Avg Conf: " prefix)
 
-**`hydrateNews()` â€” KPI cards + field name fix:**
+**`hydrateNews()` — KPI cards + field name fix:**
 - Added population of: `news-kpi-count`, `news-kpi-high-impact`, `news-kpi-avg-sentiment`, `news-kpi-sentiment-sub`, `news-kpi-entities`
-- Fixed field name: `n.impact_score` â†’ `n.impact_score ?? n.impactScore ?? 0` (backend returns camelCase)
-- Fixed field name: `n.event_type` â†’ `n.event_type || n.eventType || 'General'`
+- Fixed field name: `n.impact_score` → `n.impact_score ?? n.impactScore ?? 0` (backend returns camelCase)
+- Fixed field name: `n.event_type` → `n.event_type || n.eventType || 'General'`
 - Added sentiment chart rebuild from live news timestamps
 
-**`hydrateSentiment()` â€” added KPI card hydration:**
-- Computes avg score from company list â†’ derives `Optimistic/Neutral/Pessimistic` label
+**`hydrateSentiment()` — added KPI card hydration:**
+- Computes avg score from company list → derives `Optimistic/Neutral/Pessimistic` label
 - Derives fear/greed score and zone label from avg
 - Sets strongest/weakest company from sorted company list
 
-**`hydrateOpportunities()` â€” added KPI card hydration:**
-- Counts strong signals (confidence â‰¥ 80), avg confidence, best expected return + symbol, dominant risk level
+**`hydrateOpportunities()` — added KPI card hydration:**
+- Counts strong signals (confidence ≥ 80), avg confidence, best expected return + symbol, dominant risk level
 
-**`hydrateModelCenter()` â€” full KPI card hydration:**
+**`hydrateModelCenter()` — full KPI card hydration:**
 - `model-ensemble-acc`: from `stats.bestAUC`
 - `model-active-count` / `model-active-sub`: from `stats.activeModels` / `stats.totalFolds`
 - `model-last-retrain` / `model-last-retrain-sub`: from `stats.lastTrainedAt` (formatted date + time)
 - `model-best-name` / `model-best-acc`: finds highest `primaryMetric` direction model from `models` list
 - `model-features-count`: max `featureCount` across all models
 
-**`hydrateRisk()` â€” largest position + VaR pct fix:**
+**`hydrateRisk()` — largest position + VaR pct fix:**
 - Added `risk-largest-pos` and `risk-largest-weight` population
 - Positions sorted by numeric weight descending (weight is string like `"3.5%"`, parsed correctly)
-- `risk-var-pct` sub-label now shows `âˆ’X.XX% of Capital`
+- `risk-var-pct` sub-label now shows `−X.XX% of Capital`
 - `circuit-breaker-status` className now correctly set to `kpi-value positive/negative`
 
-**`renderPage()` â€” removed `_liveHydrated` guard:**
-- Previously: hydration ran only once per page per session â€” if backend was offline, data never refreshed on revisit
+**`renderPage()` — removed `_liveHydrated` guard:**
+- Previously: hydration ran only once per page per session — if backend was offline, data never refreshed on revisit
 - Now: hydration runs on every page visit (async, lightweight, no visible flash)
 - `_liveHydrated` set kept for action buttons that manually invalidate cache
 
@@ -3133,22 +3142,22 @@ Every KPI card, sub-label, and topbar ticker across all 14 pages showed hardcode
 
 ---
 
-### What Still Shows `â€”` (Backend Doesn't Provide This Data Yet)
-- `vix-value`, `vix-change` â€” VIX not in `/market` endpoint
-- `usdinr-value`, `usdinr-change` â€” USD/INR not in `/market` endpoint
-- `market-crude-val`, `market-bond-val` â€” Crude oil, bond yield not in backend
-- `model-calibration-ece` â€” ECE not returned in `/models/stats`
-- `model-features-count` â€” only populated if model has `featureCount` or `numFeatures` field
+### What Still Shows `—` (Backend Doesn't Provide This Data Yet)
+- `vix-value`, `vix-change` — VIX not in `/market` endpoint
+- `usdinr-value`, `usdinr-change` — USD/INR not in `/market` endpoint
+- `market-crude-val`, `market-bond-val` — Crude oil, bond yield not in backend
+- `model-calibration-ece` — ECE not returned in `/models/stats`
+- `model-features-count` — only populated if model has `featureCount` or `numFeatures` field
 
 ---
 
-## 2026-06-23 â€” Strategy Trades + Replay UI Fully Functional
+## 2026-06-23 — Strategy Trades + Replay UI Fully Functional
 
 ### Files Changed
-- `backend/aqrti/api/routes/strategies.py` â€” strategy trade detail endpoint
-- `backend/aqrti/api/routes/replay.py` â€” replay endpoint returning portfolio/positions/predictions for a date
-- `ui/app.js` â€” Strategy Lab: trade table rendering, replay animation, date navigation
-- `ui/index.html` â€” Strategy Trades modal, Replay panel
+- `backend/aqrti/api/routes/strategies.py` — strategy trade detail endpoint
+- `backend/aqrti/api/routes/replay.py` — replay endpoint returning portfolio/positions/predictions for a date
+- `ui/app.js` — Strategy Lab: trade table rendering, replay animation, date navigation
+- `ui/index.html` — Strategy Trades modal, Replay panel
 
 ### Key Changes
 - Clicking any strategy in leaderboard opens a trade-by-trade detail modal
@@ -3157,26 +3166,26 @@ Every KPI card, sub-label, and topbar ticker across all 14 pages showed hardcode
 
 ---
 
-## 2026-06-22 â€” Phase 1â€“4 Complete: Full System Built
+## 2026-06-22 — Phase 1–4 Complete: Full System Built
 
 ### What Was Built
 
-**Phase 1 â€” UI Shell:**
+**Phase 1 — UI Shell:**
 - 9-page terminal UI (vanilla HTML/CSS/JS, no framework)
 - Chart.js charts, ChartRegistry, lazy rendering
 - Mock DataStore with all AQRTI entity schemas
 
-**Phase 2 â€” Backend + API:**
+**Phase 2 — Backend + API:**
 - FastAPI backend with 45+ endpoints
 - SQLAlchemy ORM + SQLite database
 - APScheduler daily pipeline automation
 
-**Phase 3 â€” Feature Engineering + ML:**
+**Phase 3 — Feature Engineering + ML:**
 - Feature extraction from market data
 - CatBoost + LightGBM + XGBoost ensemble training
 - Walk-forward validation, calibration, confidence scoring
 
-**Phase 4 â€” Paper Trading Engine:**
+**Phase 4 — Paper Trading Engine:**
 - Automated position open/close based on predictions
 - Performance tracking: equity curve, Sharpe, drawdown
 - Circuit breakers (daily/weekly/monthly loss limits)

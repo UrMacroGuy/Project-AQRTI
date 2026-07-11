@@ -83,6 +83,12 @@ async function hydrateCockpit() {
             ${catalysts.length ? `<div style="font-size:0.72rem;color:var(--text-secondary);margin-top:3px">${catalysts.join(' · ')}</div>` : ''}
             <a href="javascript:void(0)" onclick="showCockpitSources('${sym}')" style="font-size:0.66rem;color:var(--accent)">${sources} cited source${sources !== 1 ? 's' : ''} →</a>
           </div>`;
+      } else if (COCKPIT_US.includes(sym)) {
+        // VOO/QQQ are US ETFs — NSE filings/news scrapers structurally can't
+        // cover them, so research synthesis will never exist for these two.
+        // Say so plainly rather than implying it's just pending like the
+        // NSE symbols' honest "no data yet" state below.
+        synthHTML = `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--text-muted);font-size:0.7rem">US ETF — research synthesis not applicable (NSE-only data sources)</div>`;
       } else {
         synthHTML = `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);color:var(--text-muted);font-size:0.7rem">NO DATA — no research synthesis yet for ${sym}</div>`;
       }
