@@ -38,21 +38,14 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 1 — Market data failed: %s", exc)
 
-    # Step 1A: Global universe (NSE + BSE + international) — incremental, only new dates
-    try:
-        from aqrti.data.global_universe import seed_global_universe, download_global_universe
-        from aqrti.database.engine import get_db as _get_db
-        with _get_db() as _gdb:
-            seed_global_universe(_gdb)
-        gu = download_global_universe()
-        scheduler_logger.info(
-            "Step 1A — Global Universe: inserted=%d symbols=%d errors=%d",
-            sum(gu.get("inserted", {}).values()),
-            gu.get("symbols_attempted", 0),
-            gu.get("errors", 0),
-        )
-    except Exception as exc:
-        scheduler_logger.error("Step 1A — Global Universe failed: %s", exc)
+    # Step 1A: Global universe seeding — DISABLED. AQRTI now runs a fixed
+    # 12-symbol curated real-money-adjacent universe (see
+    # docs/RESEARCH_DRIVEN_REARCHITECTURE.md and settings.universe). Seeding
+    # the old ~950-symbol GLOBAL_UNIVERSE here would silently repopulate
+    # `stocks` after every prune_to_curated_universe.py run. Left in place,
+    # disabled, rather than deleted, in case a future universe expansion
+    # deliberately re-enables it.
+    scheduler_logger.info("Step 1A — Global Universe seeding: skipped (curated 12-symbol universe mode)")
 
     # Step 1B: Bhavcopy supplement — adds delivery volume from NSE CDN
     try:
@@ -86,20 +79,34 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 4 — Sentiment failed: %s", exc)
 
-    # Step 5: Predictions (requires trained models — skips gracefully if none)
+    # Step 4B: Research synthesis — LLM-derived, cited, per-symbol daily thesis
+    # feeding the research-conditioned strategy templates (post_earnings_drift,
+    # momentum_trend, mean_reversion_quality, event_catalyst, regime_dca_timing).
+    # Runs after news/sentiment/filings collection so same-day sources exist to
+    # cite. Idempotent per day (upserts on symbol+date), safe to re-run.
     try:
-        from ml.prediction_pipeline import run_prediction_pipeline
-        preport = run_prediction_pipeline()
-        n_written = preport.get("predictions_written", 0)
-        if n_written == 0:
-            scheduler_logger.warning(
-                "Step 5 — Predictions: written=0 — no active models or empty feature store. "
-                "Run /admin/train to produce models."
-            )
-        else:
-            scheduler_logger.info("Step 5 — Predictions: written=%d", n_written)
+        from intelligence.research_synthesizer import synthesize_all
+        from aqrti.database.engine import get_session_factory as _get_sf
+        _rs_db = _get_sf()()
+        try:
+            rsreport = synthesize_all(_rs_db)
+        finally:
+            _rs_db.close()
+        scheduler_logger.info(
+            "Step 4B — Research synthesis: synthesized=%d skipped=%d",
+            len(rsreport.get("synthesized", [])), len(rsreport.get("skipped", [])),
+        )
     except Exception as exc:
-        scheduler_logger.error("Step 5 — Predictions failed: %s", exc)
+        scheduler_logger.error("Step 4B — Research synthesis failed: %s", exc)
+
+    # Step 5: Predictions — DISABLED for the curated 12-symbol universe.
+    # Honest CatBoost AUC on the old 352-symbol dataset was 0.485 (coin-flip);
+    # the curated universe's ~9,300 symbol-date feature rows are a third of
+    # that and would likely be even noisier. Research-driven strategy
+    # templates don't need ML predictions; risk_allocator/portfolio_builder
+    # already degrade gracefully to zero candidates with no fresh
+    # predictions (confirmed live). See matching note in aqrti/api/app.py.
+    scheduler_logger.info("Step 5 — Predictions: skipped (ML predictions disabled for curated universe)")
 
     # Step 6: Paper trading cycle
     try:
@@ -861,18 +868,21 @@ def start_scheduler() -> BackgroundScheduler:
     except Exception as exc:
         scheduler_logger.warning("Paper monitor boot kick failed (non-fatal): %s", exc)
 
-    # Seed global universe (BSE + NSE + international) on boot — fast, no download
+    # Kick off the hourly agent pipeline immediately on boot. Without this,
+    # the "hourly_agents" interval job (registered above) only fires ~1hr
+    # after scheduler start (APScheduler interval triggers don't fire on
+    # registration), so every restart looked like "agent pipeline not
+    # starting" for up to an hour with no findings refreshed. Matches the
+    # existing boot-kick pattern for arena/paper-monitor above.
     try:
-        from aqrti.data.global_universe import seed_global_universe
-        from aqrti.database.engine import get_db as _get_db
-        with _get_db() as _gdb:
-            seed_result = seed_global_universe(_gdb)
-        scheduler_logger.info(
-            "Global universe seeded on boot: added=%d updated=%d total=%d",
-            seed_result.get("added", 0), seed_result.get("updated", 0), seed_result.get("total", 0),
-        )
+        _hourly_agent_job()
+        scheduler_logger.info("Agent pipeline kicked off on boot")
     except Exception as exc:
-        scheduler_logger.warning("Global universe seed on boot failed (non-fatal): %s", exc)
+        scheduler_logger.warning("Agent pipeline boot kick failed (non-fatal): %s", exc)
+
+    # Global universe seeding on boot — DISABLED. See the matching note on
+    # Step 1A above: AQRTI runs a fixed 12-symbol curated universe now.
+    scheduler_logger.info("Global universe seed on boot: skipped (curated 12-symbol universe mode)")
     scheduler_logger.info(
         "Scheduler started. Daily cron: %s IST | Agents: every 1 hr | Strategy loop: every 5 min",
         settings.ingest_cron,

@@ -24,6 +24,15 @@ MIN_SHARPE           = 0.5    # honest daily-series Sharpe
 # Out-of-sample hard gates (promotion)
 REQUIRE_OOS_PASS     = True
 MIN_OOS_SHARPE       = 0.2
+# MIN_OOS_WIN_RATE — additional floor enforced at the OOS stage, stacking on
+# top of (never replacing) the existing oos_passed/oos_sharpe gates above.
+# strategy_backtester._walk_forward_oos_check already requires oos_win_rate
+# >= 50.0 internally to set oos_passed=True, but that 50.0 floor was never
+# exposed as an independently-checkable named constant nor re-verified at
+# promotion time — this makes the 50% OOS win-rate floor explicit and
+# enforced directly in promote_strategy, matching the pattern of the
+# MIN_OOS_SHARPE check immediately below it.
+MIN_OOS_WIN_RATE     = 50.0
 
 # Benchmark gate (promotion): the strategy's honest daily Sharpe must reach
 # at least this fraction of buy-and-hold NIFTY50's Sharpe over the same

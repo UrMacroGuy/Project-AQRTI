@@ -109,8 +109,8 @@ function _stmDrawChart(values, labels, isCumPnl = false) {
   if (_stmChart) { _stmChart.destroy(); _stmChart = null; }
   if (!values.length) return;
   const isPositive = values[values.length - 1] >= (isCumPnl ? 0 : 100);
-  const lineColor  = isPositive ? '#22c55e' : '#ef4444';
-  const fillColor0 = isPositive ? 'rgba(34,197,94,0.14)' : 'rgba(239,68,68,0.14)';
+  const lineColor  = isPositive ? 'var(--positive)' : 'var(--negative)';
+  const fillColor0 = isPositive ? 'rgba(240,240,242,0.14)' : 'rgba(154,154,159,0.14)';
   _stmChart = new Chart(canvas, {
     type: 'line',
     data: {
@@ -156,10 +156,10 @@ async function runStrategyReplay() {
       data: {
         labels: frames.map(f => f.exitDate || '—'),
         datasets: [
-          { label: 'Equity', data: eqData, borderColor: '#ff8c00', borderWidth: 2,
+          { label: 'Equity', data: eqData, borderColor: 'var(--accent)', borderWidth: 2,
             pointRadius: frames.length > 80 ? 0 : 4,
-            pointBackgroundColor: frames.map(f => f.result==='win'?'rgba(34,197,94,0.9)':f.result==='loss'?'rgba(239,68,68,0.9)':'rgba(255,255,255,0.3)'),
-            tension: 0.2, fill: true, backgroundColor: 'rgba(255,140,0,0.06)' },
+            pointBackgroundColor: frames.map(f => f.result==='win'?'rgba(240,240,242,0.9)':f.result==='loss'?'rgba(154,154,159,0.9)':'rgba(255,255,255,0.3)'),
+            tension: 0.2, fill: true, backgroundColor: 'rgba(232,232,234,0.06)' },
           { label: 'Base', data: new Array(frames.length).fill(100), borderColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderDash: [4,4], pointRadius: 0 },
         ],
       },
@@ -201,7 +201,7 @@ async function runStrategyReplay() {
       _stmChart.update('none');
       const row = document.getElementById('stm-row-' + i);
       if (row) {
-        row.style.background = frames[i].result==='win'?'rgba(34,197,94,0.08)':frames[i].result==='loss'?'rgba(239,68,68,0.08)':'';
+        row.style.background = frames[i].result==='win'?'rgba(240,240,242,0.08)':frames[i].result==='loss'?'rgba(154,154,159,0.08)':'';
         row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
       i++;

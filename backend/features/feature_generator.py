@@ -26,6 +26,7 @@ from features.volatility_features import compute_volatility_features
 from features.trend_features      import compute_trend_features
 from features.market_features     import compute_market_features
 from features.fii_features        import compute_fii_dii_features, load_fii_dii_cache, FIIDIICache
+from features.research_features   import compute_research_features, load_research_caches
 from features.feature_store       import save_feature_vector, get_last_computed_date
 from features.feature_registry    import seed_feature_metadata
 
@@ -222,6 +223,7 @@ def _compute_all_features(
     breadth_snapshot: Optional[dict[str, tuple]] = None,
     fii_dii_cache: Optional[FIIDIICache] = None,
     peer_mean_snapshot: Optional[dict[str, dict]] = None,
+    research_caches: Optional[dict] = None,
 ) -> dict[str, Optional[float]]:
     """Merge all feature category outputs into one flat dict. Callers must
     pass already-numeric-coerced DataFrames (see _coerce_numeric) — this
@@ -231,6 +233,7 @@ def _compute_all_features(
     Optional:
       fii_dii_cache:     FIIDIICache instance pre-loaded for this run
       peer_mean_snapshot: {symbol: {"peer_mean_momentum_10d": val, ...}} for P2-A
+      research_caches:   dict from research_features.load_research_caches(), pre-loaded for this run
     """
     features: dict[str, Optional[float]] = {}
 
@@ -245,6 +248,10 @@ def _compute_all_features(
     if not stock_df.empty:
         as_of = stock_df["date"].iloc[-1]
         features.update(compute_fii_dii_features(as_of, fii_dii_cache))
+        features.update(compute_research_features(symbol, as_of, research_caches))
+    else:
+        from features.research_features import _empty_features as _empty_research_features
+        features.update(_empty_research_features())
 
     # P2-A: Sector peer-mean propagation features
     if peer_mean_snapshot is not None and symbol in peer_mean_snapshot:
@@ -360,6 +367,11 @@ def _generate_all(
     if fii_cache is None:
         log.info("FII/DII cache empty — fii_* features will be None for this run")
 
+    # Research/event/regime caches — loaded once for the whole run (same
+    # pattern as fii_cache above). only_symbols narrows the universe when set.
+    target_symbol_list = sorted(only_symbols) if only_symbols else sorted(universe_dfs.keys())
+    research_caches = load_research_caches(target_symbol_list)
+
     # Normalize once — avoids repeated Timestamp→date coercion in every slice
     universe_dfs = {s: _normalize_dates(df) for s, df in universe_dfs.items()}
     nifty_df     = _normalize_dates(nifty_df)
@@ -464,6 +476,7 @@ def _generate_all(
                         breadth_snapshot=breadth_snapshot,
                         fii_dii_cache=fii_cache,
                         peer_mean_snapshot=peer_mean_snapshot,
+                        research_caches=research_caches,
                     )
                     # commit=False: one commit per DATE (below) covers all symbols
                     # processed on that date, instead of one commit per symbol —
@@ -514,6 +527,9 @@ def _generate_incremental(
     # P1-A: load FII cache once
     fii_cache = load_fii_dii_cache()
 
+    # Research/event/regime caches — loaded once for the whole incremental run
+    research_caches = load_research_caches(sorted(universe_dfs.keys()))
+
     # Normalize once (sort, coerce dates, coerce numerics) — same contract as
     # _generate_all; _compute_all_features no longer coerces its inputs.
     universe_dfs = {s: _normalize_dates(df) for s, df in universe_dfs.items()}
@@ -557,7 +573,8 @@ def _generate_incremental(
 
             features = _compute_all_features(symbol, slice_stock, slice_nifty,
                                              slice_universe, sector_map,
-                                             fii_dii_cache=fii_cache)
+                                             fii_dii_cache=fii_cache,
+                                             research_caches=research_caches)
             rows = save_feature_vector(db, symbol, latest_price, features, version, commit=False)
             total_rows += rows
             symbols_done += 1

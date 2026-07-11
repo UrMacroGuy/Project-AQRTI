@@ -1,6 +1,6 @@
-// ui/pages/agents.js - split from app.js (ARCH-5), see CHANGELOG
+﻿// ui/pages/agents.js - split from app.js (ARCH-5), see CHANGELOG
 // RESEARCH OPERATIONS CENTER — Phase 7
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function hydrateResearchOps() {
   const el = id => document.getElementById(id);
@@ -15,7 +15,7 @@ async function hydrateResearchOps() {
     setDataPoint('roc-kpi-agent-status', 'BACKEND OFFLINE', 'agents');
   }
 
-  // ── KPIs ──────────────────────────────────────────────────────
+  // â”€â”€ KPIs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const agents = agentData?.agents || [];
   const errored = agents.filter(a => a.status === 'error').length;
   setDataPoint('roc-kpi-agents', agents.length, 'agents');
@@ -26,7 +26,7 @@ async function hydrateResearchOps() {
   setDataPoint('roc-kpi-brief-date', briefData?.brief_date || '—', 'agents');
   setDataPoint('roc-kpi-messages', (msgData?.messages || []).length, 'agents');
 
-  // ── Daily Brief ───────────────────────────────────────────────
+  // â”€â”€ Daily Brief â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const briefBody = el('roc-brief-body');
   if (briefBody && briefData) {
     const tag = el('roc-brief-date-tag');
@@ -36,10 +36,10 @@ async function hydrateResearchOps() {
       if (briefCreated) {
         const ageMs  = Date.now() - new Date(briefCreated).getTime();
         const ageH   = ageMs / 3600000;
-        if (ageH > 4) staleLabel = ` ⚠ ${ageH >= 24 ? Math.floor(ageH/24) + 'd' : Math.round(ageH) + 'h'} ago`;
+        if (ageH > 4) staleLabel = ` âš  ${ageH >= 24 ? Math.floor(ageH/24) + 'd' : Math.round(ageH) + 'h'} ago`;
       }
       tag.textContent = (briefData.brief_date || '—') + staleLabel;
-      if (staleLabel) tag.style.color = 'var(--amber-dim, #cc6600)';
+      if (staleLabel) tag.style.color = 'var(--amber-dim, #fbbf24)';
     }
 
     const _filterStrategyNoise = items => (items || []).filter(i =>
@@ -69,7 +69,7 @@ async function hydrateResearchOps() {
     briefBody.innerHTML = '<div style="color:var(--text-muted)">No brief generated today. Click Generate.</div>';
   }
 
-  // ── Agent Health Table ────────────────────────────────────────
+  // â”€â”€ Agent Health Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const agentTableBody = el('roc-agent-table-body');
   if (agentTableBody) {
     const STATUS_COLORS = { idle: 'positive', running: 'accent', error: 'negative', disabled: '' };
@@ -87,7 +87,7 @@ async function hydrateResearchOps() {
     }).join('') || '<tr><td colspan="6" style="color:var(--text-muted);text-align:center">No agents registered</td></tr>';
   }
 
-  // ── Research Findings Table ───────────────────────────────────
+  // â”€â”€ Research Findings Table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const findingsBody = el('roc-findings-body');
   if (findingsBody) {
     const allFindings = [...(findingsData?.critical || []), ...(findingsData?.high || [])];
@@ -102,17 +102,17 @@ async function hydrateResearchOps() {
     </tr>`).join('') || '<tr><td colspan="5" style="color:var(--text-muted);text-align:center">No findings today</td></tr>';
   }
 
-  // ── Messages ──────────────────────────────────────────────────
+  // â”€â”€ Messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const msgBody = el('roc-messages-body');
   if (msgBody) {
     const msgs = (msgData?.messages || []).slice(0, 10);
-    const MTYPE_COLOR = { alert: '#ff3333', finding: '#00aaff', broadcast: '#00cc66', request: '#ffcc00', response: '#666666' };
+    const MTYPE_COLOR = { alert: '#22c55e', finding: '#ff9500', broadcast: '#4fb8c4', request: '#ef4444', response: '#7a7a7e' };
     msgBody.innerHTML = msgs.map(m => `
       <div style="display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--border-faint)">
-        <span style="color:${MTYPE_COLOR[m.message_type]||'#94a3b8'};font-size:0.65rem;font-family:var(--font-mono);white-space:nowrap;padding-top:1px">${(m.message_type||'').toUpperCase()}</span>
+        <span style="color:${MTYPE_COLOR[m.message_type]||'#8b8b93'};font-size:0.65rem;font-family:var(--font-mono);white-space:nowrap;padding-top:1px">${(m.message_type||'').toUpperCase()}</span>
         <div style="flex:1;min-width:0">
           <div style="font-size:0.72rem;font-weight:500">${m.subject || '—'}</div>
-          <div style="font-size:0.68rem;color:var(--text-muted)">${m.from_agent} → ${m.to_agent}</div>
+          <div style="font-size:0.68rem;color:var(--text-muted)">${m.from_agent} â†’ ${m.to_agent}</div>
         </div>
       </div>
     `).join('') || '<div style="color:var(--text-muted)">No messages</div>';
@@ -141,18 +141,18 @@ async function hydrateResearchOps() {
       <div data-strategy-card data-strategy-id="${s.strategy_id}"
         style="display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:6px;border-radius:4px;
         background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.25)">
-        <span style="color:#f87171;font-size:0.65rem;font-weight:700;white-space:nowrap">[URGENT]</span>
+        <span style="color:#ef4444;font-size:0.65rem;font-weight:700;white-space:nowrap">[URGENT]</span>
         <div style="flex:1;min-width:0">
-          <div style="font-size:0.73rem;font-weight:600;color:#fca5a5">${s.name || s.strategy_id}</div>
+          <div style="font-size:0.73rem;font-weight:600;color:#b4b4bc">${s.name || s.strategy_id}</div>
           <div style="font-size:0.62rem;color:var(--accent);opacity:0.7">${s.strategy_id}</div>
           <div style="font-size:0.65rem;color:var(--text-muted)">
-            Fitness: <span style="color:#f87171">${(s.fitness_score||0).toFixed(1)}</span>
+            Fitness: <span style="color:#ef4444">${(s.fitness_score||0).toFixed(1)}</span>
             &nbsp;|&nbsp; Trades: ${s.trade_count||0}
             &nbsp;|&nbsp; Sharpe: ${(s.sharpe||0).toFixed(2)}
             &nbsp;|&nbsp; ${s.status}
           </div>
         </div>
-        <button class="panel-action-btn" style="background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.45);color:#f87171;white-space:nowrap;flex-shrink:0"
+        <button class="panel-action-btn" style="background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.45);color:#ef4444;white-space:nowrap;flex-shrink:0"
           onclick="retireSingleStrategy('${s.strategy_id}', this)">Retire</button>
       </div>`).join('');
 
@@ -161,8 +161,8 @@ async function hydrateResearchOps() {
       .filter(item => !item.includes('Critical Decay') && !item.includes('strategy_research:'))
       .slice(0, 6)
       .map(item => {
-        const isUrgent = item.includes('URGENT') || item.includes('🔴') || item.includes('[CRITICAL]');
-        const isWarn   = item.includes('🟡') || item.includes('REVIEW');
+        const isUrgent = item.includes('URGENT') || item.includes('ðŸ”´') || item.includes('[CRITICAL]');
+        const isWarn   = item.includes('ðŸŸ¡') || item.includes('REVIEW');
         return `<div style="padding:7px 10px;margin-bottom:5px;border-radius:4px;font-size:0.73rem;
           background:${isUrgent ? 'rgba(239,68,68,0.06)' : isWarn ? 'rgba(251,191,36,0.05)' : 'rgba(255,255,255,0.03)'};
           border:1px solid ${isUrgent ? 'rgba(239,68,68,0.18)' : isWarn ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.07)'}">
@@ -174,15 +174,15 @@ async function hydrateResearchOps() {
       '<div style="color:var(--positive);font-size:0.8rem;padding:8px">All clear — no action required</div>';
   }
 
-  // ── Agent Performance Chart ───────────────────────────────────
+  // â”€â”€ Agent Performance Chart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (perfData && perfData.length) {
     ChartRegistry.create('rocAgentPerfChart', {
       type: 'bar',
       data: {
         labels: perfData.map(p => p.agent_id.replace('_research','').replace('_','').toUpperCase()),
         datasets: [
-          { label: 'Tasks', data: perfData.map(p => p.total_tasks || 0), backgroundColor: 'rgba(0,170,255,0.6)' },
-          { label: 'Success %', data: perfData.map(p => p.success_rate || 0), backgroundColor: 'rgba(52,211,153,0.5)', yAxisID: 'y1' },
+          { label: 'Tasks', data: perfData.map(p => p.total_tasks || 0), backgroundColor: 'rgba(255,149,0,0.6)' },
+          { label: 'Success %', data: perfData.map(p => p.success_rate || 0), backgroundColor: 'rgba(34,197,94,0.5)', yAxisID: 'y1' },
         ],
       },
       options: {
@@ -198,9 +198,9 @@ async function hydrateResearchOps() {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ACTION ITEMS — RETIRE STRATEGIES
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function retireSingleStrategy(strategyId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Retiring…'; }
@@ -235,9 +235,9 @@ async function retireAllDecayedStrategies() {
   if (retireAllBtn) { retireAllBtn.disabled = false; retireAllBtn.textContent = 'Retire All Bad'; retireAllBtn.style.display = 'none'; }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // LIVE MARKET NEWS FEED — auto-refreshes every 5 min
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 let _newsRefreshTimer = null;
 
@@ -252,7 +252,7 @@ async function loadLiveNewsFeed() {
       feed.innerHTML = '<div style="color:var(--text-muted);padding:8px">No news available right now</div>';
       return;
     }
-    const SENT_COLOR = { positive: '#34d399', negative: '#f87171', neutral: '#94a3b8' };
+    const SENT_COLOR = { positive: '#22c55e', negative: '#ef4444', neutral: '#8b8b93' };
     const _age = ts => {
       if (!ts) return '';
       const diff = Date.now() - new Date(ts).getTime();
@@ -264,7 +264,7 @@ async function loadLiveNewsFeed() {
     };
     feed.innerHTML = articles.map(a => {
       const sent = (a.sentiment || 'neutral').toLowerCase();
-      const sentColor = SENT_COLOR[sent] || '#94a3b8';
+      const sentColor = SENT_COLOR[sent] || '#8b8b93';
       const score = a.impactScore || a.importanceScore || 0;
       const source = (a.source || '').replace(/_/g, ' ').toUpperCase();
       const company = a.company ? `<span style="color:var(--accent);font-weight:600">${a.company}</span> · ` : '';

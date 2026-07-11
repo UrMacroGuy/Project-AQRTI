@@ -5,6 +5,23 @@ Main entry point for the backend API server.
 
 from __future__ import annotations
 
+import os as _os
+from pathlib import Path as _Path
+from dotenv import load_dotenv as _load_dotenv
+
+# Load backend/.env into os.environ BEFORE any AQRTI submodule imports run.
+# pydantic-settings (aqrti.config.settings.Settings) loads .env into its own
+# fields via env_file=, but plain os.getenv() callers elsewhere (e.g.
+# aqrti/llm/{openrouter,nvidia_nim,provider}.py, which read
+# OPENROUTER_API_KEY/NVIDIA_NIM_API_KEY/AQRTI_LLM_PROVIDER at call time) never
+# see those values unless .env is also loaded into the real process
+# environment — this was a real bug: LLM calls in production silently fell
+# back to os.getenv()'s hardcoded defaults (openrouter, unconfigured) instead
+# of the .env-configured nvidia_nim provider, confirmed via boot log showing
+# "Active LLM provider 'openrouter' is not configured" despite .env correctly
+# setting AQRTI_LLM_PROVIDER=nvidia_nim.
+_load_dotenv(_Path(__file__).resolve().parent.parent.parent / ".env")
+
 from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -61,6 +78,7 @@ _BOOT_STEPS = [
     "features",
     "news",
     "sentiment",
+    "research_synthesis",
     "predictions",
     "paper_trading",
     "agents",
@@ -124,16 +142,28 @@ def _boot_sentiment():
     return run_sentiment_pipeline()
 
 
+def _boot_research_synthesis():
+    from intelligence.research_synthesizer import synthesize_all
+    from aqrti.database.engine import get_session_factory
+    db = get_session_factory()()
+    try:
+        return synthesize_all(db)
+    finally:
+        db.close()
+
+
 def _boot_predictions():
-    from datetime import date as _date
-    from aqrti.database.engine import get_db as _get_db
-    from aqrti.database.models import Prediction as _Pred
-    with _get_db() as _db:
-        _today_count = _db.query(_Pred).filter(_Pred.date == _date.today()).count()
-    if _today_count >= 10:
-        return f"skip — {_today_count} already exist for today"
-    from ml.prediction_pipeline import run_prediction_pipeline
-    return run_prediction_pipeline()
+    # ML predictions DISABLED for the curated 12-symbol universe: honest
+    # CatBoost AUC on the old 352-symbol/29K-row dataset was 0.485 (coin-flip
+    # per plans/CHANGELOG.md); the curated universe has ~9,300 symbol-date
+    # feature rows, a third of that, and would very likely produce an even
+    # noisier model — false confidence, not edge. Research-driven strategy
+    # templates (post_earnings_drift, momentum_trend, etc.) don't depend on
+    # ML predictions. Downstream consumers (risk_allocator/portfolio_builder)
+    # already degrade gracefully to "no investable candidates" with zero
+    # fresh Prediction rows — confirmed live. Re-enable only after evaluating
+    # a fresh honest AUC once more research/price history accumulates.
+    return "skipped — ML predictions disabled for curated universe (see comment)"
 
 
 def _boot_paper_trading():
@@ -242,6 +272,20 @@ def _run_boot_sequence():
     else:
         _boot_step("sentiment", "error", str(res))
         api_logger.error("Boot step 4 — Sentiment failed: %s", res)
+
+    # Step 4B — Research synthesis (LLM-derived, cited, per-symbol daily
+    # thesis feeding the research-conditioned strategy templates). Idempotent
+    # per day (upserts on symbol+date), safe to re-run every boot.
+    _boot_step("research_synthesis", "running")
+    ok, res = _run_with_timeout("research_synthesis", lambda: _boot_research_synthesis())
+    if ok and isinstance(res, dict):
+        _boot_step("research_synthesis", "done",
+                    f"synthesized={len(res.get('synthesized', []))} skipped={len(res.get('skipped', []))}")
+        api_logger.info("Boot step 4B — Research synthesis: synthesized=%d skipped=%d",
+                         len(res.get("synthesized", [])), len(res.get("skipped", [])))
+    else:
+        _boot_step("research_synthesis", "error", str(res))
+        api_logger.error("Boot step 4B — Research synthesis failed: %s", res)
 
     # Step 5 — Predictions (skip if today's predictions already exist)
     _boot_step("predictions", "running")
@@ -385,6 +429,9 @@ def create_app() -> FastAPI:
     from aqrti.api.routes import strategy_evolution as strategy_evolution_router
     from aqrti.api.routes import graveyard as graveyard_router
     from aqrti.api.routes import research as research_router
+    from aqrti.api.routes import research_synthesis as research_synthesis_router
+    from aqrti.api.routes import reconciliation as reconciliation_router
+    from aqrti.api.routes import monthly_allocation as monthly_allocation_router
     from aqrti.api.routes import agents as agents_router
     from aqrti.api.routes import research_briefs as research_briefs_router
     from aqrti.api.routes import research_findings as research_findings_router
@@ -447,6 +494,9 @@ def create_app() -> FastAPI:
     app.include_router(strategy_evolution_router.router,   prefix=f"{PREFIX}/strategy-evolution",   tags=["Strategy Evolution"])
     app.include_router(graveyard_router.router,            prefix=f"{PREFIX}/graveyard",            tags=["Graveyard"])
     app.include_router(research_router.router,             prefix=f"{PREFIX}/research",             tags=["Research"])
+    app.include_router(research_synthesis_router.router,   prefix=f"{PREFIX}/research-synthesis",   tags=["Research Synthesis"])
+    app.include_router(reconciliation_router.router,       prefix=f"{PREFIX}/reconciliation",       tags=["Reconciliation"])
+    app.include_router(monthly_allocation_router.router,   prefix=f"{PREFIX}/monthly-allocation",   tags=["Monthly Allocation"])
     app.include_router(agents_router.router,               prefix=f"{PREFIX}/agents",               tags=["Agents"])
     app.include_router(research_briefs_router.router,      prefix=f"{PREFIX}/research-briefs",      tags=["Research Briefs"])
     app.include_router(research_findings_router.router,    prefix=f"{PREFIX}/research-findings",    tags=["Research Findings"])

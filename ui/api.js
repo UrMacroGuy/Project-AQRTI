@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AQRTI API Layer — Live Mode
  * All data comes from FastAPI backend at localhost:8000.
  * Falls back gracefully to empty/null when endpoint unavailable.
@@ -18,7 +18,7 @@ const MARKOV_API_CONFIG = {
 };
 
 
-// ── Local Data Cache ─────────────────────────────────────────
+// â”€â”€ Local Data Cache â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Stores last-known API responses so panels show stale data when backend is offline
 const _cache = {
   PREFIX: 'aqrti_cache_',
@@ -41,7 +41,7 @@ const _cache = {
   },
 };
 
-// ── Fetch Helper ──────────────────────────────────────────────
+// â”€â”€ Fetch Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function apiFetch(endpoint, params = {}) {
   const url = new URL(`${API_CONFIG.BASE}${endpoint}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -89,7 +89,7 @@ async function apiPost(endpoint, body = {}) {
   }
 }
 
-// ── Markov backend (separate process/port) fetch helpers ──────
+// â”€â”€ Markov backend (separate process/port) fetch helpers â”€â”€â”€â”€â”€â”€
 // Deliberately not sharing _cache/apiFetch's localStorage keys with the main
 // backend — a stale Markov response should never be mistaken for main-backend
 // data or vice versa.
@@ -138,7 +138,7 @@ async function apiPostRaw(url, body = {}) {
 }
 
 
-// ── API object (used by most of app.js) ──────────────────────
+// â”€â”€ API object (used by most of app.js) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const Api = {
 
   async overview()                      { return apiFetch('/overview'); },
@@ -155,18 +155,6 @@ const Api = {
       return await res.json();
     } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/topbar failed:', e.message); return null; }
   },
-  async livePrices() {
-    // Full 8-symbol fetch — used by live-prices page
-    const url = `${API_CONFIG.BASE}/market/live`;
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 20000);
-    try {
-      const res = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(t);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
-    } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/live failed:', e.message); return null; }
-  },
   async liveStockPrices() {
     // 18-stock universe live prices (60s server cache)
     const url = `${API_CONFIG.BASE}/market/live/stocks`;
@@ -179,27 +167,18 @@ const Api = {
       return await res.json();
     } catch (e) { clearTimeout(t); console.warn('[AQRTI] /market/live/stocks failed:', e.message); return null; }
   },
-  async indexHistory(name, days = 30)  { return apiFetch(`/market/history/${name}`, { days }); },
-  async stockOhlcv(symbol, days = 90)  { return apiFetch(`/market/ohlcv/${symbol}`, { days }); },
   async predictions(p = {})            { return apiFetch('/predictions', p); },
   async news(p = {})                    { return apiFetch('/news', p); },
   async newsStats()                     { return apiFetch('/news/stats'); },
   async sentiment()                     { return apiFetch('/sentiment'); },
   async strategies(p = {})             { return apiFetch('/strategies', p); },
   async strategyStats()                 { return apiFetch('/strategies/stats'); },
-  async models(p = {})                  { return apiFetch('/models', p); },
-  async modelStats()                    { return apiFetch('/models/stats'); },
-  async modelMetrics(p = {})           { return apiFetch('/models/metrics', p); },
-  async walkForwardFolds(p = {})       { return apiFetch('/models/walk-forward', p); },
   async learning(p = {})               { return apiFetch('/learning', p); },
   async risk()                          { return apiFetch('/risk'); },
   async portfolio()                     { return apiFetch('/portfolio'); },
   async marketRegime()                  { return apiFetch('/market-regime'); },
-  async predictionSummary()            { return apiFetch('/predictions/summary'); },
   async symbolPrediction(sym)          { return apiFetch(`/predictions/symbol/${sym}`); },
-  async confidence(p = {})             { return apiFetch('/confidence', p); },
   async symbolConfidence(sym, days=30) { return apiFetch(`/confidence/symbol/${sym}`, { days }); },
-  async patterns(p = {})               { return apiFetch('/patterns', p); },
   async symbolPattern(sym)             { return apiFetch(`/patterns/symbol/${sym}`); },
 
   // Paper trading
@@ -212,26 +191,20 @@ const Api = {
   async performanceSummary()           { return apiFetch('/performance/summary'); },
   async equityCurve(days = 90)         { return apiFetch('/equity-curve', { days }); },
   async backfillEquity()               { return apiPost('/paper-portfolio/backfill-equity'); },
-  async rebalancePreview()             { return apiFetch('/rebalance'); },
 
   // Learning engine
-  async learningOverview(days = 30)   { return apiFetch('/learning', { days }); },
   async failures(p = {})              { return apiFetch('/failures', p); },
   async failureSummary(days = 30)     { return apiFetch('/failures/summary', { days }); },
   async knowledgeOverview(days = 30)  { return apiFetch('/knowledge', { days }); },
   async knowledgeScoreHistory(days=90){ return apiFetch('/knowledge/score/history', { days }); },
   async symbolKnowledge(sym, days=90) { return apiFetch(`/knowledge/graph/symbol/${sym}`, { days }); },
   async marketKnowledge(days = 30)    { return apiFetch('/knowledge/graph/market', { days }); },
-  async driftSummary(days = 90)       { return apiFetch('/drift', { days }); },
   async modelPerformance(days = 30)   { return apiFetch('/drift/performance', { days }); },
   async weightRecommendation(task='direction', days=30) { return apiFetch('/drift/weights', { task, days }); },
   async featureIntelligence(days=30)  { return apiFetch('/feature-intelligence', { days }); },
-  async featureRanking(days = 30)     { return apiFetch('/feature-intelligence/ranking', { days }); },
   async featureDecay(days = 30)       { return apiFetch('/feature-intelligence/decay', { days }); },
   async topFeatures(days=30, topN=20) { return apiFetch('/feature-intelligence/importance', { days, top_n: topN }); },
-  async lessons(p = {})               { return apiFetch('/lessons', p); },
   async lessonSummary(days = 30)      { return apiFetch('/lessons/summary', { days }); },
-  async calibrationCurve(days = 30)   { return apiFetch('/lessons/calibration', { days }); },
 
   // Strategy research
   async strategyPopulation()          { return apiFetch('/strategies/population'); },
@@ -263,39 +236,19 @@ const Api = {
   async taskStats(days = 7)           { return apiFetch('/research-findings/tasks/stats', { days }); },
 
   // Vault
-  async vaultSummary()                { return apiFetch('/vault/summary'); },
-  async vaultSnapshots(days = 30)     { return apiFetch('/vault/snapshots', { days }); },
   async vaultSnapshot(date)           { return apiFetch(`/vault/snapshots/${date}`); },
-  async replayDate(date)              { return apiFetch(`/replay/${date}`); },
   async archivePredictions(days=30, symbol=null) {
     const p = { days };
     if (symbol) p.symbol = symbol;
     return apiFetch('/archives/predictions', p);
   },
-  async archivePortfolio(days = 90)   { return apiFetch('/archives/portfolio', { days }); },
   async archiveStrategies(days = 30)  { return apiFetch('/archives/strategies', { days }); },
-  async archiveKnowledge(days = 90)   { return apiFetch('/archives/knowledge', { days }); },
-  async archiveResearch(days=30, archiveType=null) {
-    const p = { days };
-    if (archiveType) p.archive_type = archiveType;
-    return apiFetch('/archives/research', p);
-  },
-  async vaultBriefs()                 { return apiFetch('/vault-briefs'); },
-  async listBackups()                 { return apiFetch('/backups'); },
 
   // Data supremacy
-  async corporateFilings(p = {})     { return apiFetch('/corporate', p); },
   async corporateSummary(days = 30)  { return apiFetch('/corporate/summary', { days }); },
-  async fiiDii(days = 30)            { return apiFetch('/fii-dii', { days }); },
-  async optionsSnapshot(sym = 'NIFTY'){ return apiFetch('/options-intelligence', { symbol: sym }); },
   async optionsHistory(sym='NIFTY', days=30) { return apiFetch('/options-intelligence/history', { symbol: sym, days }); },
   async marketBreadth()              { return apiFetch('/market-breadth'); },
-  async marketBreadthHistory(days=30){ return apiFetch('/market-breadth/history', { days }); },
-  async sectorRotation()             { return apiFetch('/sector-rotation'); },
-  async earningsCalendar(ahead = 14) { return apiFetch('/earnings/calendar', { days_ahead: ahead }); },
   async earningsSummary(days = 90)   { return apiFetch('/earnings/summary', { days }); },
-  async dataQuality(days = 7)        { return apiFetch('/data-quality', { days }); },
-  async sourceHealth()               { return apiFetch('/data-quality/source-health'); },
 
   // Intelligence lab
   async regimeDatasets()             { return apiFetch('/regime-datasets'); },
@@ -315,12 +268,7 @@ const Api = {
   async triggerPaperTrade()          { return apiPostRaw(`${API_CONFIG.ADMIN}/paper-trade`); },
   async triggerLearning()            { return apiPostRaw(`${API_CONFIG.ADMIN}/learning`); },
   async triggerStrategyResearch()    { return apiPostRaw(`${API_CONFIG.ADMIN}/strategy-research`); },
-  async triggerVault()               { return apiPostRaw(`${API_CONFIG.ADMIN}/vault`); },
-  async triggerDataSupremacy()       { return apiPostRaw(`${API_CONFIG.ADMIN}/data-supremacy`); },
   async triggerIntelligence()        { return apiPostRaw(`${API_CONFIG.ADMIN}/intelligence`); },
-  async agentPipeline()              { return apiPostRaw(`${API_CONFIG.ADMIN}/agent-pipeline`); },
-  async generateBrief()              { return apiPost('/research-briefs/generate'); },
-  async runBackup()                  { return apiPost('/backups/run'); },
   async runLearningLoop(days = 7)    { return apiPost(`/learning/run?days=${days}`); },
   async triggerEvolve(n = 20)        { return apiPost(`/strategies/admin/evolve?n_offspring=${n}`); },
   async activateStrategy(id)         { return apiPost(`/strategies/${id}/activate`); },
@@ -335,23 +283,19 @@ const Api = {
   async triggerReplay(body = {})     { return apiPost('/replay', body); },
   async runIntelligencePipeline()    { return apiPostRaw('http://localhost:8000/admin/intelligence'); },
 
-  async screener(p = {}) { return apiFetch('/screener', p); },
-  async screenerPresets() { return apiFetch('/screener/presets'); },
+  async researchSynthesisLatest()      { return apiFetch('/research-synthesis/latest'); },
+  async researchSynthesisSymbol(sym, days = 30) { return apiFetch(`/research-synthesis/${sym}`, { days }); },
 
   async correlationMatrix(days = 60) { return apiFetch('/market/correlation', { days }); },
   async sectorBreadth() { return apiFetch('/market/breadth/by-sector'); },
-  async watchlist()                      { return apiFetch('/watchlist'); },
-  async watchlistAdd(symbol)             { return apiPost(`/watchlist/add?symbol=${symbol}`); },
-  async watchlistRemove(symbol)          { return apiPost(`/watchlist/remove?symbol=${symbol}`); },
   async stressTestRun(niftyShock = -10, sectorShock = null, sectorShockPct = -15) {
     const p = { nifty_shock_pct: niftyShock };
     if (sectorShock) { p.sector_shock = sectorShock; p.sector_shock_pct = sectorShockPct; }
     return apiPost('/stress-test/run?' + new URLSearchParams(p).toString());
   },
   async stressTestPresets()              { return apiFetch('/stress-test/presets'); },
-  async optionsChain(sym = 'NIFTY', expiryOffset = 0) { return apiFetch('/options-intelligence/chain', { symbol: sym, expiry_offset: expiryOffset }); },
 
-  // ── Historical Backtest ────────────────────────────────────────
+  // â”€â”€ Historical Backtest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async runBacktest(strategyId = null, years = 2) {
     const params = years !== 2 ? `?years=${years}` : '';
     const path   = strategyId
@@ -366,7 +310,7 @@ const Api = {
     return apiFetch(path);
   },
 
-  // ── Arena ──────────────────────────────────────────────────────
+  // â”€â”€ Arena â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async arenaStatus()          { return apiFetch('/arena'); },
   async arenaChampions()       { return apiFetch('/arena/champions'); },
   async arenaRuns(limit = 100, status = 'all') {
@@ -411,13 +355,13 @@ const Api = {
   async systemHealth()                { return apiFetch('/system-health'); },
   async systemRestartLog()            { return apiFetch('/system/restart-log'); },
 
-  // ── Go/No-Go Scorecard ────────────────────────────────────────
+  // â”€â”€ Go/No-Go Scorecard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async goNogo()          { return apiFetch('/go-nogo'); },
   async goNogoUptimeLog() { return apiFetch('/go-nogo/uptime-log'); },
   async goNogoRiskRails()     { return apiFetch('/go-nogo/risk-rails'); },
   async goNogoMonthlyReview() { return apiFetch('/go-nogo/monthly-review'); },
 
-  // ── GO-7: Morning Decision Screen ─────────────────────────────
+  // â”€â”€ GO-7: Morning Decision Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async morningDecision() { return apiFetch('/morning/decision'); },
   async morningAct(strategyId, symbol, action, note) {
     return apiPost('/morning/act', { strategy_id: strategyId, symbol, action, note });
@@ -436,8 +380,8 @@ const Api = {
   },
 };
 
-// ── Legacy uppercase API shim (used in intelligence-lab + replay) ──
-// Maps API.get(url) / API.post(url, body) → apiFetch / apiPost
+// â”€â”€ Legacy uppercase API shim (used in intelligence-lab + replay) â”€â”€
+// Maps API.get(url) / API.post(url, body) â†’ apiFetch / apiPost
 const API = {
   async get(url) {
     // strip base prefix if present, else use raw path after /api/v1
@@ -453,7 +397,7 @@ const API = {
 };
 
 
-// ── Connection Status Banner ──────────────────────────────────
+// â”€â”€ Connection Status Banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function initConnectionBanner() {
   const alive = await Api.checkBackend();
   const sysLabel = document.getElementById('sys-status-label');

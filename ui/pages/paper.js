@@ -69,7 +69,7 @@ async function triggerBacktest() {
     if (res.status === 'started') {
       if (statusEl) {
         statusEl.textContent = `✓ Running: ${res.strategy_name} — results in Algo Arena tab`;
-        statusEl.style.color = 'rgba(139,92,246,0.9)';
+        statusEl.style.color = 'rgba(196,196,200,0.9)';
       }
       // Poll status after 30s
       setTimeout(async () => {
@@ -81,10 +81,10 @@ async function triggerBacktest() {
         } catch(e) {}
       }, 30000);
     } else if (res.status === 'no_strategy') {
-      if (statusEl) { statusEl.textContent = '⚠ No active strategies yet — promote one first'; statusEl.style.color = '#ff9900'; }
+      if (statusEl) { statusEl.textContent = '⚠ No active strategies yet — promote one first'; statusEl.style.color = 'var(--warning)'; }
     }
   } catch(e) {
-    if (statusEl) { statusEl.textContent = '✗ Error: ' + e.message; statusEl.style.color = '#ff4444'; }
+    if (statusEl) { statusEl.textContent = '✗ Error: ' + e.message; statusEl.style.color = 'var(--negative)'; }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '▶ Run Backtest'; }
   }
@@ -112,7 +112,7 @@ async function triggerPaperCycle() {
     if (statusEl) { statusEl.textContent = msg; statusEl.style.color = 'var(--accent)'; }
     await hydratePaperPortfolio();
   } catch(e) {
-    if (statusEl) { statusEl.textContent = '✗ Error: ' + e.message; statusEl.style.color = '#ff4444'; }
+    if (statusEl) { statusEl.textContent = '✗ Error: ' + e.message; statusEl.style.color = 'var(--negative)'; }
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -124,7 +124,7 @@ async function triggerPaperCycleForStrategy() {
   const btn = document.querySelector('[onclick="triggerPaperCycleForStrategy()"]');
   const strategyId = (input ? input.value.trim() : '');
   if (!strategyId) {
-    if (statusEl) { statusEl.textContent = '⚠ Enter a strategy ID first'; statusEl.style.color = '#ff9900'; }
+    if (statusEl) { statusEl.textContent = '⚠ Enter a strategy ID first'; statusEl.style.color = 'var(--warning)'; }
     return;
   }
   if (statusEl) { statusEl.textContent = '⟳ Running…'; statusEl.style.color = 'var(--text-muted)'; }
@@ -137,7 +137,7 @@ async function triggerPaperCycleForStrategy() {
     });
     const data = await res.json();
     if (data.status === 'error') {
-      if (statusEl) { statusEl.textContent = '✗ ' + (data.error || 'Unknown error'); statusEl.style.color = '#ff4444'; }
+      if (statusEl) { statusEl.textContent = '✗ ' + (data.error || 'Unknown error'); statusEl.style.color = 'var(--negative)'; }
     } else {
       const opened = (data.opened || []).length;
       const value  = Math.round(data.portfolioValue || 0).toLocaleString('en-IN');
@@ -148,7 +148,7 @@ async function triggerPaperCycleForStrategy() {
       await hydratePaperPortfolio();
     }
   } catch(e) {
-    if (statusEl) { statusEl.textContent = '✗ ' + e.message; statusEl.style.color = '#ff4444'; }
+    if (statusEl) { statusEl.textContent = '✗ ' + e.message; statusEl.style.color = 'var(--negative)'; }
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -189,7 +189,7 @@ async function hydratePaperPortfolio() {
   if (btEl && btStatus && btStatus.available) {
     const ret = (btStatus.total_return_pct || 0).toFixed(1);
     const wr  = (btStatus.win_rate || 0).toFixed(0);
-    const cls = parseFloat(ret) >= 0 ? 'color:#00cc66' : 'color:#ef4444';
+    const cls = parseFloat(ret) >= 0 ? 'color:var(--positive)' : 'color:var(--negative)';
     btEl.innerHTML = `Last: <b>${btStatus.strategy_name}</b> — <span style="${cls}">${ret}%</span> return · ${wr}% win rate · ${btStatus.total_trades||0} trades · ${btStatus.status||''}`;
   }
 
@@ -271,11 +271,11 @@ async function hydratePaperPortfolio() {
         labels: curve.labels,
         datasets: [{
           data: curve.values,
-          borderColor: '#ff8c00', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
+          borderColor: 'var(--accent)', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true,
           backgroundColor: (ctx) => {
             const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
-            g.addColorStop(0, 'rgba(255,140,0,0.18)');
-            g.addColorStop(1, 'rgba(255,140,0,0.00)');
+            g.addColorStop(0, 'rgba(232,232,234,0.18)');
+            g.addColorStop(1, 'rgba(232,232,234,0.00)');
             return g;
           },
         }],
@@ -306,10 +306,10 @@ async function hydratePaperPortfolio() {
   _set('pp-alloc-exposure', `${fmt(totalExpo, 0)}% Invested`);
 
   if (allocData && allocData.length) {
-    const PALETTE = ['rgba(255,140,0,0.85)','rgba(34,197,94,0.7)','rgba(59,130,246,0.7)',
-      'rgba(245,158,11,0.7)','rgba(239,68,68,0.7)','rgba(147,51,234,0.7)',
-      'rgba(236,72,153,0.7)','rgba(0,170,255,0.7)','rgba(251,146,60,0.7)',
-      'rgba(20,184,166,0.7)','rgba(248,113,113,0.7)','rgba(167,243,208,0.7)',
+    const PALETTE = ['rgba(240,240,242,0.85)','rgba(222,222,226,0.75)','rgba(204,204,208,0.7)',
+      'rgba(186,186,190,0.7)','rgba(168,168,172,0.7)','rgba(150,150,154,0.7)',
+      'rgba(132,132,136,0.7)','rgba(114,114,118,0.7)','rgba(96,96,100,0.7)',
+      'rgba(215,215,219,0.6)','rgba(178,178,182,0.6)','rgba(141,141,145,0.6)',
       'rgba(255,255,255,0.12)'];
     ChartRegistry.create('ppAllocationChart', {
       type: 'doughnut',
@@ -339,7 +339,7 @@ async function hydratePaperPortfolio() {
         const heldDays = p.entryDate ? Math.floor((Date.now() - new Date(p.entryDate)) / 86400000) : 0;
         const maxDays = 20;
         const daysLeft = maxDays - heldDays;
-        const heldColor = daysLeft <= 3 ? 'var(--negative)' : daysLeft <= 7 ? '#f5a623' : 'var(--text-muted)';
+        const heldColor = daysLeft <= 3 ? 'var(--negative)' : daysLeft <= 7 ? 'var(--warning)' : 'var(--text-muted)';
         return `<tr>
           <td><strong>${p.symbol}</strong></td>
           <td style="color:var(--text-muted);font-size:0.7rem">${p.sector || '—'}</td>
@@ -411,10 +411,10 @@ async function triggerMTM() {
     if (tp) msg += `  · TP hit: ${tp}`;
     if (ex) msg += `  · Expired: ${ex}`;
     if (data.lossesRefined) msg += `  · Algos refined: ${data.lossesRefined}`;
-    if (statusEl) { statusEl.textContent = msg; statusEl.style.color = sl || ex ? '#f59e0b' : 'var(--positive)'; }
+    if (statusEl) { statusEl.textContent = msg; statusEl.style.color = sl || ex ? 'var(--warning)' : 'var(--positive)'; }
     await hydratePaperPortfolio();
   } catch(e) {
-    if (statusEl) { statusEl.textContent = '✗ MTM error: ' + e.message; statusEl.style.color = '#ff4444'; }
+    if (statusEl) { statusEl.textContent = '✗ MTM error: ' + e.message; statusEl.style.color = 'var(--negative)'; }
   }
 }
 

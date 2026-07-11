@@ -1,6 +1,9 @@
 """
 Strategy Generator
-Generates candidate strategies systematically across 7 feature categories.
+Generates candidate strategies from named, documented, tried-and-tested
+quant effects — each a fixed template whose parameters (thresholds, SL/TP,
+hold days) are mutated/evolved, but the template's structural logic itself
+is never invented at random.
 
 Generation approach:
   - For each family template, define a parameter grid (thresholds, feature combinations)
@@ -8,9 +11,19 @@ Generation approach:
   - Each candidate is a valid StrategyDSL object immediately ready for backtesting
   - Deduplication via strategy_id hash — duplicates are silently skipped
 
-Supported families:
-  momentum, mean_reversion, breakout, sentiment_driven,
-  regime_adaptive, volume_surge, volatility_play, hybrid
+Supported families (research-backed templates):
+  post_earnings_drift, momentum_trend, mean_reversion_quality,
+  event_catalyst, regime_dca_timing, rotation_monitor
+  (plus pre-existing: quality_momentum, institutional_flow, rl_momentum,
+  relative_strength, breadth_momentum, long_hold_momentum)
+
+The original 8 generic random-parameter families (momentum, mean_reversion,
+breakout, sentiment_driven, regime_adaptive, volume_surge, volatility_play,
+hybrid) were removed — they mutated random threshold combinations across flat
+feature pools (PRICE_FEATURES/VOLUME_FEATURES/etc, several of which were never
+backed by a real computed feature — e.g. "price_above_ema50",
+"vwap_distance", "sentiment_score" do not exist in feature_registry.py) with
+no named quant basis. See BUG_HUNTING.md if you're looking for that history.
 """
 
 from __future__ import annotations
@@ -29,8 +42,17 @@ from aqrti.database.models import StrategyV2
 from aqrti.utils.logger import get_logger
 from strategies.strategy_dsl import StrategyDSL, Condition, ConditionGroup
 from strategies.strategy_store import upsert_strategy, save_version
+from features.research_features import REGIME_MARKOV_CODES
 
 log = get_logger("strategy_generator")
+
+# regime_markov is stored as a numeric code (FeatureValue.value is Float —
+# see research_features.py::_encode_regime for why the string label can't be
+# written directly). Conditions must compare against these codes, not the
+# original "BULL"/"BEAR"/"SIDEWAYS" string labels.
+REGIME_MARKOV_BULL = REGIME_MARKOV_CODES["BULL"]
+REGIME_MARKOV_BEAR = REGIME_MARKOV_CODES["BEAR"]
+REGIME_MARKOV_SIDEWAYS = REGIME_MARKOV_CODES["SIDEWAYS"]
 
 # ── Feature pools by category ─────────────────────────────────
 
@@ -63,6 +85,21 @@ REGIME_FEATURES = [
     # GO-5b cross-sectional / breadth features
     "nifty_rs_21d", "sector_rs_21d", "relative_strength_nifty_21d",
     "breadth_pct_above_ema50", "breadth_pct_above_ema200",
+    # Markov observable-chain regime label (backend/markov module)
+    "regime_markov",
+]
+# Research-derived features (research_synthesis funnel) — registered in
+# feature_registry.py, category="research". Point-in-time joined, null when
+# no synthesis exists for the symbol/date; never fabricated.
+RESEARCH_FEATURES = [
+    "research_sentiment", "research_confidence", "research_risk_flag_negative",
+]
+# Event/catalyst features (earnings_events, nse_corporate_filings, news_events)
+# — registered in feature_registry.py, category="events".
+EVENT_FEATURES = [
+    "catalyst_earnings_beat", "catalyst_buyback", "catalyst_order_win",
+    "catalyst_dividend_hike", "management_change_recent",
+    "days_to_earnings", "days_since_earnings",
 ]
 
 # ── Regime groupings ──────────────────────────────────────────
@@ -93,213 +130,268 @@ def _rr_take_profit(rng: random.Random, stop_loss_pct: float, min_rr: float = 1.
     return round(rng.uniform(min_tp, max_tp), 1)
 
 
-def _generate_momentum(rng: random.Random) -> StrategyDSL:
-    feat    = rng.choice(["return_5d", "return_21d", "momentum_10d", "momentum_20d"])
-    thresh  = rng.uniform(1.5, 6.0)      # must move at least 1.5% to qualify
-    rsi_th  = rng.uniform(45, 58)        # don't chase overbought
-    regime  = rng.choice(["bull_only", "bull_sideways", "all_weather"])
-    n_conds = rng.randint(2, 3)
-    conds   = [_make_condition(feat, ">", round(thresh, 2))]
-    if n_conds >= 2:
-        conds.append(_make_condition("rsi_14", ">", round(rsi_th, 1)))
-    if n_conds >= 3:
-        trend = rng.choice(["macd_signal", "adx_14", "ema20_above_ema50", "price_above_ema50"])
-        t_val = rng.uniform(25, 50)     # ADX > 25 = trending; others are binary/normalised
-        conds.append(_make_condition(trend, ">", round(t_val, 1)))
-    entry  = ConditionGroup(conditions=conds)
-    exit_  = ConditionGroup(conditions=[
-        _make_condition("rsi_14", ">", round(rng.uniform(68, 80), 1)),
+# ── Named, research-backed templates ────────────────────────────────
+# Every template below combines >=1 research-derived condition AND >=1
+# technical confirmation condition — never fires on sentiment alone.
+
+# Tier 1 (owned) vs Tier 2 (bench) symbols for _generate_rotation_monitor —
+# per the curated 12-symbol universe pruning.
+TIER1_OWNED_SYMBOLS = ["BEL", "HDFCBANK", "NTPC"]
+TIER2_BENCH_SYMBOLS = ["ICICIBANK", "INFY", "CDSL", "DRREDDY", "LT", "HAL"]
+
+
+def _generate_post_earnings_drift(rng: random.Random) -> StrategyDSL:
+    """
+    Post-Earnings-Announcement Drift (PEAD) — Ball & Brown (1968); Bernard &
+    Thomas (1989, 1990). Stock prices under-react to earnings surprises: a
+    positive surprise (beat) is followed by continued excess drift over the
+    following weeks rather than an instantaneous full repricing. Entry
+    requires a confirmed beat (catalyst_earnings_beat) AND positive
+    research-synthesis sentiment (research-derived) AND recency to the
+    print (days_since_earnings, technical/event confirmation) — never fires
+    on sentiment alone.
+    """
+    sent_th   = round(rng.uniform(0.1, 0.4), 2)
+    since_th  = rng.randint(0, 2)   # within 0-2 days after results
+    n_conds   = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("catalyst_earnings_beat", "==", 1),
+        _make_condition("research_sentiment", ">", sent_th),
+        _make_condition("days_since_earnings", "<=", since_th),
+    ]
+    if n_conds >= 4:
+        conds.append(_make_condition("rsi_14", ">", round(rng.uniform(45, 60), 1)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("research_sentiment", "<", 0.0),
+        _make_condition("rsi_14", ">", round(rng.uniform(72, 82), 1)),
     ], logic="OR")
-    sl     = round(-rng.uniform(5, 10), 1)
+
+    sl = round(-rng.uniform(6, 10), 1)
     return StrategyDSL(
-        entry_conditions = entry,
+        entry_conditions = ConditionGroup(conditions=conds),
         exit_conditions  = exit_,
-        allowed_regimes  = REGIME_SETS[regime],
-        family           = "momentum",
-        name             = f"Momentum_{feat}_{round(thresh,1)}",
-        min_confidence   = _rand_confidence(rng, 52.0, 68.0),
-        max_holding_days = rng.randint(7, 25),   # min 7 to clear cost drag
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
+        family           = "post_earnings_drift",
+        name             = f"PEAD_sent{sent_th}_since{since_th}",
+        min_confidence   = _rand_confidence(rng, 55.0, 70.0),
+        max_holding_days = rng.randint(10, 40),
         stop_loss_pct    = sl,
-        take_profit_pct  = _rr_take_profit(rng, sl, 1.8),  # min 1.8:1 R:R
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.8),
     )
 
 
-def _generate_mean_reversion(rng: random.Random) -> StrategyDSL:
-    rsi_lo = round(rng.uniform(25, 38), 1)   # deeper oversold = higher conviction
-    n_conds = rng.randint(2, 3)
-    conds = [_make_condition("rsi_14", "<", rsi_lo)]
-    if n_conds >= 2:
-        # Recent pullback confirms oversold (require actual price drop)
-        conds.append(_make_condition("return_5d", "<", round(-rng.uniform(2.0, 5.0), 2)))
+def _generate_momentum_trend(rng: random.Random) -> StrategyDSL:
+    """
+    Cross-sectional/time-series momentum — Jegadeesh & Titman (1993);
+    Moskowitz, Ooi & Pedersen (2012, "Time Series Momentum"). Stocks with
+    strong trailing 3-12 month returns tend to continue outperforming over
+    the following weeks/months. Entry requires positive multi-period price
+    momentum (technical) AND the market-wide regime (research/regime-derived
+    via the Markov module) being bullish — avoids chasing momentum into a
+    deteriorating macro backdrop.
+    """
+    mom_feat = rng.choice(["return_21d", "momentum_20d", "return_63d"])
+    mom_th   = round(rng.uniform(2.0, 6.0), 2)
+    n_conds  = rng.randint(3, 4)
+
+    conds = [
+        _make_condition(mom_feat, ">", mom_th),
+        _make_condition("regime_markov", "==", REGIME_MARKOV_BULL),
+    ]
     if n_conds >= 3:
-        # BB squeeze or Bollinger lower band touch
-        conds.append(_make_condition("bb_width_20", ">", round(rng.uniform(0.03, 0.08), 3)))
-    entry = ConditionGroup(conditions=conds)
+        conds.append(_make_condition("rsi_14", ">", round(rng.uniform(50, 60), 1)))
+    if n_conds >= 4:
+        conds.append(_make_condition("adx_14", ">", round(rng.uniform(20, 28), 1)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition(mom_feat, "<", round(-rng.uniform(1.0, 3.0), 2)),
+        _make_condition("regime_markov", "==", REGIME_MARKOV_BEAR),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(7, 11), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "momentum_trend",
+        name             = f"MomTrend_{mom_feat[:8]}_{mom_th}",
+        min_confidence   = _rand_confidence(rng, 55.0, 70.0),
+        max_holding_days = rng.randint(15, 40),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_mean_reversion_quality(rng: random.Random) -> StrategyDSL:
+    """
+    Short-term mean reversion — Connors & Alvarez's RSI(2) research
+    (short-horizon oversold bounces in trending stocks tend to revert
+    quickly). NOTE — LIMITATION: feature_registry.py only computes RSI(14)
+    (rsi_14); no RSI(2) feature exists yet. This template substitutes an
+    adapted, very-low threshold on rsi_14 (RSI(14) rarely prints as low as
+    RSI(2) does, so the effective threshold band here is intentionally
+    higher than classic RSI(2) < 10 rules) and documents the substitution
+    honestly rather than fabricating an RSI(2) feature. Entry requires
+    rsi_14 oversold AND price still above a longer-term trend proxy
+    (mean reversion within an uptrend, not a falling knife) AND no negative
+    research risk flags (research-derived condition).
+    """
+    rsi_lo  = round(rng.uniform(28, 38), 1)   # adapted RSI(14) oversold band — see docstring
+    n_conds = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("rsi_14", "<", rsi_lo),
+        _make_condition("price_vs_ema50_pct", ">", round(rng.uniform(-2.0, 5.0), 2)),
+        _make_condition("research_risk_flag_negative", "==", 0),
+    ]
+    if n_conds >= 4:
+        conds.append(_make_condition("return_5d", "<", round(-rng.uniform(1.5, 4.0), 2)))
+
     exit_ = ConditionGroup(conditions=[
         _make_condition("rsi_14", ">", round(rng.uniform(50, 60), 1)),
     ])
+
     sl = round(-rng.uniform(4, 8), 1)
     return StrategyDSL(
-        entry_conditions = entry,
+        entry_conditions = ConditionGroup(conditions=conds),
         exit_conditions  = exit_,
         allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
-        family           = "mean_reversion",
-        name             = f"MeanRev_RSI{rsi_lo}",
+        family           = "mean_reversion_quality",
+        name             = f"MeanRevQ_RSI{rsi_lo}",
         min_confidence   = _rand_confidence(rng, 50.0, 65.0),
-        max_holding_days = rng.randint(5, 15),   # min 5 — MR needs time to recover
+        max_holding_days = rng.randint(5, 15),
         stop_loss_pct    = sl,
         take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
     )
 
 
-def _generate_breakout(rng: random.Random) -> StrategyDSL:
-    brk_th = round(rng.uniform(-5, 2), 2)   # wider range — can enter at -5% from 52w high
-    vol_th = round(rng.uniform(1.2, 2.2), 2)
-    n_conds = rng.randint(2, 4)
-    conds = [_make_condition("breakout_distance_52w", ">", brk_th)]
-    if n_conds >= 2:
-        conds.append(_make_condition("volume_ratio_20d", ">", vol_th))
-    if n_conds >= 3:
-        adx_th = round(rng.uniform(18, 32), 1)
-        conds.append(_make_condition("adx_14", ">", adx_th))
+def _generate_event_catalyst(rng: random.Random) -> StrategyDSL:
+    """
+    Event-study drift — corporate-action announcement effects (buybacks:
+    Ikenberry, Lakonishok & Vermaelen 1995; large order wins/contract
+    announcements and dividend increases as positive information signals
+    consistent with the broader post-announcement-drift literature). Entry
+    fires on ANY of buyback / large-order-win / dividend-hike catalysts
+    (research/event-derived, OR logic) AND positive research sentiment AND
+    a technical confirmation (price above a short EMA) — never on the
+    catalyst alone.
+    """
+    sent_th = round(rng.uniform(0.05, 0.3), 2)
+    n_conds = rng.randint(3, 4)
+
+    catalyst_group = ConditionGroup(
+        conditions=[
+            _make_condition("catalyst_buyback", "==", 1),
+            _make_condition("catalyst_order_win", "==", 1),
+            _make_condition("catalyst_dividend_hike", "==", 1),
+        ],
+        logic="OR",
+    )
+    conds = [
+        catalyst_group,
+        _make_condition("research_sentiment", ">", sent_th),
+        _make_condition("price_vs_ema21_pct", ">", round(rng.uniform(-1.0, 2.0), 2)),
+    ]
     if n_conds >= 4:
-        conds.append(_make_condition("price_above_ema50", "==", 1.0))
-    regime = rng.choice(["bull_only", "bull_sideways"])
+        conds.append(_make_condition("management_change_recent", "==", 0))
+
+    sl = round(-rng.uniform(6, 10), 1)
     return StrategyDSL(
         entry_conditions = ConditionGroup(conditions=conds),
-        allowed_regimes  = REGIME_SETS[regime],
-        family           = "breakout",
-        name             = f"Breakout_52w_{round(brk_th,1)}",
-        min_confidence   = _rand_confidence(rng, 52.0, 68.0),
-        max_holding_days = rng.randint(8, 22),
-        stop_loss_pct    = round(-rng.uniform(6, 12), 1),
-        take_profit_pct  = round(rng.uniform(12, 28), 1),
-    )
-
-
-def _generate_sentiment_driven(rng: random.Random) -> StrategyDSL:
-    sent_th = round(rng.uniform(55, 75), 1)
-    n_conds = rng.randint(2, 3)
-    conds = [_make_condition("sentiment_score", ">", sent_th)]
-    if n_conds >= 2:
-        tech_f  = rng.choice(["rsi_14", "momentum_10d", "return_5d", "adx_14"])
-        tech_v  = round(rng.uniform(40, 58), 1)
-        conds.append(_make_condition(tech_f, ">", tech_v))
-    if n_conds >= 3:
-        vel_th = round(rng.uniform(3, 15), 1)
-        conds.append(_make_condition("sentiment_velocity", ">", vel_th))
-    entry   = ConditionGroup(conditions=conds)
-    return StrategyDSL(
-        entry_conditions = entry,
         allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
-        family           = "sentiment_driven",
-        name             = f"Sentiment_GT{sent_th}",
-        min_confidence   = _rand_confidence(rng, 50.0, 65.0),
-        max_holding_days = rng.randint(4, 14),
-        stop_loss_pct    = round(-rng.uniform(5, 9), 1),
-        take_profit_pct  = round(rng.uniform(7, 16), 1),
+        family           = "event_catalyst",
+        name             = f"EventCat_sent{sent_th}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = rng.randint(8, 25),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.8),
     )
 
 
-def _generate_regime_adaptive(rng: random.Random) -> StrategyDSL:
-    regime_set = rng.choice(list(REGIME_SETS.keys()))
-    feat1 = rng.choice(PRICE_FEATURES + TREND_FEATURES[:4])
-    v1    = round(rng.uniform(-3, 5), 2)
+def _generate_regime_dca_timing(rng: random.Random) -> StrategyDSL:
+    """
+    Valuation-conditioned dollar-cost averaging — the well-documented
+    empirical result that DCA/SIP allocations tilted toward periods of
+    depressed valuation (buying more when the market/regime is in a Bear
+    phase and the stock is oversold on a 52-week basis) outperform pure
+    time-based DCA. NOTE: this is fundamentally a monthly SIP-allocation
+    TILT signal, not a standalone entry/exit trade — implemented here as a
+    StrategyDSL so it can run through the existing promotion/backtest
+    pipeline, but its practical use downstream should be as an
+    allocation-tilt signal for the Personal Portfolio module, not a
+    freestanding paper-trading algo. Entry: Markov regime is Bear
+    (research/regime-derived) AND price is notably below its 52-week range
+    (technical confirmation of "cheap").
+    """
+    pos_th  = round(rng.uniform(0.15, 0.35), 2)   # price_position_52w below this = "cheap" zone
     n_conds = rng.randint(2, 3)
-    conds = [_make_condition(feat1, ">", v1)]
-    if n_conds >= 2:
-        feat2 = rng.choice(TREND_FEATURES)
-        v2    = round(rng.uniform(38, 62), 1)
-        conds.append(_make_condition(feat2, ">", v2))
-    if n_conds >= 3:
-        conds.append(_make_condition("regime_confidence", ">", round(rng.uniform(55, 75), 1)))
-    entry  = ConditionGroup(conditions=conds)
-    return StrategyDSL(
-        entry_conditions = entry,
-        allowed_regimes  = REGIME_SETS[regime_set],
-        family           = "regime_adaptive",
-        name             = f"Regime_{regime_set}_{feat1[:6]}",
-        min_confidence   = _rand_confidence(rng, 50.0, 66.0),
-        max_holding_days = rng.randint(6, 20),
-        stop_loss_pct    = round(-rng.uniform(6, 11), 1),
-        take_profit_pct  = round(rng.uniform(9, 22), 1),
-    )
 
-
-def _generate_volume_surge(rng: random.Random) -> StrategyDSL:
-    vol_th  = round(rng.uniform(1.3, 2.8), 2)
-    n_conds = rng.randint(2, 4)
-    conds   = [_make_condition("volume_ratio_20d", ">", vol_th)]
-    if n_conds >= 2:
-        rsi_th  = round(rng.uniform(42, 62), 1)
-        conds.append(_make_condition("rsi_14", ">", rsi_th))
+    conds = [
+        _make_condition("regime_markov", "==", REGIME_MARKOV_BEAR),
+        _make_condition("price_position_52w", "<", pos_th),
+    ]
     if n_conds >= 3:
-        conds.append(_make_condition("return_1d", ">", round(rng.uniform(0.3, 1.8), 2)))
-    if n_conds >= 4:
-        del_th = round(rng.uniform(50, 72), 1)
-        conds.append(_make_condition("delivery_pct", ">", del_th))
+        conds.append(_make_condition("rsi_14", "<", round(rng.uniform(35, 48), 1)))
+
+    sl = round(-rng.uniform(10, 16), 1)   # wide SL — this is an allocation tilt, not a tight trade
     return StrategyDSL(
         entry_conditions = ConditionGroup(conditions=conds),
-        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "bull_only", "all_weather"])],
-        family           = "volume_surge",
-        name             = f"VolSurge_{vol_th}x",
-        min_confidence   = _rand_confidence(rng, 52.0, 67.0),
-        max_holding_days = rng.randint(3, 10),
-        stop_loss_pct    = round(-rng.uniform(4, 8), 1),
-        take_profit_pct  = round(rng.uniform(6, 14), 1),
+        allowed_regimes  = REGIME_SETS["defensive"],
+        family           = "regime_dca_timing",
+        name             = f"RegimeDCA_pos{pos_th}",
+        min_confidence   = _rand_confidence(rng, 50.0, 62.0),
+        max_holding_days = rng.randint(30, 60),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
     )
 
 
-def _generate_volatility_play(rng: random.Random) -> StrategyDSL:
-    atr_th  = round(rng.uniform(1.2, 3.5), 2)
+def _generate_rotation_monitor(rng: random.Random) -> StrategyDSL:
+    """
+    Cross-sectional relative strength / sector rotation — the classic
+    relative-strength rotation approach (e.g. Levy 1967; modern factor
+    literature on cross-sectional momentum) of rotating capital toward
+    names showing the strongest relative strength vs peers/benchmark.
+    LIMITATION — honestly flagged: the DSL evaluates ONE symbol's feature
+    row at a time with no cross-symbol join capability, so a true
+    owned-tier-vs-bench-tier cross-sectional comparison (Tier 1 owned:
+    BEL/HDFCBANK/NTPC vs Tier 2 bench: ICICIBANK/INFY/CDSL/DRREDDY/LT/HAL)
+    cannot be expressed inside a single-symbol DSL rule. This template
+    therefore uses relative_strength_nifty_21d (already-computed feature) as
+    an ABSOLUTE proxy for "this symbol has strong relative strength" — firing
+    per-symbol when RS vs NIFTY is strongly positive. The actual cross-
+    sectional owned-vs-bench COMPARISON is a signal-layer concern that
+    belongs in a post-promotion allocator/rotation monitor built on top of
+    per-symbol outputs, not in this DSL rule — flagged here rather than
+    oversold as something this template doesn't actually do.
+    """
+    rs_th   = round(rng.uniform(3.0, 8.0), 2)   # strong absolute RS-vs-NIFTY proxy
     n_conds = rng.randint(2, 3)
-    conds   = [_make_condition("atr_14", ">", atr_th)]
-    if n_conds >= 2:
-        rsi_th  = round(rng.uniform(32, 52), 1)
-        conds.append(_make_condition("rsi_14", "<", rsi_th))
+
+    conds = [
+        _make_condition("relative_strength_nifty_21d", ">", rs_th),
+        _make_condition("sector_rs_21d", ">", round(rng.uniform(0.5, 3.0), 2)),
+    ]
     if n_conds >= 3:
-        hv_th = round(rng.uniform(35, 65), 1)
-        conds.append(_make_condition("hv_percentile_252d", "<", hv_th))
-    # Volatility plays work in all markets including volatile regimes
+        conds.append(_make_condition("volume_ratio_20d", ">", round(rng.uniform(1.1, 1.6), 2)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("relative_strength_nifty_21d", "<", round(-rng.uniform(0.5, 2.0), 2)),
+    ])
+
+    sl = round(-rng.uniform(7, 11), 1)
     return StrategyDSL(
         entry_conditions = ConditionGroup(conditions=conds),
-        allowed_regimes  = REGIME_SETS[rng.choice(["high_vol", "all_weather", "bull_sideways"])],
-        family           = "volatility_play",
-        name             = f"VolPlay_ATR{atr_th}",
-        min_confidence   = _rand_confidence(rng, 48.0, 64.0),
-        max_holding_days = rng.randint(3, 8),
-        stop_loss_pct    = round(-rng.uniform(3, 7), 1),
-        take_profit_pct  = round(rng.uniform(5, 13), 1),
-    )
-
-
-def _generate_hybrid(rng: random.Random) -> StrategyDSL:
-    # Pick 2-3 features from different categories — wider feature space
-    all_cats = [PRICE_FEATURES, TREND_FEATURES, VOLUME_FEATURES, VOLATILITY_FEATURES]
-    rng.shuffle(all_cats)
-    n_conds = rng.randint(2, 3)
-    conds = []
-    for pool in all_cats[:n_conds]:
-        feat   = rng.choice(pool)
-        # Use feature-appropriate threshold ranges
-        if feat in VOLATILITY_FEATURES:
-            thresh = round(rng.uniform(0.02, 3.0), 3)
-        elif feat in VOLUME_FEATURES:
-            thresh = round(rng.uniform(1.0, 2.5), 2)
-        else:
-            thresh = round(rng.uniform(40, 70), 2)
-        op = rng.choice([">", ">", ">="])   # bias toward greater-than
-        conds.append(_make_condition(feat, op, thresh))
-    entry = ConditionGroup(conditions=conds)
-    return StrategyDSL(
-        entry_conditions = entry,
-        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather", "bull_only"])],
-        family           = "hybrid",
-        name             = f"Hybrid_{conds[0].feature[:6]}_{conds[1].feature[:6]}",
-        min_confidence   = _rand_confidence(rng, 50.0, 66.0),
-        max_holding_days = rng.randint(6, 18),
-        stop_loss_pct    = round(-rng.uniform(5, 10), 1),
-        take_profit_pct  = round(rng.uniform(8, 18), 1),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
+        family           = "rotation_monitor",
+        name             = f"Rotation_RS{rs_th}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = rng.randint(15, 35),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.8),
     )
 
 
@@ -589,14 +681,14 @@ def _generate_long_hold_momentum(rng: random.Random) -> StrategyDSL:
 
 
 _GENERATORS = {
-    "momentum":            _generate_momentum,
-    "mean_reversion":      _generate_mean_reversion,
-    "breakout":            _generate_breakout,
-    "sentiment_driven":    _generate_sentiment_driven,
-    "regime_adaptive":     _generate_regime_adaptive,
-    "volume_surge":        _generate_volume_surge,
-    "volatility_play":     _generate_volatility_play,
-    "hybrid":              _generate_hybrid,
+    # Named, research-backed templates (replace the old 8 generic random families)
+    "post_earnings_drift":     _generate_post_earnings_drift,
+    "momentum_trend":          _generate_momentum_trend,
+    "mean_reversion_quality":  _generate_mean_reversion_quality,
+    "event_catalyst":          _generate_event_catalyst,
+    "regime_dca_timing":       _generate_regime_dca_timing,
+    "rotation_monitor":        _generate_rotation_monitor,
+    # Pre-existing research-backed families (unaffected by this change)
     "quality_momentum":    _generate_quality_momentum,
     "institutional_flow":  _generate_institutional_flow,
     "rl_momentum":         _generate_rl_momentum,
@@ -610,14 +702,13 @@ _GENERATORS = {
 # GO-5b families get high initial weights: diagnosis showed cost drag kills short-hold
 # families; cross-sectional RS and long-hold families are structurally cost-advantaged.
 _FAMILY_WEIGHTS = {
-    "momentum":            0.10,
-    "mean_reversion":      0.07,
-    "breakout":            0.08,
-    "sentiment_driven":    0.04,
-    "regime_adaptive":     0.05,
-    "volume_surge":        0.07,
-    "volatility_play":     0.05,
-    "hybrid":              0.05,
+    # New research-backed templates — initial weights, meta-learner adapts over time
+    "post_earnings_drift":     0.10,
+    "momentum_trend":          0.10,
+    "mean_reversion_quality":  0.08,
+    "event_catalyst":          0.08,
+    "regime_dca_timing":       0.05,   # allocation-tilt signal, not a core trading family
+    "rotation_monitor":        0.08,
     "quality_momentum":    0.09,
     "institutional_flow":  0.06,
     "rl_momentum":         0.09,
@@ -873,7 +964,9 @@ def persist_candidates(
                          ["trend"] if f in TREND_FEATURES else
                          ["sentiment"] if f in SENTIMENT_FEATURES else
                          ["pattern"] if f in PATTERN_FEATURES else
-                         ["regime"] if f in REGIME_FEATURES else [])
+                         ["regime"] if f in REGIME_FEATURES else
+                         ["research"] if f in RESEARCH_FEATURES else
+                         ["events"] if f in EVENT_FEATURES else [])
         })
         row = upsert_strategy(db, {
             "strategy_id":       sid,

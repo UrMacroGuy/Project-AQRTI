@@ -55,14 +55,16 @@ log = get_logger("meta_learner")
 # generation by itself — but it did mean these 4 families were permanently
 # invisible to the death-suppression / live-performance-boost mechanisms.
 _DEFAULT_FAMILY_WEIGHTS = {
-    "momentum":           0.18,
-    "mean_reversion":     0.10,
-    "breakout":           0.12,
-    "sentiment_driven":   0.06,
-    "regime_adaptive":    0.08,
-    "volume_surge":       0.10,
-    "volatility_play":    0.08,
-    "hybrid":             0.08,
+    # Named, research-backed templates (replaced the old 8 generic random
+    # families — momentum/mean_reversion/breakout/sentiment_driven/
+    # regime_adaptive/volume_surge/volatility_play/hybrid — see
+    # strategy_generator.py and BUG_HUNTING.md for the rationale).
+    "post_earnings_drift":     0.10,
+    "momentum_trend":          0.10,
+    "mean_reversion_quality":  0.08,
+    "event_catalyst":          0.08,
+    "regime_dca_timing":       0.05,
+    "rotation_monitor":        0.08,
     "quality_momentum":   0.12,
     "institutional_flow": 0.08,
     "rl_momentum":         0.09,

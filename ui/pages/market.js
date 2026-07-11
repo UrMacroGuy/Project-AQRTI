@@ -101,10 +101,10 @@ async function hydrateMarket() {
           label: 'Strength Score',
           data: sectorStrength.map(s => s.score),
           backgroundColor: sectorStrength.map(s =>
-            s.score >= 80 ? 'rgba(34,197,94,0.7)'
-            : s.score >= 60 ? 'rgba(255,140,0,0.7)'
-            : s.score >= 45 ? 'rgba(245,158,11,0.6)'
-            : 'rgba(239,68,68,0.6)'
+            s.score >= 80 ? 'rgba(240,240,242,0.7)'
+            : s.score >= 60 ? 'rgba(200,200,204,0.7)'
+            : s.score >= 45 ? 'rgba(180,180,184,0.6)'
+            : 'rgba(154,154,159,0.6)'
           ),
           borderRadius: 4, borderSkipped: false,
         }],
@@ -198,9 +198,9 @@ async function loadUniverseSummary() {
       } else if (status && status.last_result) {
         const r = status.last_result;
         alert.style.display = 'block';
-        alert.style.background = 'rgba(34,197,94,0.08)';
-        alert.style.borderColor = 'rgba(34,197,94,0.3)';
-        alert.style.color = '#22c55e';
+        alert.style.background = 'rgba(240,240,242,0.08)';
+        alert.style.borderColor = 'rgba(240,240,242,0.3)';
+        alert.style.color = 'var(--positive)';
         alert.textContent = `Last download: ${r.downloaded} downloaded, ${r.skipped} skipped, ${r.errors} errors, ${(r.total_rows||0).toLocaleString()} rows total`;
       } else {
         alert.style.display = 'none';
@@ -219,9 +219,9 @@ async function seedAndDownloadUniverse(region = 'all') {
   const alert = document.getElementById('universe-download-alert');
   if (alert) {
     alert.style.display = 'block';
-    alert.style.background = 'rgba(251,191,36,0.1)';
-    alert.style.borderColor = 'rgba(251,191,36,0.3)';
-    alert.style.color = '#fbbf24';
+    alert.style.background = 'rgba(200,200,204,0.1)';
+    alert.style.borderColor = 'rgba(200,200,204,0.3)';
+    alert.style.color = 'var(--warning)';
     alert.textContent = 'Starting download…';
   }
 
@@ -237,7 +237,7 @@ async function seedAndDownloadUniverse(region = 'all') {
     }
   } catch (e) {
     if (alert) {
-      alert.style.color = '#ef4444';
+      alert.style.color = 'var(--negative)';
       alert.textContent = `Download failed: ${e.message || e}`;
     }
   }

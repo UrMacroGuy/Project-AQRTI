@@ -149,8 +149,18 @@ LEGACY_SYMBOLS: set[str] = {"LTIM", "TATAMOTORS", "LTM", "TMPV"}
 # SEED UNIVERSE
 # ══════════════════════════════════════════════════════════════
 def seed_stock_universe(db: Session) -> None:
-    """Insert stock metadata rows if not already present."""
-    for symbol, meta in STOCK_META.items():
+    """
+    Insert/refresh stock metadata rows for the curated universe only
+    (settings.universe_clean — see docs/RESEARCH_DRIVEN_REARCHITECTURE.md).
+    STOCK_META is a larger legacy reference dict; only entries whose symbol
+    is in the curated universe are ever written, so this can never
+    repopulate a pruned symbol.
+    """
+    settings = get_settings()
+    curated = set(settings.universe_clean)
+    seeded = 0
+    for symbol in curated:
+        meta = STOCK_META.get(symbol, {"name": symbol, "sector": None, "industry": None, "nifty": False})
         existing = db.query(Stock).filter_by(symbol=symbol).first()
         if not existing:
             db.add(Stock(
@@ -167,12 +177,13 @@ def seed_stock_universe(db: Session) -> None:
             existing.industry = meta["industry"]
             existing.nifty_member = meta["nifty"]
             existing.active = True
+        seeded += 1
     for symbol in LEGACY_SYMBOLS:
         existing = db.query(Stock).filter_by(symbol=symbol).first()
         if existing:
             existing.active = False
     db.commit()
-    data_logger.info("Stock universe seeded — %d stocks.", len(STOCK_META))
+    data_logger.info("Stock universe seeded — %d curated stocks.", seeded)
 
 
 # ══════════════════════════════════════════════════════════════

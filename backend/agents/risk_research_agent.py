@@ -18,7 +18,7 @@ if backend_dir not in sys.path:
 from sqlalchemy.orm import Session
 from aqrti.database.models import (
     PaperTrade, PaperPosition, PaperPortfolio, PerformanceSnapshot,
-    EquityCurvePoint, DailyPrice, IndexData,
+    EquityCurvePoint, DailyPrice, IndexData, Stock,
 )
 from aqrti.utils.logger import get_logger
 from agents.agent_base import AgentBase
@@ -49,7 +49,9 @@ SECTOR_MAP = {
     "ADANIENT": "Conglomerate", "BEL": "Defence",
 }
 
-STOCK_UNIVERSE = list(SECTOR_MAP.keys())
+def _stock_universe(db: Session) -> list[str]:
+    """DB-driven active universe (curated 12-symbol set, 2026-07 prune)."""
+    return [s.symbol for s in db.query(Stock.symbol).filter(Stock.active == True).all()]
 
 
 class RiskResearchAgent(AgentBase):
@@ -188,7 +190,8 @@ class RiskResearchAgent(AgentBase):
         # ── 4. Market Risk from Price Data (fallback + supplement) ─
         try:
             stock_returns: list[float] = []
-            for symbol in STOCK_UNIVERSE:
+            universe = _stock_universe(db)
+            for symbol in universe:
                 rows = (
                     db.query(DailyPrice.daily_return)
                     .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)
@@ -210,7 +213,7 @@ class RiskResearchAgent(AgentBase):
                 findings.append({
                     "title":       f"Market Risk: Universe Volatility {vol_ann:.1f}% ann., 1-day VaR {var_95:.2f}%",
                     "description": (
-                        f"NSE universe (20 stocks, 30d) annualised vol={vol_ann:.1f}%. "
+                        f"Tracked universe ({len(universe)} symbols, 30d) annualised vol={vol_ann:.1f}%. "
                         f"Parametric 95% 1-day VaR={var_95:.2f}% per unit invested."
                     ),
                     "evidence":    f"vol_ann={vol_ann:.1f}%, var_95={var_95:.2f}%, n_returns={len(stock_returns)}",
@@ -222,7 +225,7 @@ class RiskResearchAgent(AgentBase):
                 # Worst single-day drop across universe
                 worst = min(stock_returns)
                 worst_sym = None
-                for symbol in STOCK_UNIVERSE:
+                for symbol in universe:
                     rows = (
                         db.query(DailyPrice.daily_return, DailyPrice.date)
                         .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)

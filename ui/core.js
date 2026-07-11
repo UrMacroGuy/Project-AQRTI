@@ -1,4 +1,4 @@
-// ui/core.js - split from app.js (ARCH-5), see CHANGELOG
+﻿// ui/core.js - split from app.js (ARCH-5), see CHANGELOG
 /**
  * AQRTI Intelligence Terminal — app.js
  * UI shell hydrated entirely from the live backend API — no mock data.
@@ -7,9 +7,9 @@
  * reuse errors.
  */
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CHART.JS GLOBAL DEFAULTS — Dark Terminal Theme
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Bloomberg black/amber palette
 // Guarded: if the Chart.js <script> tag failed to load (blocked/offline CDN,
 // network-restricted dev environment), `Chart` is undefined here. Without
@@ -27,16 +27,16 @@ if (typeof Chart !== 'undefined') {
   Chart.defaults.plugins.tooltip.backgroundColor = '#0d0d0d';
   Chart.defaults.plugins.tooltip.borderColor     = '#2a2a2a';
   Chart.defaults.plugins.tooltip.borderWidth     = 1;
-  Chart.defaults.plugins.tooltip.titleColor      = '#ff8c00';
+  Chart.defaults.plugins.tooltip.titleColor      = '#ff9500';
   Chart.defaults.plugins.tooltip.bodyColor       = '#888888';
   Chart.defaults.plugins.legend.labels.color     = '#444444';
 } else {
   console.error('[AQRTI] Chart.js failed to load — charts will be unavailable, but the rest of the app will still work.');
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CHART REGISTRY — prevents "Canvas already in use" errors
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const ChartRegistry = (() => {
   const instances = {};
   return {
@@ -57,9 +57,9 @@ const ChartRegistry = (() => {
   };
 })();
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // HELPERS
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function el(id) { return document.getElementById(id); }
 
 function setDataPoint(id, value, source, timestamp) {
@@ -93,7 +93,7 @@ function riskBadge(risk) {
 }
 
 function statusBadge(status) {
-  const labels = { institutional: '★ Institutional', production: 'Production', paper: 'Paper', shadow: 'Shadow', retired: 'Retired' };
+  const labels = { institutional: 'â˜… Institutional', production: 'Production', paper: 'Paper', shadow: 'Shadow', retired: 'Retired' };
   return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
 }
 
@@ -103,9 +103,9 @@ function sentColor(val) {
   return 'negative';
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CLOCK
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function updateClock() {
   const now = new Date();
   const hh = String(now.getHours()).padStart(2,'0');
@@ -125,25 +125,21 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // NAVIGATION
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const pageSubtitles = {
-  overview:            'Command Center',
-  market:              'Market Intelligence',
-  'live-prices':       'Live Market Prices',
-  opportunity:         'Opportunity Rankings',
-  news:                'News Intelligence',
-  sentiment:           'Sentiment Center',
-  strategy:            'Algo Lab',
-  model:               'Model Center',
-  learning:            'Learning Center',
+  cockpit:             'Portfolio Cockpit',
+  market:              'Market',
+  analytics:           'Analytics',
+  news:                'Research',
+  strategy:            'Algos',
   risk:                'Risk Center',
   paper:               'Paper Portfolio',
-  agents:              'Research Operations',
-  vault:               'Intelligence Vault',
-  'intelligence-lab':  'Historical Intelligence',
-  'data-intelligence': 'Data Intelligence',
+  agents:              'Agents',
+  arena:               'Algo Arena',
+  gonogo:              'Go / No-Go',
+  markov:              'Markov Regime',
 };
 
 function activatePage(pageId) {
@@ -163,10 +159,10 @@ function activatePage(pageId) {
     btn.classList.remove('active-page');
   });
   const fkeyMap = {
-    'overview': 'fk-overview', 'market': 'fk-market', 'opportunity': 'fk-opportunity',
-    'live-prices': 'fk-live-prices', 'news': 'fk-news', 'strategy': 'fk-strategy',
-    'paper': 'fk-paper', 'risk': 'fk-risk', 'model': 'fk-model',
-    'learning': 'fk-learning', 'agents': 'fk-agents', 'screener': 'fk-screener',
+    'cockpit': 'fk-cockpit', 'market': 'fk-market', 'analytics': 'fk-analytics',
+    'news': 'fk-news', 'agents': 'fk-agents', 'strategy': 'fk-strategy',
+    'arena': 'fk-arena', 'gonogo': 'fk-gonogo', 'markov': 'fk-markov',
+    'paper': 'fk-paper', 'risk': 'fk-risk',
   };
   const fkActive = el(fkeyMap[pageId]);
   if (fkActive) fkActive.classList.add('active-page');
@@ -175,9 +171,9 @@ function activatePage(pageId) {
   _session.save(pageId);
 }
 
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SESSION PERSISTENCE — survive dev server restarts
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const _session = {
   KEY: 'aqrti_session',
 
@@ -246,10 +242,10 @@ function _sessionToast(session) {
 
   const age = Math.round((Date.now() - session.savedAt) / 60000);
   const ageStr = age < 1 ? 'just now' : age < 60 ? `${age}m ago` : `${Math.round(age/60)}h ago`;
-  const pageName = (session.page || 'overview').toUpperCase().replace(/-/g, ' ');
+  const pageName = (session.page || 'cockpit').toUpperCase().replace(/-/g, ' ');
 
   // Store session data on window so the resume button can access it
-  // (localStorage was already overwritten by renderPage('overview'))
+  // (localStorage was already overwritten by renderPage('cockpit'))
   window._pendingSession = session;
 
   const toast = document.createElement('div');
@@ -265,23 +261,23 @@ function _sessionToast(session) {
   `;
   toast.innerHTML = `
     <style>@keyframes slideUp{from{transform:translateX(-50%) translateY(20px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}</style>
-    <span style="color:var(--accent,#ff8c00);font-size:1.2rem">◈</span>
+    <span style="color:var(--accent,#ff9500);font-size:1.2rem">â—ˆ</span>
     <div style="flex:1">
       <div style="color:#f1f5f9;font-weight:700;letter-spacing:0.08em;font-size:0.75rem">SESSION FOUND</div>
       <div style="color:rgba(255,255,255,0.5);margin-top:3px;font-size:0.7rem">
-        Last on <span style="color:var(--accent,#ff8c00);font-weight:600">${pageName}</span> · saved ${ageStr}
+        Last on <span style="color:var(--accent,#ff9500);font-weight:600">${pageName}</span> · saved ${ageStr}
       </div>
     </div>
     <button id="aqrti-resume-btn"
       style="background:rgba(255,140,0,0.18);border:1px solid rgba(255,140,0,0.6);
-             color:var(--accent,#ff8c00);padding:8px 18px;border-radius:6px;
+             color:var(--accent,#ff9500);padding:8px 18px;border-radius:6px;
              cursor:pointer;font-family:inherit;font-size:0.72rem;font-weight:700;
              letter-spacing:0.08em;white-space:nowrap;transition:background 0.15s">
       RESUME ›
     </button>
     <button onclick="document.getElementById('aqrti-session-toast').remove()"
       style="background:transparent;border:none;color:rgba(255,255,255,0.35);
-             cursor:pointer;font-size:1.1rem;padding:0 4px;line-height:1">✕</button>
+             cursor:pointer;font-size:1.1rem;padding:0 4px;line-height:1">âœ•</button>
   `;
   document.body.appendChild(toast);
 
@@ -307,23 +303,19 @@ function _sessionToast(session) {
   setTimeout(() => { if (toast.parentNode) toast.remove(); }, 30000);
 }
 
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // COMMAND PALETTE — Bloomberg-style GO function
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const CMD_PAGES = [
-  { icon: '◈', label: 'Overview',              hint: 'Command Center',        page: 'overview' },
-  { icon: '◎', label: 'Market Intelligence',   hint: 'Indices · Sectors',     page: 'market' },
-  { icon: '◉', label: 'Live Prices',           hint: 'Real-time quotes',      page: 'live-prices' },
-  { icon: '◆', label: 'Opportunity Rankings',  hint: 'Signals · Confidence',  page: 'opportunity' },
-  { icon: '◉', label: 'News Intelligence',     hint: 'Headlines · Sentiment', page: 'news' },
-  { icon: '◐', label: 'Sentiment Center',      hint: 'Fear/Greed · Scores',   page: 'sentiment' },
-  { icon: '▣', label: 'Algo Research',     hint: 'Leaderboard · Replay',  page: 'strategy' },
-  { icon: '▦', label: 'Model Center',          hint: 'ML Registry · AUC',     page: 'model' },
-  { icon: '▷', label: 'Learning Center',       hint: 'Knowledge · Failures',  page: 'learning' },
-  { icon: '◎', label: 'Research Ops',          hint: '7 Agents · Daily Brief',page: 'agents' },
-  { icon: '▩', label: 'Intelligence Vault',    hint: 'Replay · Archive',      page: 'vault' },
-  { icon: '⬟', label: 'Historical Intelligence',hint: 'Regimes · Meta-Learn', page: 'intelligence-lab' },
-  { icon: '◫', label: 'Data Intelligence',     hint: 'FII/DII · Options',     page: 'data-intelligence' },
+  { icon: 'â—ˆ', label: 'Portfolio Cockpit',     hint: '12-symbol overview',    page: 'cockpit' },
+  { icon: '◎', label: 'Market',                hint: 'Indices · Sectors',     page: 'market' },
+  { icon: 'â—ˆ', label: 'Analytics',             hint: 'Portfolio performance', page: 'analytics' },
+  { icon: '◉', label: 'Research',              hint: 'News · Sentiment · Synthesis', page: 'news' },
+  { icon: '◎', label: 'Agents',                hint: 'Research agents · Daily Brief', page: 'agents' },
+  { icon: '▣', label: 'Algos',                 hint: 'Leaderboard · Replay',  page: 'strategy' },
+  { icon: 'âš”', label: 'Arena',                 hint: 'Promotion gates',       page: 'arena' },
+  { icon: 'âœ…', label: 'Go / No-Go',            hint: 'Morning decision',      page: 'gonogo' },
+  { icon: '◇', label: 'Markov Regime',         hint: 'Bull · Bear · Sideways',page: 'markov' },
   { icon: '◈', label: 'Paper Portfolio',       hint: 'Positions · P&L',       page: 'paper' },
   { icon: '⬡', label: 'Risk Center',           hint: 'VaR · Drawdown · CB',   page: 'risk' },
 ];
@@ -414,11 +406,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// ── Bloomberg F-key physical keyboard shortcuts ───────────────
+// â”€â”€ Bloomberg F-key physical keyboard shortcuts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const _fkeyPageMap = {
-  F1:  'overview', F2: 'market',     F3: 'opportunity', F4: 'live-prices',
-  F5:  'news',     F6: 'strategy',   F7: 'paper',       F8: 'risk',
-  F9:  'model',    F10: 'learning',  F11: 'agents',     F12: 'screener',
+  F1:  'cockpit',  F2: 'market',   F3: 'analytics', F4: 'news',
+  F5:  'agents',   F6: 'strategy', F7: 'arena',      F8: 'gonogo',
+  F9:  'markov',   F10: 'paper',   F11: 'risk',
 };
 document.addEventListener('keydown', (e) => {
   // Only activate F-keys when not typing in an input
@@ -429,27 +421,22 @@ document.addEventListener('keydown', (e) => {
   if (page) { e.preventDefault(); activatePage(page); renderPage(page); }
 });
 
-// ── Bloomberg GO> command bar ─────────────────────────────────
+// â”€â”€ Bloomberg GO> command bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Behaves like Bloomberg terminal: type a mnemonic and press Enter
 const _bbgCommands = {
   // Page mnemonics
-  'GO':    'overview',  'OV':    'overview',  'HP':  'overview',
+  'GO':    'cockpit',   'CKPT': 'cockpit',   'CP':    'cockpit',   'HOME': 'cockpit', 'HP': 'cockpit',
   'MKT':  'market',    'MRKT':  'market',    'IM':  'market',
-  'SIG':  'opportunity','TRADE':'opportunity','OPP': 'opportunity',
-  'LIVE': 'live-prices','PX':   'live-prices','GPRT':'live-prices',
-  'NI':   'news',       'NEWS': 'news',       'TOP': 'news',
-  'SENT': 'sentiment',  'SENT1':'sentiment',
   'ANLT': 'analytics',  'AN':   'analytics',
-  'STRAT':'strategy',   'ST':   'strategy',   'EVL': 'strategy',
-  'MDL':  'model',      'ML':   'model',
-  'LRN':  'learning',   'INTEL':'learning',
-  'RSK':  'risk',       'RISK': 'risk',       'VRA': 'risk',
-  'PORT': 'paper',      'PPT':  'paper',      'PA':  'paper',
+  'NI':   'news',       'NEWS': 'news',       'TOP': 'news',
+  'SENT': 'news',       'SENT1':'news',        'RSCH':'news',
   'AGT':  'agents',     'ROP':  'agents',
-  'VLT':  'vault',      'ARCH': 'vault',
-  'SCRN': 'screener',   'EQS':  'screener',
-  'DI':   'data-intelligence', 'DATA': 'data-intelligence',
+  'STRAT':'strategy',   'ST':   'strategy',   'EVL': 'strategy',
   'ARENA':'arena',      'ART':  'arena',
+  'GNG':  'gonogo',     'GONOGO':'gonogo',
+  'MKV':  'markov',     'REGIME':'markov',
+  'PORT': 'paper',      'PPT':  'paper',      'PA':  'paper',
+  'RSK':  'risk',       'RISK': 'risk',       'VRA': 'risk',
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -480,8 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // Treat as symbol search → go to screener with prefilled symbol
-      // or fall through to command palette
+      // Treat as symbol/command search — fall through to command palette
       openCmdPalette();
       const palette = document.getElementById('cmd-palette-input');
       if (palette) { palette.value = cmd; renderCmdResults(cmd); }
@@ -499,9 +485,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // NEWS TICKER STRIP — Bloomberg amber bar hydration
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 async function hydratePipelineHealthBanner() {
   const banner = el('pipeline-fail-banner');
   const detail = el('pipeline-fail-detail');
@@ -542,9 +528,9 @@ async function hydrateWatchdogRestartPill() {
   }
 }
 
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // GO-1 / GO-7 / GO-8: Go/No-Go Scorecard hydration
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function hydrateGoNogo() {
   const condEl    = el('gonogo-conditions');
@@ -561,19 +547,19 @@ async function hydrateGoNogo() {
     return;
   }
 
-  // ── Overall banner ───────────────────────────────────────────
+  // â”€â”€ Overall banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (bannerEl) {
-    const overallColor = data.overall === 'green' ? '#22c55e' : data.overall === 'partial' ? '#f59e0b' : '#ef4444';
-    const overallIcon  = data.overall === 'green' ? '✅ ALL CLEAR' : data.overall === 'partial' ? '⚠️ PARTIAL' : '❌ NOT READY';
+    const overallColor = data.overall === 'green' ? '#22c55e' : data.overall === 'partial' ? '#fbbf24' : '#ef4444';
+    const overallIcon  = data.overall === 'green' ? 'âœ… ALL CLEAR' : data.overall === 'partial' ? 'âš ï¸ PARTIAL' : 'âŒ NOT READY';
     bannerEl.style.cssText = `margin-bottom:20px;padding:12px 16px;border-radius:6px;font-size:0.8rem;letter-spacing:0.06em;background:${overallColor}18;border:1px solid ${overallColor}40;color:${overallColor};font-weight:600`;
     bannerEl.textContent = overallIcon + (data.overall === 'green' ? ' — All 5 conditions met. Ready for real capital.' : data.overall === 'partial' ? ' — Some conditions met. Not ready for real capital.' : ' — Conditions not met. Do NOT trade real capital.');
     bannerEl.style.display = 'block';
   }
 
-  // ── Condition cards ──────────────────────────────────────────
+  // â”€â”€ Condition cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function condCard(c) {
-    const color = c.status === 'green' ? '#22c55e' : c.status === 'partial' ? '#f59e0b' : '#ef4444';
-    const icon  = c.status === 'green' ? '✅' : c.status === 'partial' ? '⚠️' : '❌';
+    const color = c.status === 'green' ? '#22c55e' : c.status === 'partial' ? '#fbbf24' : '#ef4444';
+    const icon  = c.status === 'green' ? 'âœ…' : c.status === 'partial' ? 'âš ï¸' : 'âŒ';
     return `<div style="background:var(--card-bg);border:1px solid ${color}40;border-left:3px solid ${color};border-radius:6px;padding:14px 16px">
       <div style="font-size:1rem">${icon} <strong style="color:${color}">${c.label}</strong></div>
       <div style="color:var(--text-muted);font-size:0.78rem;margin-top:6px">${c.detail}</div>
@@ -581,7 +567,7 @@ async function hydrateGoNogo() {
   }
   condEl.innerHTML = (data.conditions || []).map(condCard).join('');
 
-  // ── Quarantine progress ──────────────────────────────────────
+  // â”€â”€ Quarantine progress â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (quarEl) {
     const algos = data.quarantine_algos || [];
     if (algos.length === 0) {
@@ -589,7 +575,7 @@ async function hydrateGoNogo() {
     } else {
       const rows = algos.map(a => {
         const ok = a.quarantine_ok;
-        const rowColor = ok ? '#22c55e' : '#f59e0b';
+        const rowColor = ok ? '#22c55e' : '#fbbf24';
         const gates = a.gates || {};
         const gateHtml = [
           ['>=60d', gates.days_60],
@@ -597,15 +583,15 @@ async function hydrateGoNogo() {
           ['>=50% WR', gates.wr_50pct],
           ['+P&L', gates.positive_pnl],
         ].map(([lbl, v]) =>
-          `<span style="margin-right:8px;color:${v ? '#22c55e' : '#6b7280'}">${v ? '✓' : '○'} ${lbl}</span>`
+          `<span style="margin-right:8px;color:${v ? '#22c55e' : '#75757a'}">${v ? 'âœ“' : 'â—‹'} ${lbl}</span>`
         ).join('');
         return `<tr style="border-bottom:1px solid var(--border-faint)">
-          <td style="padding:8px 6px;color:${rowColor};font-size:0.8rem">${ok ? '✅' : '⏳'} ${a.name}</td>
+          <td style="padding:8px 6px;color:${rowColor};font-size:0.8rem">${ok ? 'âœ…' : 'â³'} ${a.name}</td>
           <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${a.strategy_id}</td>
           <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.days_in_quarantine}d</td>
           <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.shadow_trades}</td>
           <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.shadow_wr}%</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:${a.net_pnl >= 0 ? '#22c55e' : '#ef4444'}">₹${a.net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:${a.net_pnl >= 0 ? '#22c55e' : '#ef4444'}">â‚¹${a.net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
           <td style="padding:8px 6px;font-size:0.72rem">${gateHtml}</td>
         </tr>`;
       }).join('');
@@ -624,7 +610,7 @@ async function hydrateGoNogo() {
     }
   }
 
-  // ── Actionable signals ───────────────────────────────────────
+  // â”€â”€ Actionable signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (sigEl) {
     const sigs = data.actionable_signals || [];
     if (sigs.length === 0) {
@@ -637,7 +623,7 @@ async function hydrateGoNogo() {
           <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.algo_name}</td>
           <td style="padding:8px 6px;font-size:0.78rem">${s.direction || '—'}</td>
           <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.entry_date || '—'}</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">₹${(s.entry_price || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">â‚¹${(s.entry_price || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
           <td style="padding:8px 6px;text-align:right;font-size:0.82rem;color:${pnlColor}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
         </tr>`;
       }).join('');
@@ -758,17 +744,17 @@ async function hydrateGoNogoRiskRails() {
   }
 
   const rows = data.rules.map(r => `
-    <div style="border:1px solid var(--border-faint);border-left:3px solid #f59e0b;border-radius:5px;padding:10px 14px;margin-bottom:8px">
-      <div style="font-size:0.8rem;font-weight:600;color:#f59e0b">Rule ${r.id}: ${r.rule}</div>
+    <div style="border:1px solid var(--border-faint);border-left:3px solid #fbbf24;border-radius:5px;padding:10px 14px;margin-bottom:8px">
+      <div style="font-size:0.8rem;font-weight:600;color:#fbbf24">Rule ${r.id}: ${r.rule}</div>
       <div style="font-size:0.76rem;color:var(--text-muted);margin-top:4px">${r.detail}</div>
     </div>`).join('');
 
   railsEl.innerHTML = rows + `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;padding:8px 12px;background:var(--card-bg);border-radius:4px;border:1px solid var(--border-faint)">${data.note || ''}</div>`;
 }
 
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // GO-7: Morning Decision Screen hydration
-// ══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function hydrateMorningDecision() {
   const panelEl = document.getElementById('morning-decision-panel');
@@ -786,12 +772,12 @@ async function hydrateMorningDecision() {
   const hasNoAction  = data.no_action;
   const noActionText = data.no_action_reason || '';
 
-  // ── NO ACTION banner ────────────────────────────────────────
+  // â”€â”€ NO ACTION banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let noActionHtml = '';
   if (hasNoAction) {
     noActionHtml = `
       <div style="margin-bottom:14px;padding:12px 16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:6px;display:flex;align-items:flex-start;gap:10px">
-        <span style="font-size:1.2rem;color:#ef4444;flex-shrink:0">⛔</span>
+        <span style="font-size:1.2rem;color:#ef4444;flex-shrink:0">â›”</span>
         <div>
           <div style="color:#ef4444;font-weight:700;font-size:0.82rem;letter-spacing:0.04em;margin-bottom:4px">NO ACTION TODAY</div>
           <div style="color:var(--text-muted);font-size:0.76rem">${noActionText}</div>
@@ -799,20 +785,20 @@ async function hydrateMorningDecision() {
       </div>`;
   }
 
-  // ── Regime + Risk posture bar ────────────────────────────────
+  // â”€â”€ Regime + Risk posture bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const regime      = data.regime || '—';
   const regimeDate  = data.regime_date || '';
   const posture     = data.risk_posture || 'normal';
   const cbOk        = data.circuit_breaker_ok;
-  const postureIcon = posture === 'high' ? '🔴' : posture === 'elevated' ? '🟡' : '🟢';
-  const postureCls  = posture === 'high' ? '#ef4444' : posture === 'elevated' ? '#f59e0b' : '#22c55e';
-  const cbIcon      = cbOk === true ? '🟢' : cbOk === false ? '🔴' : '⚪';
+  const postureIcon = posture === 'high' ? 'ðŸ”´' : posture === 'elevated' ? 'ðŸŸ¡' : 'ðŸŸ¢';
+  const postureCls  = posture === 'high' ? '#ef4444' : posture === 'elevated' ? '#fbbf24' : '#22c55e';
+  const cbIcon      = cbOk === true ? 'ðŸŸ¢' : cbOk === false ? 'ðŸ”´' : 'âšª';
 
   let regimeHtml = `
     <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;font-size:0.76rem">
       <div style="padding:6px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px;display:flex;align-items:center;gap:6px">
         <span style="font-weight:600;color:var(--text-primary)">Regime:</span>
-        <span style="color:${regime === 'BULL' ? '#22c55e' : regime === 'BEAR' ? '#ef4444' : '#f59e0b'}">${regime}</span>
+        <span style="color:${regime === 'BULL' ? '#22c55e' : regime === 'BEAR' ? '#ef4444' : '#fbbf24'}">${regime}</span>
         ${regimeDate ? `<span style="color:var(--text-muted);font-size:0.68rem">(${regimeDate})</span>` : ''}
       </div>
       <div style="padding:6px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px;display:flex;align-items:center;gap:6px">
@@ -830,7 +816,7 @@ async function hydrateMorningDecision() {
       </div>
     </div>`;
 
-  // ── Signals table ────────────────────────────────────────────
+  // â”€â”€ Signals table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let signalsHtml = '';
   const sigs = data.signals || [];
 
@@ -844,7 +830,7 @@ async function hydrateMorningDecision() {
         <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.algo_name}</td>
         <td style="padding:8px 6px;font-size:0.78rem;color:${dirCls}">${s.direction || '—'}</td>
         <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:${pnlCls}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
-        <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:var(--text-muted)">₹${(s.position_size_inr || 0).toLocaleString('en-IN')}</td>
+        <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:var(--text-muted)">â‚¹${(s.position_size_inr || 0).toLocaleString('en-IN')}</td>
         <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.stop_loss_pct != null ? (s.stop_loss_pct * 100).toFixed(1) + '%' : '—'}</td>
         <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.take_profit_pct != null ? (s.take_profit_pct * 100).toFixed(1) + '%' : '—'}</td>
         <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.confidence != null ? s.confidence + '%' : '—'}</td>
@@ -865,7 +851,7 @@ async function hydrateMorningDecision() {
             <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Algo</th>
             <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Dir</th>
             <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">P&L%</th>
-            <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Size ₹</th>
+            <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Size â‚¹</th>
             <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">SL</th>
             <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">TP</th>
             <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Conf</th>
@@ -881,7 +867,7 @@ async function hydrateMorningDecision() {
     signalsHtml = '<div style="color:var(--text-muted);font-size:0.78rem;padding:8px 0">No open positions from promoted/active algos. All signals flat — no action needed.</div>';
   }
 
-  // ── Act/Skip buttons (only when there are signals and no NO ACTION) ──
+  // â”€â”€ Act/Skip buttons (only when there are signals and no NO ACTION) â”€â”€
   let actHtml = '';
   if (!hasNoAction && sigs.length > 0) {
     const btnRows = sigs.map((s, i) => {
@@ -890,8 +876,8 @@ async function hydrateMorningDecision() {
       return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-faint);font-size:0.76rem">
         <span style="flex:0 0 100px;font-weight:600">${s.symbol}</span>
         <span style="flex:0 0 120px;color:var(--text-muted);font-size:0.72rem">${s.algo_name}</span>
-        <button id="${actId}" class="btn-sm" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);color:#22c55e" onclick="morningAct('${s.strategy_id}','${s.symbol}','acted')">✓ Acted</button>
-        <button id="${skipId}" class="btn-sm" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444" onclick="morningAct('${s.strategy_id}','${s.symbol}','skipped')">✗ Skip</button>
+        <button id="${actId}" class="btn-sm" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);color:#22c55e" onclick="morningAct('${s.strategy_id}','${s.symbol}','acted')">âœ“ Acted</button>
+        <button id="${skipId}" class="btn-sm" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444" onclick="morningAct('${s.strategy_id}','${s.symbol}','skipped')">âœ— Skip</button>
         <span id="m-feedback-${i}" style="font-size:0.68rem;color:var(--text-muted)"></span>
       </div>`;
     }).join('');
@@ -904,7 +890,7 @@ async function hydrateMorningDecision() {
 
   panelEl.innerHTML = noActionHtml + regimeHtml + signalsHtml + actHtml;
 
-  // ── Load act log ──────────────────────────────────────────────
+  // â”€â”€ Load act log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (logEl) {
     let logData = null;
     try { logData = await Api.morningActLog(20); } catch (_) {}
@@ -936,7 +922,7 @@ async function hydrateMorningDecision() {
   }
 }
 
-// ── Global function for act/skip buttons ──────────────────────
+// â”€â”€ Global function for act/skip buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function morningAct(strategyId, symbol, action) {
   const result = await Api.morningAct(strategyId, symbol, action);
   if (result && result.logged) {
@@ -946,18 +932,32 @@ async function morningAct(strategyId, symbol, action) {
 }
 
 async function hydrateNewsStrip() {
+  const strip = document.getElementById('news-strip');
   const inner = document.getElementById('news-strip-inner');
-  if (!inner) return;
+  if (!inner || !strip) return;
 
   const data = await Api.news({ limit: 20, hours: 48 });
-  if (!data || !Array.isArray(data) || !data.length) return;
+  if (!data || !Array.isArray(data) || !data.length) {
+    // Backend offline or no news in the lookback window — there is nothing
+    // honest to show, so hide the whole strip rather than leaving a stuck
+    // "fetching live data…" placeholder or a noisy offline banner sitting
+    // in the layout permanently.
+    strip.style.display = 'none';
+    document.body.classList.add('news-strip-hidden');
+    inner.innerHTML = '';
+    inner.style.animationDuration = '';
+    return;
+  }
+
+  strip.style.display = '';
+  document.body.classList.remove('news-strip-hidden');
 
   // Build items from live news headlines
   const items = data.slice(0, 16).map(n => {
     const sym  = n.symbol || n.entities?.[0] || 'NSE';
     const headline = (n.headline || n.title || '').slice(0, 90);
     const sent = n.sentiment_label || n.sentimentLabel || '';
-    const sentIcon = sent === 'positive' ? '▲' : sent === 'negative' ? '▼' : '◆';
+    const sentIcon = sent === 'positive' ? 'â–²' : sent === 'negative' ? 'â–¼' : 'â—†';
     return `<span class="news-strip-item"><span class="strip-sym">${sym}</span><span class="strip-sep">·</span>${sentIcon} ${headline}</span>`;
   });
 
@@ -971,23 +971,11 @@ async function hydrateNewsStrip() {
   inner.style.animationDuration = `${duration}s`;
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PAGE RENDERERS
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-// ── OVERVIEW ──────────────────────────────────────────────────
-function renderOverview() {
-  setDataPoint('kpi-portfolio', '…', 'overview');
-  setDataPoint('kpi-daily-pnl', '…', 'overview');
-  setDataPoint('kpi-positions', '…', 'overview');
-  setDataPoint('kpi-predictions', '…', 'overview');
-  setDataPoint('kpi-winrate', '…', 'overview');
-  setDataPoint('kpi-knowledge', '…', 'overview');
-  const tbody = el('top-predictions-body');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:16px">Loading predictions…</td></tr>';
-}
-
-// ── MARKET ────────────────────────────────────────────────────
+// â”€â”€ MARKET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderMarket() {
   // Delegate to live hydration — hydrateMarket() renders all charts/tables
   const moversBody = el('top-movers-body');
@@ -996,89 +984,62 @@ function renderMarket() {
   if (derivBody) derivBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;padding:16px">No options data — run Options Intelligence scraper</td></tr>';
 }
 
-// ── OPPORTUNITIES ─────────────────────────────────────────────
-function renderOpportunities() {
-  // Delegate to hydrateOpportunities() which fetches real predictions
-  const tbody = el('opportunity-body');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);text-align:center;padding:16px">Loading opportunities…</td></tr>';
-  // Wire filter listeners once
-  const confFilter = el('opp-conf-filter');
-  const dirFilter  = el('opp-dir-filter');
-  if (confFilter && !confFilter._wired) {
-    confFilter._wired = true;
-    confFilter.addEventListener('change', () => hydrateOpportunities());
-  }
-  if (dirFilter && !dirFilter._wired) {
-    dirFilter._wired = true;
-    dirFilter.addEventListener('change', () => hydrateOpportunities());
-  }
-}
-
-// ── NEWS ──────────────────────────────────────────────────────
+// â”€â”€ RESEARCH (merged News + Sentiment) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderNews() {
-  // Delegate to hydrateNews() — all live data from backend
+  // Delegate to hydrateNews() + hydrateSentiment() + hydrateResearchSynthesis()
+  // — all live data from backend. Page id stays "news" for backward
+  // compatibility with saved sessions/bookmarks; nav label is "Research".
   const hi = el('news-high-impact');
   if (hi) hi.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.78rem">Loading news…</div>';
   const feed = el('news-feed');
   if (feed) feed.innerHTML = '';
-}
-
-// ── SENTIMENT ─────────────────────────────────────────────────
-function renderSentiment() {
-  // Delegate to hydrateSentiment() — live backend data
   const velBody = el('sentiment-velocity-body');
   if (velBody) velBody.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.78rem">Loading…</div>';
   const narrativeBody = el('narrative-shifts-body');
   if (narrativeBody) narrativeBody.innerHTML = '';
+  const synthBody = el('research-synthesis-body');
+  if (synthBody) synthBody.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px">Loading…</div>';
 }
 
-// ── STRATEGY LAB ──────────────────────────────────────────────
+// â”€â”€ STRATEGY LAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderStrategy() {
   // Delegate to hydrateStrategyResearch() — live backend data
   const tbody = el('strategy-body');
   if (tbody) tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-muted);text-align:center;padding:16px">Loading strategies…</td></tr>';
 }
 
-// ── MODEL CENTER ──────────────────────────────────────────────
-function renderModel() {
-  // Delegate to hydrateModelCenter() — live ML registry from backend
-  const tbody = el('model-registry-body');
-  if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-muted);text-align:center;padding:16px">Loading model registry…</td></tr>';
-}
-
-// ── LEARNING CENTER ───────────────────────────────────────────
+// â”€â”€ RISK CENTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderRisk() {
   // Delegate entirely to hydrateRisk() -- live backend data only, no mock data
   hydrateRisk();
 }
 
 // LAZY RENDER — Render page on first activation
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const rendered = new Set();
 
 function renderPage(pageId) {
   if (rendered.has(pageId)) return;
   rendered.add(pageId);
   const renderers = {
-    overview:    renderOverview,
-    market:      renderMarket,
-    opportunity: renderOpportunities,
-    news:        renderNews,
-    sentiment:   renderSentiment,
-    strategy:    renderStrategy,
-    model:       renderModel,
-    learning:    renderLearning,
-    risk:       renderRisk,
-    paper:      renderPaperPortfolio,
-    gonogo:     () => {},  // rendered entirely by hydrate* functions
-    markov:     () => {},  // rendered entirely by hydrateMarkov (isolated module)
+    cockpit:   () => {},  // rendered entirely by hydrateCockpit()
+    market:    renderMarket,
+    news:      renderNews,
+    strategy:  renderStrategy,
+    risk:      renderRisk,
+    paper:     renderPaperPortfolio,
+    arena:     () => {},  // rendered entirely by hydrateArena()
+    gonogo:    () => {},  // rendered entirely by hydrate* functions
+    markov:    () => {},  // rendered entirely by hydrateMarkov (isolated module)
+    analytics: () => {},  // rendered entirely by hydrateAnalytics()
+    agents:    () => {},  // rendered entirely by hydrateResearchOps()
   };
   if (renderers[pageId]) renderers[pageId]();
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ANIMATED KPI COUNTER
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 function animateCounter(element, target, prefix = '', suffix = '', duration = 800) {
   const start = 0;
   const startTime = performance.now();
@@ -1100,7 +1061,7 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
 
 
 
-// ── Boot sequence poller ──────────────────────────────────────────────────────
+// â”€â”€ Boot sequence poller â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 (function bootPoller() {
   const STEP_LABELS = {
     market_data:       'Pulling market data (OHLCV)…',
@@ -1114,8 +1075,8 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
     learning:          'Running learning & scoring loop…',
   };
   const STEP_ORDER = Object.keys(STEP_LABELS);
-  const ICONS = { pending: '⬡', running: '◈', done: '◆', error: '✗' };
-  const COLORS = { pending: '#374151', running: '#00d4aa', done: '#22c55e', error: '#ef4444' };
+  const ICONS = { pending: 'â¬¡', running: 'â—ˆ', done: 'â—†', error: 'âœ—' };
+  const COLORS = { pending: '#3a3a3e', running: '#ff9500', done: '#22c55e', error: '#ef4444' };
 
   const overlay  = document.getElementById('boot-overlay');
   const bar      = document.getElementById('boot-progress-bar');
@@ -1143,7 +1104,7 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
     if (stepLbl) {
       const cur = status.current_step;
       stepLbl.textContent = cur ? (STEP_LABELS[cur] || cur) : (status.done ? 'All systems ready!' : 'Initialising…');
-      stepLbl.style.color = status.done ? '#22c55e' : '#00d4aa';
+      stepLbl.style.color = status.done ? '#22c55e' : '#ff9500';
     }
     if (elapsed && status.started_at) {
       const secs = Math.round((Date.now() / 1000) - status.started_at);
@@ -1154,8 +1115,8 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
       const el = document.getElementById('boot-s-' + key);
       if (!el) return;
       const s = steps[key] || { status: 'pending', msg: '' };
-      const icon  = ICONS[s.status] || '⬡';
-      const color = COLORS[s.status] || '#374151';
+      const icon  = ICONS[s.status] || 'â¬¡';
+      const color = COLORS[s.status] || '#3a3a3e';
       el.style.color = color;
       el.textContent = icon + ' ' + (STEP_LABELS[key] || key).replace('…', '') + (s.msg ? '  — ' + s.msg : '');
     });
@@ -1206,8 +1167,9 @@ window.addEventListener('DOMContentLoaded', () => {
   // Read previous session BEFORE renderPage() overwrites it
   const prevSession = _session.load();
 
-  // Render initial page (mock data first, then live overwrites)
-  renderPage('overview');
+  // Render initial page — Portfolio Cockpit is the default landing page
+  renderPage('cockpit');
+  activatePage('cockpit');
 
   // Set date — Bloomberg format: 28 JUN 2026
   const dateEl = el('topbar-date');
@@ -1222,9 +1184,6 @@ window.addEventListener('DOMContentLoaded', () => {
   if (liveDot) liveDot.classList.remove('off');
 
   // Live backend hydration on startup
-  hydrateOverview();
-  hydrateOverviewPredictions();
-  hydratePaperPortfolioStrip();
   hydrateMarket();          // topbar from DB (instant, yesterday's close)
   hydrateMarketRegime();
   startTopbarLivePolling(); // overwrites with real-time yfinance prices, refreshes every 30s
@@ -1250,58 +1209,33 @@ const _liveHydrated = new Set(); // kept for manual cache-busting by action butt
 function renderPage(pageId) {
   _originalRenderPage(pageId);
 
-  if (pageId === 'news')        hydrateNews();
-  if (pageId === 'sentiment')   hydrateSentiment();
+  if (pageId === 'news')        { hydrateNews(); hydrateSentiment(); hydrateResearchSynthesis(); }
   if (pageId === 'market')      { hydrateMarket(); loadUniverseSummary().catch(()=>{}); }
-  if (pageId === 'opportunity') { loadTodaySignals(); hydrateOpportunities(); }
-  if (pageId === 'model')       hydrateModelCenter();
   if (pageId === 'paper') { hydratePaperPortfolio(); startPaperPolling(); }
   if (pageId !== 'paper') stopPaperPolling();
   if (pageId === 'risk')        hydrateRisk();
-  // learning: renderLearning() is fully live. _originalRenderPage calls it on first
-  // visit; we only need hydrateLearnCenter (which re-runs renderLearning) on
-  // repeat visits when _originalRenderPage is a no-op due to the rendered guard.
-  if (pageId === 'learning' && _learningInitDone) hydrateLearnCenter();
-  if (pageId === 'learning') _learningInitDone = true;
   if (pageId === 'strategy')    hydrateStrategyResearch();
-  if (pageId === 'agents')           { hydrateResearchOps(); startNewsFeedAutoRefresh(); }
-  if (pageId === 'vault')            hydrateVault();
-  if (pageId === 'data-intelligence') hydrateDataIntelligence();
-  if (pageId === 'overview') {
-    hydrateOverview();
-    hydrateMarketRegime();
-    hydrateOverviewPredictions();
-    hydratePaperPortfolioStrip();
-  }
-  if (pageId === 'intelligence-lab') hydrateIntelligenceLab();
-  if (pageId === 'live-prices')      hydrateLivePrices();
-  if (pageId === 'screener')         hydrateScreener();
-  if (pageId === 'analytics')        hydrateAnalytics();
-  if (pageId === 'arena')            hydrateArena();
-  if (pageId === 'gonogo')           { hydrateMorningDecision(); hydrateGoNogo(); hydrateGoNogoUptime(); hydrateGoNogoRiskRails(); hydrateGoNogoMonthlyReview(); }
-  if (pageId === 'markov')           hydrateMarkov();
+  if (pageId === 'agents')      { hydrateResearchOps(); startNewsFeedAutoRefresh(); }
+  if (pageId === 'analytics')   hydrateAnalytics();
+  if (pageId === 'arena')       hydrateArena();
+  if (pageId === 'gonogo')      { hydrateMorningDecision(); hydrateGoNogo(); hydrateGoNogoUptime(); hydrateGoNogoRiskRails(); hydrateGoNogoMonthlyReview(); }
+  if (pageId === 'markov')      hydrateMarkov();
+  if (pageId === 'cockpit')     hydrateCockpit();
 }
 
 // ── Nav Badges — live counts from backend ────────────────────
 async function refreshNavBadges() {
   const _b = (id, val) => { const e = el(id); if (e && val != null) e.textContent = val; };
   try {
-    const [ov, preds, news, strats, agentData, findings] = await Promise.all([
+    const [ov, news, strats, agentData, findings] = await Promise.all([
       Api.overview().catch(() => null),
-      Api.predictions({ limit: 50 }).catch(() => null),
       Api.news({ limit: 10 }).catch(() => null),
       Api.strategies().catch(() => null),
       Api.agents().catch(() => null),
       Api.findingsSummary().catch(() => null),
     ]);
     if (ov) {
-      _b('badge-overview', ov.openPositions ?? ov.activePredictions ?? '—');
       if (ov.activeStrategies != null) _b('badge-strat', ov.activeStrategies);
-      if (ov.knowledgeScore  != null) _b('badge-intel', ov.knowledgeScore.toFixed(1));
-    }
-    if (preds) {
-      const bullish = preds.filter(p => (p.direction || '').toLowerCase().includes('bull')).length;
-      _b('badge-opp', bullish || preds.length);
     }
     if (news) {
       _b('badge-news', Array.isArray(news) ? news.length : (news.total ?? news.count ?? '—'));
@@ -1324,11 +1258,23 @@ async function refreshNavBadges() {
 
 // ── Topbar Live Ticker — real-time prices every 30s ───────────
 let _topbarLiveTimer = null;
-let _learningInitDone = false;
 
 async function hydrateTopbarLive() {
   const data = await Api.topbarPrices();
-  if (!data || !data.length) return;
+  if (!data || !data.length) {
+    // Backend offline / no source — fall back to a single, calm "—" per
+    // field rather than verbose "NO DATA" / "Backend offline" text that
+    // overflows the tight ticker boxes and reads as glitchy.
+    ['nifty-value', 'banknifty-value', 'vix-value', 'usdinr-value'].forEach(id => {
+      const e = el(id);
+      if (e) e.textContent = '—';
+    });
+    ['nifty-change', 'banknifty-change', 'vix-change', 'usdinr-change'].forEach(id => {
+      const e = el(id);
+      if (e) { e.textContent = '—'; e.className = 'ticker-change'; }
+    });
+    return;
+  }
 
   const nifty     = data.find(d => d.key === 'nifty50');
   const banknifty = data.find(d => d.key === 'banknifty');
@@ -1400,7 +1346,6 @@ document.querySelectorAll('.nav-item').forEach(item => {
     activatePage(pageId);
     renderPage(pageId);
     // Always re-hydrate on every visit (renderPage skips after first render)
-    if (pageId === 'screener')  hydrateScreener();
     if (pageId === 'analytics') hydrateAnalytics();
   });
 });

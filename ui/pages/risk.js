@@ -20,9 +20,9 @@ async function hydrateRisk() {
         datasets: [{
           data: exp.map(e => e.weight),
           backgroundColor: exp.map((_, i) => [
-            'rgba(255,140,0,0.8)', 'rgba(34,197,94,0.6)', 'rgba(59,130,246,0.6)',
-            'rgba(245,158,11,0.6)', 'rgba(239,68,68,0.6)', 'rgba(147,51,234,0.6)',
-            'rgba(236,72,153,0.6)', 'rgba(255,255,255,0.1)',
+            'rgba(240,240,242,0.85)', 'rgba(216,216,220,0.75)', 'rgba(196,196,200,0.7)',
+            'rgba(176,176,180,0.7)', 'rgba(154,154,159,0.7)', 'rgba(132,132,138,0.7)',
+            'rgba(110,110,116,0.7)', 'rgba(88,88,94,0.7)',
           ][i % 8]),
           borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
         }],
@@ -48,8 +48,8 @@ async function hydrateRisk() {
         datasets: [{
           label: 'Drawdown %',
           data: hist.map(h => h.drawdown || 0),
-          borderColor: '#ef4444', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true,
-          backgroundColor: 'rgba(239,68,68,0.12)',
+          borderColor: 'var(--negative)', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true,
+          backgroundColor: 'rgba(154,154,159,0.12)',
         }],
       },
       options: {

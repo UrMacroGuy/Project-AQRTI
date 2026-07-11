@@ -329,3 +329,307 @@ class TestSessionRollback:
         # Attempting to commit without rollback should raise
         with pytest.raises(Exception):
             self.session.commit()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. MIN_OOS_WIN_RATE gate — promote_strategy must reject a strategy whose OOS
+#    win rate is below the 50% floor even when every other gate passes, and
+#    admit it once OOS win rate clears 50%. Uses an in-memory SQLite DB
+#    (real aqrti.database.models.Base) so promote_strategy's actual query/
+#    update path is exercised, not a re-implementation of its logic.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from sqlalchemy import create_engine as _create_engine
+from sqlalchemy.orm import sessionmaker as _sessionmaker
+
+from aqrti.database.models import Base as _AqrtiBase, StrategyV2
+from strategies.promotion_config import MIN_OOS_WIN_RATE
+from strategies.strategy_lifecycle import promote_strategy
+
+
+def _make_promotable_strategy_row(**overrides) -> dict:
+    """Field values that clear every OTHER promotion gate, so a rejection can
+    only come from the gate under test. Mirrors promote_strategy's own
+    thresholds (strategy_lifecycle.py) with comfortable margin."""
+    base = dict(
+        strategy_id      = "AQRTI_STR_TESTOOSWR01",
+        name             = "TestOOSWinRate",
+        family           = "post_earnings_drift",
+        asset_class      = "stock",
+        dsl_json         = "{}",
+        status           = "shadow",
+        fitness_score    = 80.0,
+        trade_count      = 200,
+        win_rate         = 60.0,
+        sharpe           = 1.0,
+        oos_passed       = True,
+        oos_sharpe       = 0.5,
+        oos_win_rate     = 55.0,   # overridden per-test
+        backtest_start   = None,   # skip benchmark gate (requires both start+end)
+        backtest_end     = None,
+    )
+    base.update(overrides)
+    return base
+
+
+class TestMinOosWinRateGate:
+    @pytest.fixture(autouse=True)
+    def setup_db(self):
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        Session = _sessionmaker(bind=engine)
+        self.db = Session()
+        yield
+        self.db.close()
+        engine.dispose()
+
+    def test_49_percent_oos_win_rate_is_rejected(self):
+        row = StrategyV2(**_make_promotable_strategy_row(
+            strategy_id="AQRTI_STR_TESTOOSWR49", oos_win_rate=49.0,
+        ))
+        self.db.add(row)
+        self.db.commit()
+
+        result = promote_strategy(self.db, "AQRTI_STR_TESTOOSWR49")
+
+        assert result["success"] is False
+        assert "oos_win_rate" in result["error"]
+        refreshed = self.db.query(StrategyV2).filter_by(strategy_id="AQRTI_STR_TESTOOSWR49").first()
+        assert refreshed.status == "shadow", "Rejected strategy must not advance past shadow"
+
+    def test_51_percent_oos_win_rate_passes_to_quarantine(self):
+        row = StrategyV2(**_make_promotable_strategy_row(
+            strategy_id="AQRTI_STR_TESTOOSWR51", oos_win_rate=51.0,
+        ))
+        self.db.add(row)
+        self.db.commit()
+
+        result = promote_strategy(self.db, "AQRTI_STR_TESTOOSWR51")
+
+        assert result["success"] is True, result.get("error")
+        refreshed = self.db.query(StrategyV2).filter_by(strategy_id="AQRTI_STR_TESTOOSWR51").first()
+        assert refreshed.status == "promoted", "Accepted strategy must move to promoted (quarantine) status"
+
+    def test_floor_constant_is_50_percent(self):
+        assert MIN_OOS_WIN_RATE == 50.0
+
+
+from aqrti.database.models import PaperTrade, MarketRegime
+import strategies.live_validator as _lv
+
+
+class TestPostPromotionDemotionTriggers:
+    """
+    Post-promotion lifecycle demotion triggers (live_validator.py) — additive
+    checks on top of the pre-existing divergence check, never replacing it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_db(self):
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        Session = _sessionmaker(bind=engine)
+        self.db = Session()
+        yield
+        self.db.close()
+        engine.dispose()
+
+    def _add_trades(self, strategy_id, pnls, base=date(2026, 1, 1)):
+        for i, pnl in enumerate(pnls):
+            self.db.add(PaperTrade(
+                portfolio_name=f"strat_{strategy_id}", symbol="BEL", is_open=False,
+                entry_date=base + timedelta(days=i), exit_date=base + timedelta(days=i + 1),
+                gross_pnl=pnl, gross_pnl_pct=pnl,
+                entry_price=100, shares=1, capital_deployed=100,
+            ))
+        self.db.commit()
+
+    def test_rolling_win_rate_below_floor_demotes(self):
+        row = StrategyV2(strategy_id="AQRTI_STR_WRFLOOR", family="post_earnings_drift",
+                          dsl_json="{}", status="promoted", max_drawdown=-10.0,
+                          sharpe=1.0, win_rate=60.0, allowed_regimes='["BULL"]', bull_sharpe=1.2)
+        self.db.add(row)
+        self.db.commit()
+        # 20 trades, 8 wins = 40% < 50% floor
+        self._add_trades("AQRTI_STR_WRFLOOR", [1.0] * 8 + [-1.0] * 12)
+
+        result = _lv._check_rolling_win_rate_floor(self.db, "AQRTI_STR_WRFLOOR")
+        assert result["demote"] is True
+
+    def test_rolling_win_rate_above_floor_does_not_demote(self):
+        row = StrategyV2(strategy_id="AQRTI_STR_WROK", family="post_earnings_drift",
+                          dsl_json="{}", status="promoted", max_drawdown=-10.0,
+                          sharpe=1.0, win_rate=60.0, allowed_regimes='["BULL"]', bull_sharpe=1.2)
+        self.db.add(row)
+        self.db.commit()
+        # 20 trades, 12 wins = 60% >= 50% floor
+        self._add_trades("AQRTI_STR_WROK", [1.0] * 12 + [-0.8] * 8)
+
+        result = _lv._check_rolling_win_rate_floor(self.db, "AQRTI_STR_WROK")
+        assert result["demote"] is False
+
+    def test_drawdown_breach_over_1_5x_backtest_demotes(self):
+        row = StrategyV2(strategy_id="AQRTI_STR_DDBREACH", family="momentum_trend",
+                          dsl_json="{}", status="promoted", max_drawdown=-10.0,
+                          sharpe=1.0, win_rate=60.0)
+        self.db.add(row)
+        self.db.commit()
+        # peak=5, trough=-20 -> dd = -500% >> 1.5x(-10%) = -15%
+        self._add_trades("AQRTI_STR_DDBREACH", [5, -2, -2, -6, -3, -7, -5])
+
+        result = _lv._check_drawdown_breach(self.db, "AQRTI_STR_DDBREACH")
+        assert result["demote"] is True
+
+    def test_regime_shift_outside_allowed_demotes(self):
+        row = StrategyV2(strategy_id="AQRTI_STR_REGIMESHIFT", family="momentum_trend",
+                          dsl_json="{}", status="promoted", max_drawdown=-10.0,
+                          sharpe=1.0, win_rate=60.0, allowed_regimes='["BULL"]', bull_sharpe=1.2)
+        self.db.add(row)
+        self.db.add(MarketRegime(date=date.today(), regime="BEAR", confidence=80.0))
+        self.db.commit()
+
+        result = _lv._check_regime_shift(self.db, "AQRTI_STR_REGIMESHIFT")
+        assert result["demote"] is True
+
+    def test_regime_within_allowed_and_validated_does_not_demote(self):
+        row = StrategyV2(strategy_id="AQRTI_STR_REGIMEOK", family="momentum_trend",
+                          dsl_json="{}", status="promoted", max_drawdown=-10.0,
+                          sharpe=1.0, win_rate=60.0, allowed_regimes='["BULL","SIDEWAYS"]',
+                          bull_sharpe=1.2, sideways_sharpe=0.5)
+        self.db.add(row)
+        self.db.add(MarketRegime(date=date.today(), regime="BULL", confidence=80.0))
+        self.db.commit()
+
+        result = _lv._check_regime_shift(self.db, "AQRTI_STR_REGIMEOK")
+        assert result["demote"] is False
+
+
+from aqrti.database.models import PortfolioTransaction
+from portfolio.paper_real_reconciliation import reconcile, has_real_trades
+
+
+class TestPaperRealReconciliation:
+    @pytest.fixture(autouse=True)
+    def setup_db(self):
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        Session = _sessionmaker(bind=engine)
+        self.db = Session()
+        yield
+        self.db.close()
+        engine.dispose()
+
+    def test_no_real_trades_reports_honestly(self):
+        assert has_real_trades(self.db) is False
+        result = reconcile(self.db)
+        assert result["has_real_trades"] is False
+        assert result["comparisons"] == []
+        assert result["persistent_gap_flags"] == []
+
+    def test_matches_real_transaction_to_paper_trade_within_window(self):
+        base = date(2026, 1, 1)
+        self.db.add(PortfolioTransaction(
+            ticker="BEL", transaction_type="buy", quantity=10, price=105.0,
+            amount=1050.0, transaction_date=base, broker="zerodha",
+        ))
+        self.db.add(PaperTrade(
+            portfolio_name="strat_TEST", symbol="BEL", is_open=False,
+            entry_date=base + timedelta(days=1), exit_date=base + timedelta(days=6),
+            entry_price=100.0, exit_price=110.0, shares=1, capital_deployed=100,
+            strategy_id="AQRTI_STR_TEST",
+        ))
+        self.db.commit()
+
+        result = reconcile(self.db)
+        assert result["has_real_trades"] is True
+        assert result["matched"] == 1
+        assert result["comparisons"][0]["gap_pct"] == 5.0
+
+    def test_persistent_gap_flagged_after_repeated_significant_divergence(self):
+        base = date(2026, 1, 1)
+        for i in range(3):
+            d = base + timedelta(days=i * 10)
+            self.db.add(PortfolioTransaction(
+                ticker="BEL", transaction_type="buy", quantity=10, price=105.0,
+                amount=1050.0, transaction_date=d, broker="zerodha",
+            ))
+            self.db.add(PaperTrade(
+                portfolio_name="strat_TEST", symbol="BEL", is_open=False,
+                entry_date=d, exit_date=d + timedelta(days=5),
+                entry_price=100.0, exit_price=110.0, shares=1, capital_deployed=100,
+                strategy_id="AQRTI_STR_TEST",
+            ))
+        self.db.commit()
+
+        result = reconcile(self.db)
+        assert len(result["persistent_gap_flags"]) == 1
+        assert result["persistent_gap_flags"][0]["ticker"] == "BEL"
+        assert result["persistent_gap_flags"][0]["direction"] == "real_worse_than_paper"
+
+    def test_small_gap_not_flagged_as_persistent(self):
+        base = date(2026, 1, 1)
+        for i in range(3):
+            d = base + timedelta(days=i * 10)
+            self.db.add(PortfolioTransaction(
+                ticker="HDFCBANK", transaction_type="buy", quantity=1, price=100.2,
+                amount=100.2, transaction_date=d, broker="zerodha",
+            ))
+            self.db.add(PaperTrade(
+                portfolio_name="strat_TEST", symbol="HDFCBANK", is_open=False,
+                entry_date=d, exit_date=d + timedelta(days=5),
+                entry_price=100.0, exit_price=105.0, shares=1, capital_deployed=100,
+                strategy_id="AQRTI_STR_TEST",
+            ))
+        self.db.commit()
+
+        result = reconcile(self.db)
+        assert result["persistent_gap_flags"] == []
+
+
+from aqrti.database.models import ResearchSynthesis
+from portfolio.monthly_allocator import compute_monthly_allocation, SATELLITE_SYMBOLS, SATELLITE_MONTHLY_BUDGET_INR
+
+
+class TestMonthlyAllocator:
+    @pytest.fixture(autouse=True)
+    def setup_db(self):
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        Session = _sessionmaker(bind=engine)
+        self.db = Session()
+        yield
+        self.db.close()
+        engine.dispose()
+
+    def test_no_data_falls_back_to_equal_split(self):
+        result = compute_monthly_allocation(self.db)
+        assert result["basis"] == "equal_split_no_data"
+        for symbol in SATELLITE_SYMBOLS:
+            assert result["allocation_inr"][symbol] == round(SATELLITE_MONTHLY_BUDGET_INR / len(SATELLITE_SYMBOLS), 2)
+
+    def test_allocation_sums_to_budget(self):
+        self.db.add(ResearchSynthesis(
+            symbol="BEL", synthesis_date=date.today(), sentiment_score=0.9,
+            thesis_direction="bullish", key_catalysts="[]", risk_flags="[]",
+            management_change_flag=False, source_event_ids="[]", model_used="test", confidence=0.9,
+        ))
+        self.db.commit()
+        result = compute_monthly_allocation(self.db)
+        total = sum(result["allocation_inr"].values())
+        assert abs(total - SATELLITE_MONTHLY_BUDGET_INR) < 0.05
+
+    def test_bullish_synthesis_ranks_above_bearish(self):
+        self.db.add(ResearchSynthesis(
+            symbol="BEL", synthesis_date=date.today(), sentiment_score=0.9,
+            thesis_direction="bullish", key_catalysts="[]", risk_flags="[]",
+            management_change_flag=False, source_event_ids="[]", model_used="test", confidence=0.9,
+        ))
+        self.db.add(ResearchSynthesis(
+            symbol="HDFCBANK", synthesis_date=date.today(), sentiment_score=-0.5,
+            thesis_direction="bearish", key_catalysts="[]", risk_flags="[]",
+            management_change_flag=False, source_event_ids="[]", model_used="test", confidence=0.8,
+        ))
+        self.db.commit()
+        result = compute_monthly_allocation(self.db)
+        assert result["allocation_inr"]["BEL"] > result["allocation_inr"]["HDFCBANK"]
+        assert result["ranked_symbols"][0] == "BEL"

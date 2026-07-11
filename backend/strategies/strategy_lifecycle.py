@@ -31,7 +31,7 @@ log = get_logger("strategy_lifecycle")
 
 from strategies.promotion_config import (
     PROMOTE_THRESHOLD, RETIRE_THRESHOLD, MIN_BACKTEST_TRADES,
-    MIN_WIN_RATE, MIN_SHARPE, REQUIRE_OOS_PASS, MIN_OOS_SHARPE,
+    MIN_WIN_RATE, MIN_SHARPE, REQUIRE_OOS_PASS, MIN_OOS_SHARPE, MIN_OOS_WIN_RATE,
     PAPER_WIN_RATE_GATE, BENCHMARK_SHARPE_FACTOR, MAX_TRADE_OVERLAP,
     QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
     MAX_DRAWDOWN_LIMIT,
@@ -212,6 +212,8 @@ def promote_strategy(
         return {"success": False, "error": f"OOS gate failed (oos_passed={row.oos_passed}, oos_wr={row.oos_win_rate})"}
     if REQUIRE_OOS_PASS and (row.oos_sharpe or 0) < MIN_OOS_SHARPE:
         return {"success": False, "error": f"oos_sharpe {row.oos_sharpe or 0:.2f} below {MIN_OOS_SHARPE}"}
+    if REQUIRE_OOS_PASS and (row.oos_win_rate or 0) < MIN_OOS_WIN_RATE:
+        return {"success": False, "error": f"oos_win_rate {row.oos_win_rate or 0:.1f}% below {MIN_OOS_WIN_RATE}% threshold"}
 
     # Benchmark gate: must reach BENCHMARK_SHARPE_FACTOR × buy-and-hold
     # Sharpe over the same backtest window. Worse than doing nothing = not

@@ -70,9 +70,13 @@ _RULES: list[tuple[EventType, list[str]]] = [
         r"\bmerger\s+(agreement|deal|ratio|swap)\b",
     ]),
     (EventType.MANAGEMENT_CHANGE, [
-        r"\b(ceo|md|cfo|coo|chairman|director)\s+(resigns?|quits?|steps?\s+down|appointed?|joins?|elevated?)\b",
-        r"\b(appoints?|names?|elevates?)\s+new\s+(ceo|cfo|md|coo|chairman)\b",
-        r"\b(resignation|appointment)\s+of\s+(ceo|md|cfo|chairman|director)\b",
+        r"\b(ceo|md|cfo|coo|chairman|managing\s+director|whole[- ]?time\s+director|independent\s+director|director)\s+(resigns?|quits?|steps?\s+down|appointed?|joins?|elevated?)\b",
+        r"\b(appoints?|names?|elevates?)\s+new\s+(ceo|cfo|md|coo|chairman|managing\s+director|whole[- ]?time\s+director|independent\s+director)\b",
+        r"\b(resignation|appointment)\s+of\s+(ceo|md|cfo|chairman|managing\s+director|whole[- ]?time\s+director|independent\s+director|director)\b",
+        r"\b(appointed|elevated|named)\s+as\s+(ceo|cfo|md|coo|chairman|managing\s+director|whole[- ]?time\s+director|independent\s+director|director)\b",
+        r"\bboard\s+appoint\w*\b.{0,40}\b(ceo|cfo|md|coo|chairman|director)\b",
+        r"\b(ceo|cfo|md|coo|chairman|director)\b.{0,40}\bboard\s+appoint\w*\b",
+        r"\bnew\s+(ceo|cfo|md|coo|chairman)\b",
     ]),
     (EventType.REGULATORY_ACTION, [
         r"\b(sebi|rbi|cci|nclt|ed|cbi|income\s+tax)\s*(order|notice|penalty|fine|probe|investigation|approval|approval)\b",

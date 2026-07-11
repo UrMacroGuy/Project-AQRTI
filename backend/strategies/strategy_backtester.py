@@ -151,19 +151,14 @@ def _round_trip_cost(symbol: str = "") -> float:
 ROUND_TRIP_COST = _EXCHANGE_ROUND_TRIP_COST["NSE"]
 # ≈ 0.28% round-trip (realistic for NSE delivery)
 
+# Curated 12-symbol universe (2026-07 prune). Last-resort fallback only —
+# get_backtest_universe() below is DB-driven (Stock.active == True) and this
+# constant is used only if that query returns nothing.
 STOCK_UNIVERSE = [
-    # Original 20
-    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
-    "WIPRO", "AXISBANK", "NESTLEIND", "BAJFINANCE",
-    "MARUTI", "SUNPHARMA", "TATASTEEL", "KOTAKBANK",
-    "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
-    # Expanded 30
-    "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
-    "BAJAJFINSV", "NTPC", "ADANIENT", "ADANIPORTS", "JSWSTEEL",
-    "TECHM", "COALINDIA", "BPCL", "HDFCLIFE", "SBILIFE",
-    "INDUSINDBK", "M&M", "DIVISLAB", "DRREDDY", "EICHERMOT",
-    "HEROMOTOCO", "CIPLA", "BRITANNIA", "APOLLOHOSP", "TRENT",
-    "GRASIM", "SHREECEM", "BEL", "POWERGRID", "ASIANPAINT",
+    # Tier 1 — owned
+    "BEL", "HDFCBANK", "NTPC", "VOO", "QQQ",
+    # Tier 2 — bench
+    "ICICIBANK", "INFY", "CDSL", "DRREDDY", "LT", "HAL",
 ]
 
 

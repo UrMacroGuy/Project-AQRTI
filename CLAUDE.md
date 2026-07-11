@@ -866,17 +866,18 @@ Do not attempt to edit, create, or delete files in these directories. If Claude 
 
 # CLAUDE.md — AQRTI Project Instructions
 
-AQRTI is a self-learning quant research & paper-trading platform for Indian markets (NSE/BSE). It must be **realistic, data-backed, and proven — never lucky**. It suggests; the user reviews and trades manually. No real-money execution, ever.
+AQRTI is a research-driven real-money-adjacent quant engine for a curated 9-symbol NSE portfolio (+VOO/QQQ, monitor-only) plus NIFTY 50 as benchmark/regime. It must be **realistic, data-backed, and proven — never lucky**. Strategies ("algos") are synthesized from actual research (filings, earnings, news, LLM synthesis), not random mutation. It suggests; the user reviews and trades manually. No real-money execution, ever.
 
 ## Hard rules (non-negotiable)
 
 1. **No placeholder, mock, or fabricated data — anywhere, ever.**
-   - Never seed DB tables with invented/estimated/random values (see the `seed_missing_data.py` incident, IMPROVEMENTS.md P0-1). If a data source is unavailable, the UI shows an explicit "NO DATA — source unavailable" state. An honest gap beats a plausible lie.
+   - Never seed DB tables with invented/estimated/random values. If a data source is unavailable, the UI shows an explicit "NO DATA — source unavailable" state. An honest gap beats a plausible lie.
    - Never add mock/fallback objects to the UI that render when an API fails (`MOCK_*` patterns are banned). Every visible number must trace to a real DB row from a real source.
+   - LLM-derived research synthesis (`ResearchSynthesis` table) must cite real, verified source event IDs — a response citing a nonexistent/unshown/future-dated ID is rejected and never persisted (`research_synthesizer.py::_validate_citations`). This is the anti-fabrication gate for the entire research-to-strategy funnel; never weaken it.
    - Synthetic/derived data is allowed **only** if flagged in the schema (e.g. `is_synthetic=True` on index-futures cost-of-carry rows) AND labeled wherever displayed, so it cannot be mistaken for real market data.
-2. **Honest metrics only.** Never loosen a gate, cap, or cost model to make results look better. No look-ahead: no ML predictions in backtests, DSL evaluation is fail-closed (missing features → no entry), NSE costs 0.28% round-trip, mark-to-market daily Sharpe. If a metric looks too good (AUC ≈ 1.0, Sharpe > 3), treat it as a bug until proven otherwise — that instinct has caught two catastrophic bugs already.
-3. **Verify, don't assume.** After any fix: check the DB, hit the endpoint, read the log. CHANGELOG entries record verified reality, including failures and limitations (see the `2026-07-03f` "data source reality check" entry for the standard).
-4. **Check `plans/BUG_HUNTING.md` before any code change.** If a bug exists for the file you're editing, read and understand its root cause before making any change. If you discover a new bug, add it to BUG_HUNTING.md immediately (never fixed silently, never ignored).
+2. **Honest metrics only.** Never loosen a gate, cap, or cost model to make results look better. No look-ahead: ML predictions are currently disabled entirely (see below), DSL evaluation is fail-closed (missing features → no entry), NSE costs 0.28% round-trip, mark-to-market daily Sharpe. If a metric looks too good (AUC ≈ 1.0, Sharpe > 3), treat it as a bug until proven otherwise. If a strategy template shows zero trades, that is a data-availability finding to report honestly, not a bug to work around.
+3. **Verify, don't assume.** After any fix: check the DB, hit the endpoint, read the log. CHANGELOG entries record verified reality, including failures and limitations.
+4. **The curated universe is fixed.** Never let boot/scheduler code silently re-expand it (see the `seed_global_universe()` gotcha in `docs/RESEARCH_DRIVEN_REARCHITECTURE.md` §2 — this has happened once already and undid a DB prune within seconds of the next boot).
 
 ## Terminology
 
@@ -884,54 +885,51 @@ Call the evolved trading strategies **"algos"** in all user-facing text, docs, a
 
 ## Sources of truth (when docs disagree, higher wins)
 
-1. The code — especially `backend/strategies/promotion_config.py` (ALL promotion/retirement/quarantine gates; never re-declare its constants elsewhere).
-2. `CHANGELOG.md` — session history, newest first. **Read the top entries at session start to catch up.**
-3. `PROJECT_DIARY.md` — full-system reference. `DATABASE_AND_TRAINING.md` — schema + training pipeline.
-4. `docs/STRATEGY_ARENA.md` — arena engine reference (its constants can lag the config).
-5. `plans/*.md` — **historical design docs (June 2026). Do not trust their numbers or architecture claims.**
-6. `IMPROVEMENTS.md` — active backlog; work items from there, check them off with dates.
+1. The code — especially `backend/strategies/promotion_config.py` (ALL promotion/retirement/quarantine gates; never re-declare its constants elsewhere) and `backend/aqrti/config/settings.py::universe` / `backend/scripts/prune_to_curated_universe.py::KEEP_SYMBOLS` (the curated universe — kept in sync manually, see the doc below).
+2. `plans/CHANGELOG.md` — session history, newest first. **Read the top entries at session start to catch up.**
+3. `docs/RESEARCH_DRIVEN_REARCHITECTURE.md` — full current architecture reference: the curated universe, the research-to-strategy funnel, the 6 named strategy templates and their honest WFO status, the ML-disabled decision, the post-promotion demotion triggers, and a "known pitfalls" appendix of past bugs whose root causes are still live risks. **Read this before touching strategy generation, feature computation, the LLM research pipeline, or the boot/scheduler universe-seeding code.**
+4. `docs/MARKOV_STRATEGY_PLAN.md` — the isolated Markov/HMM regime module (`backend/markov/`) reference.
 
 ## Session bootstrap — where every new session collects its tasks
 
-Run this sequence at the start of EVERY session, before doing anything else:
-
-1. **`CHANGELOG.md` (top 2-3 entries)** — what happened most recently; other sessions may have worked since you last did (same-day entries get letters: `[YYYY-MM-DD]`, `b`, `c`…).
-2. **`docs/ROAD_TO_REAL.md`** — the master roadmap to real capital. It orders the entire backlog into stages with exit criteria (Stage 1 reliability → Stage 2 edge → Stage 3 cockpit UI → Stage 4 real-money bridge). Pick work in stage order.
-3. **`IMPROVEMENTS.md`** — the task queue itself. If the user hasn't given a specific task, work the highest-priority unchecked item per the roadmap's stage order (any remaining P0/P1 first, then Stage-1 items: GO-2/3/4 + ARCH-2/4/7/9, then GO-5 before any new algo families). Follow its "How to work this file" rules: verify with evidence, check off with date, changelog, diary sync.
-4. **Active build specs** live in `docs/` — read the spec before touching its items: `ROAD_TO_REAL.md` (money-readiness → P-GO items), `PERSONAL_PORTFOLIO_PLAN.md` (My Portfolio module → P-PF items), `OBSIDIAN_INTEGRATION_PLAN.md` (vault exporter → P-OBS items).
-5. Deeper context when needed: `PROJECT_DIARY.md` (whole system), `DATABASE_AND_TRAINING.md` (schema/ML).
+1. **`plans/CHANGELOG.md` (top 2-3 entries)** — what happened most recently; other sessions may have worked since you last did (same-day entries get letters: `[YYYY-MM-DD]`, `b`, `c`…).
+2. **`docs/RESEARCH_DRIVEN_REARCHITECTURE.md`** — current architecture and what's still pending (as of the last sync: the monthly capital allocator and paper-vs-real reconciliation are not yet built; `research_synthesizer.synthesize_all()` is not yet wired into the scheduler).
+3. If the user hasn't given a specific task, check the architecture doc's "not yet built" items first.
 
 ## Session workflow
 
-- **After completing a task:** add a CHANGELOG entry (newest-first, dated `[YYYY-MM-DD<letter>]`), then sync `PROJECT_DIARY.md` per its §16 rule (timeline row for new phases; edit sections in place when numbers/architecture change; bump its "Last synced" line). Update `DATABASE_AND_TRAINING.md` if schema or training pipeline changed. Check off finished `IMPROVEMENTS.md` items with `(done YYYY-MM-DD)`.
-- New problems found mid-task go into `IMPROVEMENTS.md` as items — never fixed silently, never ignored.
-- Another session may be working concurrently (this has happened). Before bulk DB writes or file rewrites, re-read the target; never clobber an entry you didn't write.
+- **After completing a task:** add a CHANGELOG entry (newest-first, dated `[YYYY-MM-DD<letter>]`) to `plans/CHANGELOG.md`. Update `docs/RESEARCH_DRIVEN_REARCHITECTURE.md` if architecture/schema/status changed.
+- New problems found mid-task get fixed or explicitly flagged in the CHANGELOG — never fixed silently, never ignored.
+- Another session may be working concurrently. Before bulk DB writes or file rewrites, re-read the target; never clobber an entry you didn't write.
 
 ## Personal Portfolio module (real money — extra rules)
 
-The user's real 60-40 investment plan (₹2,000/month, Zerodha + INDmoney) is tracked in the "My Portfolio" section (spec: `docs/PERSONAL_PORTFOLIO_PLAN.md`). Rules beyond the global ones:
+The user's real 60-40 investment plan (₹2,000/month: ₹1,200 India / ₹800 US, Zerodha + INDmoney) is tracked in the "My Portfolio" section. Rules beyond the global ones:
 - Tracker + advisor ONLY. No broker write APIs, no order placement, no auto-execution — the user records transactions manually.
 - Real-money tables (`Portfolio*`) never mix with paper trading or the algo population. `PortfolioTransaction` is append-only (corrections = reversal rows) — it's a tax audit trail.
 - Mutual funds are valued at prior-day AMFI NAV and the UI must say so; never present NAV as real-time. Instruments get added only after verification (exact ticker/scheme code) — never guessed.
+- Every suggestion the engine surfaces (signals, SIP tilts, rotation suggestions) carries "suggestions, not advice — you decide" framing; the user makes every real trade decision manually.
 
 ## Running & operating
 
-- **Backend:** `cd backend && .venv\Scripts\activate && python main.py` → port 8000, Swagger at `/docs`, health at `/health`. On boot it runs a 10-step catch-up pipeline (can take minutes).
+- **Backend:** `cd backend && .venv\Scripts\activate && python main.py` → port 8000, Swagger at `/docs`, health at `/health`. On boot it runs a 10-step catch-up pipeline (~20-30s at the current 9-symbol curated universe scale).
 - **UI:** `npm run dev` → port 3000. Vanilla JS + Chart.js, no frameworks — keep it that way.
-- **Scheduler:** daily pipeline cron 15:30 IST weekdays; algo micro-loop every 5 min; agents hourly; integrity sweep Sat 10:00 IST. `AQRTI_LITE_MODE=1` disables the heavy loops (RAM 800MB+ → ~230MB).
-- **Database:** `backend/aqrti.db` — SQLite WAL, several GB. Before any bulk mutation, back up first (convention: `aqrti.db.bak-YYYYMMDD`). Running manual scripts alongside the live backend can hit `database is locked` — expected contention, prefer stopping the backend for heavy writes.
+- **Scheduler:** daily pipeline cron 15:30 IST weekdays; algo micro-loop every 5 min; agents hourly; integrity sweep Sat 10:00 IST. ML prediction generation (Step 5) is currently disabled — see `docs/RESEARCH_DRIVEN_REARCHITECTURE.md` §6.
+- **Database:** `backend/aqrti.db` — SQLite WAL. Before any bulk mutation, back up first (convention: `aqrti.db.bak-YYYYMMDD`). Running manual scripts alongside the live backend can hit `database is locked` — expected contention, prefer stopping the backend for heavy writes (full feature regeneration across the curated universe's price history can also just be genuinely slow — don't assume a hang is always a lock).
+- **LLM provider:** `AQRTI_LLM_PROVIDER` in `backend/.env` selects `openrouter` or `nvidia_nim` (default `nvidia_nim`, model `meta/llama-3.1-8b-instruct` — **not** `z-ai/glm-5.2`, which is invalid). NVIDIA NIM is rate-limited client-side to `NVIDIA_NIM_RATE_LIMIT_RPM` (40).
 
 ## Code conventions
 
-- All table models live in `backend/aqrti/database/models.py` (one file, 93 tables). New tables go there, following existing index/unique-constraint patterns.
+- All table models live in `backend/aqrti/database/models.py`. New tables go there, following existing index/unique-constraint patterns.
 - API routes under `backend/aqrti/api/routes/`, all mounted at `/api/v1`.
 - UI: page renderers + hydration functions in `ui/app.js`; every backend call goes through `ui/api.js`. Hydration re-runs on every page visit.
-- Features: register the name in `features/feature_registry.py`, compute in the matching category module (`price/volume/volatility/trend/market_features.py`). **Point-in-time correctness is mandatory** — a feature for date `d` may only read rows ≤ `d`.
-- SQLAlchemy sessions: on any failed flush/commit, `db.rollback()` before the session is used again — a logged-but-not-rolled-back error poisons every subsequent caller (root cause of the 2026-07-03e backend crash).
+- Features: register the name in `features/feature_registry.py`, compute in the matching category module. **Point-in-time correctness is mandatory** — a feature for date `d` may only read rows ≤ `d`. `FeatureValue.value` is a Float-only column and features for one (symbol, date) are written in a single bulk INSERT — a string-valued feature silently fails the ENTIRE batch, not just itself (see `regime_markov`'s numeric-encoding fix in `docs/RESEARCH_DRIVEN_REARCHITECTURE.md` §4 for the pattern to follow for any future non-numeric feature).
+- SQLAlchemy sessions: on any failed flush/commit, `db.rollback()` before the session is used again — a logged-but-not-rolled-back error poisons every subsequent caller.
 - The index-futures segment is fully isolated from stocks: `StrategyV2.asset_class` discriminator, parallel tables, own backtester. Never let the two populations mix in arena, promotion, or evolution queries.
 
 ## The quant bar (what "done" means for algo/ML work)
 
-- An algo is only trustworthy after passing ALL of: honest backtest gates (`promotion_config.py`), the OOS holdout, the benchmark gate (0.8× NIFTY buy-and-hold Sharpe), the duplicate gate, and forward-paper quarantine (≥60 days promoted, ≥20 closed shadow trades, ≥50% WR, positive P&L). Human approval is the last gate, never the first.
-- Current honest baseline (2026-07-03): **0 promoted algos** out of a 927 population. That is correct behavior, not a bug — do not "fix" it by weakening gates.
+- An algo is only trustworthy after passing ALL of: honest backtest gates (`promotion_config.py`), the OOS holdout (including `MIN_OOS_WIN_RATE = 50.0`), the benchmark gate (0.8× NIFTY buy-and-hold Sharpe), the duplicate gate, walk-forward validation (12-fold, WFO Sharpe ≥ 0.7 — see `backend/scripts/walk_forward_templates.py`), and forward-paper quarantine (≥60 days promoted, ≥20 closed shadow trades, ≥50% WR, positive P&L). Human approval is the last gate, never the first.
+- Current honest baseline (2026-07-11): **0 of 6 research-driven strategy templates pass WFO** — 5 have zero trades (research/regime feature history doesn't exist yet post-re-architecture), 1 traded and failed (Sharpe -4.6). That is correct, honest behavior, not a bug — do not "fix" it by weakening gates or fabricating history. Re-run `walk_forward_templates.py` as research history accumulates via `research_synthesizer.synthesize_all()`.
+- A promoted algo keeps its signal stream only while three live triggers hold: rolling-20-trade win rate ≥ 50%, live drawdown ≤ 1.5× validated backtest max_drawdown, and the current market regime is one the algo was actually validated in (`backend/strategies/live_validator.py`).
 - Backtester changes require a spot-check: re-run a known algo and confirm the honest Sharpe moves for the stated reason.

@@ -55,35 +55,16 @@ class Settings(BaseSettings):
     paper_capital: float = Field(default=100_000.0)
 
     # ── Universe ─────────────────────────────────────────────────
+    # Curated 12-symbol real-money-adjacent universe per the research-driven
+    # re-architecture (docs/RESEARCH_DRIVEN_REARCHITECTURE.md). NSE-scrapable
+    # symbols only — VOO/QQQ (US, no NSE feed) and NIFTY 50 (lives in
+    # index_data, not the stocks table) are handled outside this list.
     universe: str = Field(
         default=(
-            # Original 20
-            "RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,"
-            "WIPRO.NS,AXISBANK.NS,NESTLEIND.NS,BAJFINANCE.NS,"
-            "MARUTI.NS,SUNPHARMA.NS,TATASTEEL.NS,"
-            "KOTAKBANK.NS,TITAN.NS,ONGC.NS,HINDALCO.NS,SBIN.NS,BHARTIARTL.NS,"
-            # Expanded 30
-            "HCLTECH.NS,ITC.NS,LT.NS,HINDUNILVR.NS,ULTRACEMCO.NS,"
-            "BAJAJFINSV.NS,NTPC.NS,ADANIENT.NS,ADANIPORTS.NS,JSWSTEEL.NS,"
-            "TECHM.NS,COALINDIA.NS,BPCL.NS,HDFCLIFE.NS,SBILIFE.NS,"
-            "INDUSINDBK.NS,M&M.NS,DIVISLAB.NS,DRREDDY.NS,EICHERMOT.NS,"
-            "HEROMOTOCO.NS,CIPLA.NS,BRITANNIA.NS,APOLLOHOSP.NS,TRENT.NS,"
-            "GRASIM.NS,SHREECEM.NS,BEL.NS,POWERGRID.NS,ASIANPAINT.NS,"
-            # NSE Extended Universe (from global_universe.py NSE section)
-            "MPHASIS.NS,PERSISTENT.NS,COFORGE.NS,LTTS.NS,"
-            "BAJAJ-AUTO.NS,TVSMOTOR.NS,BOSCHLTD.NS,MOTHERSON.NS,"
-            "BANDHANBNK.NS,FEDERALBNK.NS,IDFCFIRSTB.NS,"
-            "BANKBARODA.NS,PNB.NS,CANBK.NS,UNIONBANK.NS,"
-            "CHOLAFIN.NS,MUTHOOTFIN.NS,"
-            "AUROPHARMA.NS,LUPIN.NS,TORNTPHARM.NS,ALKEM.NS,"
-            "DABUR.NS,MARICO.NS,COLPAL.NS,GODREJCP.NS,EMAMILTD.NS,TATACONSUM.NS,"
-            "VEDL.NS,NATIONALUM.NS,SAIL.NS,HINDCOPPER.NS,"
-            "IOC.NS,GAIL.NS,ADANIPOWER.NS,ADANIGREEN.NS,"
-            "DMART.NS,NYKAA.NS,ETERNAL.NS,PAYTM.NS,POLICYBZR.NS,"
-            "IRCTC.NS,INDHOTEL.NS,"
-            "HAL.NS,BHEL.NS,SIEMENS.NS,ABB.NS,AIAENG.NS,GRINDWELL.NS,"
-            "PIIND.NS,UPL.NS,SRF.NS,AARTIIND.NS,DEEPAKNTR.NS,NAVINFLUOR.NS,"
-            "PHOENIXLTD.NS,OBEROIRLTY.NS,GODREJPROP.NS,PRESTIGE.NS,DLF.NS"
+            # Tier 1 (owned)
+            "BEL.NS,HDFCBANK.NS,NTPC.NS,"
+            # Tier 2 (bench)
+            "ICICIBANK.NS,INFY.NS,CDSL.NS,DRREDDY.NS,LT.NS,HAL.NS"
         )
     )
 

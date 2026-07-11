@@ -2565,3 +2565,33 @@ class PortfolioActionLog(Base):
     status       = Column(String(10), nullable=False, default="pending")  # pending|completed|dismissed
     completed_at = Column(DateTime,   nullable=True)
     created_at   = Column(DateTime,   default=datetime.utcnow)
+
+
+class ResearchSynthesis(Base):
+    """
+    LLM-derived daily research synthesis per symbol — the output of the
+    research-to-strategy funnel (news + filings + earnings -> structured
+    thesis). Always clearly labeled LLM-derived, never presented as market
+    data. Every conclusion must trace to real source_event_ids; a response
+    citing nonexistent IDs is rejected and never persisted here.
+    """
+    __tablename__ = "research_synthesis"
+    __table_args__ = (
+        UniqueConstraint("symbol", "synthesis_date", name="uq_rs_symbol_date"),
+        Index("ix_rs_symbol",     "symbol"),
+        Index("ix_rs_date",       "synthesis_date"),
+    )
+
+    id                    = Column(Integer,    primary_key=True, autoincrement=True)
+    symbol                = Column(String(20), nullable=False)
+    synthesis_date        = Column(Date,       nullable=False)   # point-in-time date this synthesis is valid for
+    sentiment_score       = Column(Float,      nullable=False)   # -1..1
+    thesis_direction      = Column(String(10), nullable=False)   # bullish|bearish|neutral
+    key_catalysts         = Column(Text,       nullable=True)    # JSON list[str]
+    risk_flags            = Column(Text,       nullable=True)    # JSON list[str]
+    management_change_flag = Column(Boolean,   nullable=False, default=False)
+    source_event_ids      = Column(Text,       nullable=False)   # JSON list[{table, id}] — every cited source
+    raw_response          = Column(Text,       nullable=True)    # full LLM JSON response, for audit
+    model_used            = Column(String(60), nullable=False)   # e.g. "openrouter:nousresearch/hermes-3-llama-3.1-70b:free"
+    confidence            = Column(Float,      nullable=True)    # 0..1, self-reported by the LLM if provided
+    created_at            = Column(DateTime,   default=datetime.utcnow)

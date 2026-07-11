@@ -17,7 +17,7 @@ if backend_dir not in sys.path:
 
 from sqlalchemy.orm import Session
 from aqrti.database.models import (
-    MarketRegime, DailyPrice, IndexData, SentimentRecord, MarketBreadth,
+    MarketRegime, DailyPrice, IndexData, SentimentRecord, MarketBreadth, Stock,
 )
 from aqrti.utils.logger import get_logger
 from agents.agent_base import AgentBase
@@ -25,19 +25,19 @@ from agents.agent_registry import register_agent_class
 
 log = get_logger("agent.market_research")
 
-STOCK_UNIVERSE = [
-    # Original 20
-    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "WIPRO", "AXISBANK",
-    "NESTLEIND", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TATASTEEL",
-    "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
-    # Expanded 30
-    "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
-    "BAJAJFINSV", "NTPC", "ADANIENT", "ADANIPORTS", "JSWSTEEL",
-    "TECHM", "COALINDIA", "BPCL", "HDFCLIFE", "SBILIFE",
-    "INDUSINDBK", "M&M", "DIVISLAB", "DRREDDY", "EICHERMOT",
-    "HEROMOTOCO", "CIPLA", "BRITANNIA", "APOLLOHOSP", "TRENT",
-    "GRASIM", "SHREECEM", "BEL", "POWERGRID", "ASIANPAINT",
-]
+# US tickers held in the curated universe (VOO, QQQ) are not NSE-listed —
+# exclude them from NSE-specific breadth/anomaly calculations below. There is
+# no `exchange` column on Stock yet, so this explicit list is the filter.
+NON_NSE_SYMBOLS = {"VOO", "QQQ"}
+
+
+def _stock_universe(db: Session, nse_only: bool = False) -> list[str]:
+    """DB-driven active universe (curated 12-symbol set, 2026-07 prune)."""
+    syms = [s.symbol for s in db.query(Stock.symbol).filter(Stock.active == True).all()]
+    if nse_only:
+        syms = [s for s in syms if s not in NON_NSE_SYMBOLS]
+    return syms
+
 
 SECTOR_MAP = {
     "RELIANCE": "Energy",    "ONGC": "Energy",       "COALINDIA": "Energy",  "BPCL": "Energy",
@@ -56,6 +56,7 @@ SECTOR_MAP = {
     "LT": "Infra",           "ADANIPORTS": "Infra",  "POWERGRID": "Power",   "NTPC": "Power",
     "ULTRACEMCO": "Cement",  "GRASIM": "Cement",     "SHREECEM": "Cement",
     "ADANIENT": "Conglomerate", "BEL": "Defence",
+    "ICICIBANK": "Banking",  "CDSL": "Financial Services", "HAL": "Defence",
 }
 
 
@@ -203,7 +204,7 @@ class MarketResearchAgent(AgentBase):
             declining     = 0
             sector_rets: dict[str, list[float]] = {}
 
-            for symbol in STOCK_UNIVERSE:
+            for symbol in _stock_universe(db, nse_only=True):
                 rows = (
                     db.query(DailyPrice.close, DailyPrice.date)
                     .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)
@@ -344,7 +345,7 @@ class MarketResearchAgent(AgentBase):
         # ── 7. Volume Anomaly Detection ───────────────────────────
         try:
             volume_anomalies = []
-            for symbol in STOCK_UNIVERSE:
+            for symbol in _stock_universe(db, nse_only=True):
                 vol_rows = (
                     db.query(DailyPrice.volume, DailyPrice.date, DailyPrice.close)
                     .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)

@@ -17,26 +17,17 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from sqlalchemy.orm import Session
-from aqrti.database.models import PatternMatch, DailyPrice, IndexData
+from aqrti.database.models import PatternMatch, DailyPrice, IndexData, Stock
 from aqrti.utils.logger import get_logger
 from agents.agent_base import AgentBase
 from agents.agent_registry import register_agent_class
 
 log = get_logger("agent.pattern_research")
 
-STOCK_UNIVERSE = [
-    # Original 20
-    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK", "WIPRO", "AXISBANK",
-    "NESTLEIND", "BAJFINANCE", "MARUTI", "SUNPHARMA", "TATASTEEL",
-    "KOTAKBANK", "TITAN", "ONGC", "HINDALCO", "SBIN", "BHARTIARTL",
-    # Expanded 30
-    "HCLTECH", "ITC", "LT", "HINDUNILVR", "ULTRACEMCO",
-    "BAJAJFINSV", "NTPC", "ADANIENT", "ADANIPORTS", "JSWSTEEL",
-    "TECHM", "COALINDIA", "BPCL", "HDFCLIFE", "SBILIFE",
-    "INDUSINDBK", "M&M", "DIVISLAB", "DRREDDY", "EICHERMOT",
-    "HEROMOTOCO", "CIPLA", "BRITANNIA", "APOLLOHOSP", "TRENT",
-    "GRASIM", "SHREECEM", "BEL", "POWERGRID", "ASIANPAINT",
-]
+
+def _stock_universe(db: Session) -> list[str]:
+    """DB-driven active universe (curated 12-symbol set, 2026-07 prune)."""
+    return [s.symbol for s in db.query(Stock.symbol).filter(Stock.active == True).all()]
 
 
 def _simple_rsi(closes: list[float], period: int = 14) -> float | None:
@@ -107,8 +98,9 @@ class PatternResearchAgent(AgentBase):
         try:
             overbought = []
             oversold   = []
+            universe   = _stock_universe(db)
 
-            for symbol in STOCK_UNIVERSE:
+            for symbol in universe:
                 rows = (
                     db.query(DailyPrice.close, DailyPrice.date)
                     .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)
@@ -166,8 +158,9 @@ class PatternResearchAgent(AgentBase):
         try:
             ema_breakouts_up   = []
             ema_breakouts_down = []
+            universe           = _stock_universe(db)
 
-            for symbol in STOCK_UNIVERSE:
+            for symbol in universe:
                 rows = (
                     db.query(DailyPrice.close, DailyPrice.date)
                     .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_52w)
@@ -230,8 +223,9 @@ class PatternResearchAgent(AgentBase):
         try:
             accumulating  = []
             distributing  = []
+            universe      = _stock_universe(db)
 
-            for symbol in STOCK_UNIVERSE:
+            for symbol in universe:
                 rows = (
                     db.query(DailyPrice.close, DailyPrice.volume, DailyPrice.daily_return, DailyPrice.date)
                     .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_30d)
@@ -308,7 +302,7 @@ class PatternResearchAgent(AgentBase):
 
                 # Count stocks rising vs NIFTY trend
                 stock_up_count = 0
-                for symbol in STOCK_UNIVERSE[:10]:
+                for symbol in _stock_universe(db)[:10]:
                     latest_ret = (
                         db.query(DailyPrice.daily_return)
                         .filter(DailyPrice.symbol == symbol, DailyPrice.date >= cutoff_7d)

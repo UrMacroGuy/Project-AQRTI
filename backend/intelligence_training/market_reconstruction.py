@@ -52,8 +52,10 @@ def reconstruct_feature_matrix(
                 params[f"s{i}"] = s
 
         rows = db.execute(
-            f"SELECT symbol, feature_name, value FROM feature_values "
-            f"WHERE date = :d{symbol_filter}",
+            text(
+                f"SELECT symbol, feature_name, value FROM feature_values "
+                f"WHERE date = :d{symbol_filter}"
+            ),
             params,
         ).fetchall()
 

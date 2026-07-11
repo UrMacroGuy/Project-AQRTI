@@ -34,8 +34,17 @@ def _build_engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         # NORMAL is safe with WAL and much faster than FULL
         cursor.execute("PRAGMA synchronous=NORMAL")
-        # Checkpoint every 50 pages (~200 KB) so the WAL stays small
-        cursor.execute("PRAGMA wal_autocheckpoint=50")
+        # Checkpoint every 1000 pages (~4 MB, SQLite's own default) rather
+        # than 50 (~200 KB). The aggressive 50-page setting meant a
+        # checkpoint (which needs a brief exclusive lock) fired on nearly
+        # every write, and with 3 concurrent writers now hitting this file
+        # (main backend, the separate Markov process, and the 5-min
+        # strategy-loop subprocess — see docs/RESEARCH_DRIVEN_REARCHITECTURE.md),
+        # that checkpoint churn was a real contributor to the "database is
+        # locked" errors observed in evolution_engine/markov writes even
+        # with a 30s busy_timeout. WAL growing a few MB larger between
+        # checkpoints is a trivial tradeoff against fewer lock collisions.
+        cursor.execute("PRAGMA wal_autocheckpoint=1000")
         # Wait up to 30 seconds when locked instead of failing immediately
         cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()

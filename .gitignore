@@ -75,3 +75,7 @@ backend/strategies_v2_backup_*.json
 # Runtime process files
 backend/scheduler.pid
 *.pid
+
+# Runtime artifacts
+backend/*.lock
+backend/data/briefs/

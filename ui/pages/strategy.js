@@ -65,18 +65,18 @@ async function hydrateStrategyResearch() {
       // human approved it after quarantine (or forced). Make that distinction
       // visible — otherwise an unproven strategy looks identical to a proven one.
       const quarantineBadge = r.status === 'promoted'
-        ? ' <span style="font-size:0.6rem;color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:3px;padding:0 4px" title="Backtest-proven only — not yet forward-tested in paper trading">UNPROVEN</span>'
+        ? ' <span style="font-size:0.6rem;color:var(--warning);border:1px solid rgba(200,200,204,0.4);border-radius:3px;padding:0 4px" title="Backtest-proven only — not yet forward-tested in paper trading">UNPROVEN</span>'
         : r.status === 'active'
-          ? ' <span style="font-size:0.6rem;color:var(--positive);border:1px solid rgba(34,197,94,0.4);border-radius:3px;padding:0 4px" title="Human-approved after forward paper-trading quarantine">PROVEN</span>'
+          ? ' <span style="font-size:0.6rem;color:var(--positive);border:1px solid rgba(240,240,242,0.4);border-radius:3px;padding:0 4px" title="Human-approved after forward paper-trading quarantine">PROVEN</span>'
           : '';
       const maxDd = r.max_drawdown != null ? r.max_drawdown : null;
       const ddWarn = maxDd != null && maxDd < -30;
       const ddStr  = maxDd != null ? `${maxDd.toFixed(1)}%` : '—';
-      const ddColor = maxDd == null ? '' : maxDd < -50 ? 'color:var(--negative);font-weight:700' : maxDd < -30 ? 'color:#f59e0b;font-weight:600' : 'color:var(--text-muted)';
+      const ddColor = maxDd == null ? '' : maxDd < -50 ? 'color:var(--negative);font-weight:700' : maxDd < -30 ? 'color:var(--warning);font-weight:600' : 'color:var(--text-muted)';
       return `<tr${ddWarn ? ' title="⚠ High drawdown — use caution"' : ''}>
         <td style="color:var(--text-muted)">${i + 1}</td>
         <td style="font-family:var(--font-mono);font-size:0.72rem">
-          <div>${r.name || '—'}${ddWarn ? ' <span style="color:#f59e0b;font-size:0.65rem">⚠</span>' : ''}</div>
+          <div>${r.name || '—'}${ddWarn ? ' <span style="color:var(--warning);font-size:0.65rem">⚠</span>' : ''}</div>
           <div onclick="loadStrategyDna('${r.strategy_id}');document.getElementById('panel-dna-viewer').scrollIntoView({behavior:'smooth'})" style="font-size:0.62rem;color:var(--accent);letter-spacing:0.02em;cursor:pointer;text-decoration:underline dotted" title="Click to open DNA viewer">${r.strategy_id}</div>
         </td>
         <td><span class="chip">${r.family || '—'}</span></td>
@@ -88,8 +88,8 @@ async function hydrateStrategyResearch() {
         <td style="color:var(--text-muted)">${r.trade_count || 0}</td>
         <td style="white-space:nowrap">
           ${canActivate ? `<button class="panel-action-btn" onclick="activateStrategy('${r.strategy_id}')">Activate</button> ` : ''}
-          ${r.trade_count > 0 ? `<button class="panel-action-btn" style="background:rgba(0,170,255,0.12);border-color:rgba(0,170,255,0.35)" onclick="openStrategyTrades('${r.strategy_id}')">Trades</button> ` : ''}
-          <button class="panel-action-btn" style="background:rgba(167,139,250,0.1);border-color:rgba(167,139,250,0.35);color:rgba(167,139,250,0.9)" onclick="loadStrategyDna('${r.strategy_id}');document.getElementById('panel-dna-viewer').scrollIntoView({behavior:'smooth'})">DNA</button>
+          ${r.trade_count > 0 ? `<button class="panel-action-btn" style="background:rgba(232,232,234,0.12);border-color:rgba(232,232,234,0.35)" onclick="openStrategyTrades('${r.strategy_id}')">Trades</button> ` : ''}
+          <button class="panel-action-btn" style="background:rgba(196,196,200,0.1);border-color:rgba(196,196,200,0.35);color:rgba(196,196,200,0.9)" onclick="loadStrategyDna('${r.strategy_id}');document.getElementById('panel-dna-viewer').scrollIntoView({behavior:'smooth'})">DNA</button>
         </td>
       </tr>`;
     }).join('') || `<tr><td colspan="10" style="color:var(--text-muted);text-align:center">${serverOnline ? 'No strategies yet' : 'Backend offline — click Refresh after starting server'}</td></tr>`;
@@ -106,8 +106,8 @@ async function hydrateStrategyResearch() {
     data: {
       labels: famLabels,
       datasets: [
-        { label: 'Alive', data: famAlive, backgroundColor: 'rgba(0,170,255,0.7)' },
-        { label: 'Graveyard', data: famDead, backgroundColor: 'rgba(239,68,68,0.4)' },
+        { label: 'Alive', data: famAlive, backgroundColor: 'rgba(232,232,234,0.7)' },
+        { label: 'Graveyard', data: famDead, backgroundColor: 'rgba(154,154,159,0.4)' },
       ],
     },
     options: {
@@ -133,14 +133,14 @@ async function hydrateStrategyResearch() {
         {
           label: 'Avg Fitness Δ',
           data: opDelta,
-          backgroundColor: opDelta.map(v => v >= 0 ? 'rgba(52,211,153,0.6)' : 'rgba(239,68,68,0.5)'),
+          backgroundColor: opDelta.map(v => v >= 0 ? 'rgba(240,240,242,0.6)' : 'rgba(154,154,159,0.5)'),
           yAxisID: 'y',
         },
         {
           label: '% Positive',
           data: opPos,
           type: 'line',
-          borderColor: 'rgba(251,191,36,0.8)',
+          borderColor: 'rgba(200,200,204,0.8)',
           backgroundColor: 'transparent',
           pointRadius: 3,
           yAxisID: 'y1',
@@ -160,7 +160,7 @@ async function hydrateStrategyResearch() {
 
   // ── Regime Affinity Chart ─────────────────────────────────────
   const REGIMES = ['BULL', 'BEAR', 'SIDEWAYS', 'VOLATILE'];
-  const REGIME_COLORS = ['rgba(52,211,153,0.7)', 'rgba(239,68,68,0.6)', 'rgba(251,191,36,0.6)', 'rgba(167,139,250,0.6)'];
+  const REGIME_COLORS = ['rgba(240,240,242,0.7)', 'rgba(154,154,159,0.6)', 'rgba(200,200,204,0.6)', 'rgba(196,196,200,0.6)'];
   const affFamilies = affinity ? Object.keys(affinity) : [];
   ChartRegistry.create('srcRegimeChart', {
     type: 'bar',
@@ -263,7 +263,7 @@ async function hydrateStrategyResearch() {
           <span style="font-size:0.75rem;font-weight:600;color:var(--text-primary)">${rep.title || cat}</span>
         </div>
         <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:8px;line-height:1.5">${rep.summary || '—'}</div>
-        ${rep.recommendations ? `<div style="font-size:0.68rem;color:var(--accent);background:rgba(255,140,0,0.06);padding:6px 10px;border-radius:4px;border-left:2px solid var(--accent)">${rep.recommendations}</div>` : ''}
+        ${rep.recommendations ? `<div style="font-size:0.68rem;color:var(--accent);background:rgba(232,232,234,0.06);padding:6px 10px;border-radius:4px;border-left:2px solid var(--accent)">${rep.recommendations}</div>` : ''}
       </div>
     `).join('');
   }
@@ -389,7 +389,7 @@ async function loadStrategyDna(strategyId) {
 
   // Children
   const children = (dna.children || []).slice(0, 5).map(c =>
-    `<span onclick="loadStrategyDna('${c.strategy_id}')" style="cursor:pointer;background:rgba(52,211,153,0.06);border:1px solid rgba(52,211,153,0.2);border-radius:4px;padding:2px 8px;font-size:0.7rem;font-family:var(--font-mono);color:var(--positive);margin:2px"
+    `<span onclick="loadStrategyDna('${c.strategy_id}')" style="cursor:pointer;background:rgba(240,240,242,0.06);border:1px solid rgba(240,240,242,0.2);border-radius:4px;padding:2px 8px;font-size:0.7rem;font-family:var(--font-mono);color:var(--positive);margin:2px"
       title="${c.operation}">${c.name || c.strategy_id}</span>`
   ).join('') || '<span style="color:var(--text-muted);font-size:0.72rem">No offspring yet</span>';
 
@@ -423,7 +423,7 @@ async function loadStrategyDna(strategyId) {
       <div><div style="color:var(--text-muted)">Live Win%</div><div style="font-size:1.1rem;font-weight:600;color:${wrColor}">${lvWr.toFixed(1)}% (${wrDelta>=0?'+':''}${wrDelta.toFixed(1)}pp)</div></div>
     </div>
     <div style="margin-top:6px;font-size:0.68rem;color:var(--text-muted);font-family:var(--font-mono)">Live trades: ${fv.live_trades || 0} · Total P&amp;L: ${fv.live_total_pnl != null ? (fv.live_total_pnl >= 0 ? '+' : '') + fv.live_total_pnl.toFixed(2) + '%' : '—'}</div>
-    <div style="margin-top:6px;padding:4px 8px;border-radius:4px;font-size:0.7rem;background:${divStatus==='ok'?'rgba(52,211,153,0.1)':divStatus==='warning'?'rgba(251,191,36,0.1)':'rgba(239,68,68,0.1)'};color:${divStatus==='ok'?'var(--positive)':divStatus==='warning'?'rgba(251,191,36,0.9)':'var(--negative)'}">
+    <div style="margin-top:6px;padding:4px 8px;border-radius:4px;font-size:0.7rem;background:${divStatus==='ok'?'rgba(240,240,242,0.1)':divStatus==='warning'?'rgba(200,200,204,0.1)':'rgba(154,154,159,0.1)'};color:${divStatus==='ok'?'var(--positive)':divStatus==='warning'?'rgba(200,200,204,0.9)':'var(--negative)'}">
       ${divStatus === 'ok' ? '✓ Live performance tracking backtest — strategy is validated' : `⚠ Divergence: ${divStatus} — sharpe gap ${fv.sharpe_gap != null ? fv.sharpe_gap.toFixed(2) : '?'}, win-rate gap ${fv.winrate_gap != null ? fv.winrate_gap.toFixed(1) : '?'}pp`}
     </div>`;
   }
@@ -478,7 +478,7 @@ async function loadStrategyDna(strategyId) {
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${['BULL','BEAR','SIDEWAYS','VOLATILE'].map(r => {
               const allowed = !dna.allowed_regimes || dna.allowed_regimes.includes(r);
-              const colors = {BULL:'var(--positive)',BEAR:'var(--negative)',SIDEWAYS:'rgba(251,191,36,0.9)',VOLATILE:'rgba(167,139,250,0.9)'};
+              const colors = {BULL:'var(--positive)',BEAR:'var(--negative)',SIDEWAYS:'rgba(200,200,204,0.9)',VOLATILE:'rgba(196,196,200,0.9)'};
               return `<span style="padding:3px 10px;border-radius:4px;font-size:0.7rem;font-family:var(--font-mono);border:1px solid;${allowed?`color:${colors[r]};border-color:${colors[r]};background:${colors[r]}1a`:'color:var(--text-muted);border-color:rgba(255,255,255,0.08);opacity:0.4'}">${r}</span>`;
             }).join('')}
           </div>
@@ -566,7 +566,7 @@ async function loadTradeRecommendations() {
   }
 
   const regime = data.currentRegime || 'UNKNOWN';
-  const regimeColors = { BULL:'var(--positive)', BEAR:'var(--negative)', SIDEWAYS:'rgba(251,191,36,0.9)', VOLATILE:'rgba(167,139,250,0.9)' };
+  const regimeColors = { BULL:'var(--positive)', BEAR:'var(--negative)', SIDEWAYS:'rgba(200,200,204,0.9)', VOLATILE:'rgba(196,196,200,0.9)' };
   if (regimeLabel) {
     regimeLabel.textContent = `${regime} REGIME`;
     regimeLabel.style.color = regimeColors[regime] || '';
@@ -596,7 +596,7 @@ async function loadTradeRecommendations() {
               <span style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary)">${r.symbol}</span>
               <span class="chip" style="margin-left:8px;font-size:0.65rem">${r.sector || '—'}</span>
             </div>
-            <span style="background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.3);color:var(--positive);padding:2px 8px;border-radius:4px;font-size:0.68rem;font-family:var(--font-mono)">TRADE #${i+1}</span>
+            <span style="background:rgba(240,240,242,0.12);border:1px solid rgba(240,240,242,0.3);color:var(--positive);padding:2px 8px;border-radius:4px;font-size:0.68rem;font-family:var(--font-mono)">TRADE #${i+1}</span>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;font-family:var(--font-mono)">
@@ -605,12 +605,12 @@ async function loadTradeRecommendations() {
               <div style="font-size:0.95rem;font-weight:700">${fmtPrice(r.entryPrice)}</div>
               <div style="font-size:0.65rem;color:var(--text-muted)">${r.priceDate || 'latest'}</div>
             </div>
-            <div style="text-align:center;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px;padding:8px">
+            <div style="text-align:center;background:rgba(154,154,159,0.08);border:1px solid rgba(154,154,159,0.2);border-radius:6px;padding:8px">
               <div style="font-size:0.6rem;color:var(--negative);margin-bottom:2px">STOP LOSS</div>
               <div style="font-size:0.95rem;font-weight:700;color:var(--negative)">${fmtPrice(r.stopLoss)}</div>
               <div style="font-size:0.65rem;color:var(--negative)">−${downside}%</div>
             </div>
-            <div style="text-align:center;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:6px;padding:8px">
+            <div style="text-align:center;background:rgba(240,240,242,0.08);border:1px solid rgba(240,240,242,0.2);border-radius:6px;padding:8px">
               <div style="font-size:0.6rem;color:var(--positive);margin-bottom:2px">TARGET</div>
               <div style="font-size:0.95rem;font-weight:700;color:var(--positive)">${fmtPrice(r.target)}</div>
               <div style="font-size:0.65rem;color:var(--positive)">+${upside}%</div>
@@ -672,11 +672,13 @@ function renderMetaLearningPanel(ms, rt) {
   html += '<div>';
   html += '<div style="font-weight:600;font-size:13px;color:var(--accent);margin-bottom:10px">◆ Family Weight Adjustments</div>';
   if (ms?.family_weights) {
+    // Must mirror backend/strategies/strategy_generator.py::_FAMILY_WEIGHTS —
+    // update both together if family weights change.
     const defaults = {
-      momentum: 0.18, mean_reversion: 0.10, breakout: 0.12,
-      sentiment_driven: 0.06, regime_adaptive: 0.08, volume_surge: 0.10,
-      volatility_play: 0.08, hybrid: 0.08, quality_momentum: 0.12,
-      institutional_flow: 0.08,
+      post_earnings_drift: 0.10, momentum_trend: 0.10, mean_reversion_quality: 0.08,
+      event_catalyst: 0.08, regime_dca_timing: 0.05, rotation_monitor: 0.08,
+      quality_momentum: 0.09, institutional_flow: 0.06, rl_momentum: 0.09,
+      relative_strength: 0.12, breadth_momentum: 0.09, long_hold_momentum: 0.14,
     };
     html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
     html += '<tr><th style="text-align:left;color:var(--muted);padding:2px 4px">Family</th><th style="color:var(--muted);padding:2px 4px">Default</th><th style="color:var(--muted);padding:2px 4px">Current</th><th style="color:var(--muted);padding:2px 4px">Δ</th></tr>';
@@ -726,7 +728,7 @@ function renderMetaLearningPanel(ms, rt) {
         <div style="color:var(--muted);font-size:11px;margin-bottom:4px">Bad Features (avoided in generation)</div>
         <div style="display:flex;flex-wrap:wrap;gap:4px">
           ${ms.bad_features.map(f =>
-            `<span style="background:rgba(239,68,68,0.15);color:var(--negative);border:1px solid rgba(239,68,68,0.3);border-radius:3px;padding:1px 6px;font-size:11px">${f}</span>`
+            `<span style="background:rgba(154,154,159,0.15);color:var(--negative);border:1px solid rgba(154,154,159,0.3);border-radius:3px;padding:1px 6px;font-size:11px">${f}</span>`
           ).join('')}
         </div>
       </div>`;
@@ -761,7 +763,7 @@ function renderMetaLearningPanel(ms, rt) {
     const acc  = rt.accuracy_check || {};
     const stal = rt.staleness_check || {};
 
-    html += `<div style="background:${needsRetrain ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.08)'};border:1px solid ${needsRetrain ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.2)'};border-radius:6px;padding:10px;margin-bottom:12px">
+    html += `<div style="background:${needsRetrain ? 'rgba(154,154,159,0.1)' : 'rgba(240,240,242,0.08)'};border:1px solid ${needsRetrain ? 'rgba(154,154,159,0.3)' : 'rgba(240,240,242,0.2)'};border-radius:6px;padding:10px;margin-bottom:12px">
       <div style="font-size:13px;font-weight:600;color:${needsRetrain ? 'var(--negative)' : 'var(--positive)'}">
         ${needsRetrain ? '⚠ Retraining Recommended' : '✓ Model Healthy'}
       </div>

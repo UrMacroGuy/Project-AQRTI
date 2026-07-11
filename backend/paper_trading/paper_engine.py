@@ -115,23 +115,17 @@ def run_paper_trading_cycle(version: int = 1, strategy_id: str | None = None) ->
         mtm["totalValue"],
     )
 
-    # ── Auto-retrain: if live win rate is below WIN_RATE_TARGET, trigger retrain loop ────
+    # ── Auto-retrain: DISABLED for the curated universe. ML predictions are
+    # disabled entirely (see aqrti/api/app.py::_boot_predictions and
+    # docs/RESEARCH_DRIVEN_REARCHITECTURE.md §6 — honest AUC on the old
+    # 352-symbol dataset was 0.485/coin-flip; the curated universe's dataset
+    # is smaller still). This retrain trigger was left live after that
+    # decision and was firing into paper_trading/retrain_loop.py, which
+    # imports the now-nonexistent ml.predictors/ml.trainers modules —
+    # producing a "No module named 'ml.predictors'" error on every paper
+    # trading cycle. Disabled here to match; re-enable only alongside a
+    # fresh decision to re-enable ML predictions.
     retrain_triggered = False
-    try:
-        from paper_trading.retrain_loop import run_retrain_loop, _get_live_win_rate, MIN_TRADES_EVAL, WIN_RATE_TARGET
-        with get_db() as db2:
-            live_wr, live_trades = _get_live_win_rate(db2)
-        if live_trades >= MIN_TRADES_EVAL and live_wr < WIN_RATE_TARGET:
-            log.info(
-                "Live win rate %.1f%% < target %.0f%% with %d trades — triggering retrain loop",
-                live_wr, WIN_RATE_TARGET, live_trades,
-            )
-            import threading
-            t = threading.Thread(target=run_retrain_loop, kwargs={"force": False}, daemon=True)
-            t.start()
-            retrain_triggered = True
-    except Exception as rt_exc:
-        log.warning("Auto-retrain check failed: %s", rt_exc)
 
     return {
         "status":           "ok",

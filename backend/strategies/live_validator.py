@@ -18,7 +18,7 @@ Called by:
 
 from __future__ import annotations
 
-import sys, os, math
+import sys, os, math, json
 from datetime import date, timedelta
 from collections import defaultdict
 from typing import Optional
@@ -40,6 +40,15 @@ MIN_LIVE_TRADES      = 3     # need at least 3 closed live trades before judging
 SHARPE_DIVERGE_LIMIT = 0.8   # if live Sharpe < backtest Sharpe - 0.8 → flag
 WINRATE_DIVERGE_LIMIT = 20.0 # if live win-rate < backtest - 20pp → flag
 DEMOTION_MIN_TRADES  = 5     # only demote if ≥ 5 live trades (avoid noise)
+
+# ── Post-promotion lifecycle triggers (additive — stack on top of the
+# divergence check above, never replace it; per CLAUDE.md, gates only
+# tighten, never loosen) ─────────────────────────────────────────
+ROLLING_WR_WINDOW      = 20    # trades — rolling window for the live WR floor
+ROLLING_WR_FLOOR        = 50.0  # % — matches MIN_OOS_WIN_RATE (promotion_config.py);
+                                 # a champion's live edge must never fall below what
+                                 # it had to prove to get promoted in the first place
+DRAWDOWN_BREACH_FACTOR  = 1.5   # live drawdown > 1.5x validated backtest max_drawdown → demote
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -196,8 +205,18 @@ def run_daily_validation_sweep(db: Session, days_back: int = 90) -> dict:
         if result["demote"]:
             demoted.append(strategy_id)
             _demote_to_shadow(db, strategy_id, result["reason"])
+            continue
         elif result["flag"]:
             flagged.append(strategy_id)
+
+        # Additive post-promotion triggers — each independently sufficient
+        # to demote; checked even if the divergence check above passed.
+        for check in (_check_rolling_win_rate_floor, _check_drawdown_breach, _check_regime_shift):
+            trigger = check(db, strategy_id)
+            if trigger["demote"]:
+                demoted.append(strategy_id)
+                _demote_to_shadow(db, strategy_id, trigger["reason"])
+                break
 
     db.commit()
 
@@ -259,6 +278,125 @@ def _check_live_divergence(db: Session, strategy_id: str) -> dict:
     )
     log.debug("Divergence %s: %s demote=%s", strategy_id, reason, demote)
     return {"demote": demote, "flag": flag, "reason": reason}
+
+
+def _closed_trades_chronological(db: Session, strategy_id: str) -> list[PaperTrade]:
+    return (
+        db.query(PaperTrade)
+        .filter(
+            PaperTrade.portfolio_name == f"strat_{strategy_id}",
+            PaperTrade.is_open        == False,
+        )
+        .order_by(PaperTrade.exit_date.asc())
+        .all()
+    )
+
+
+def _check_rolling_win_rate_floor(db: Session, strategy_id: str) -> dict:
+    """
+    Trigger: live win rate over the most recent ROLLING_WR_WINDOW closed
+    trades falls below ROLLING_WR_FLOOR. Uses a trailing window rather than
+    all-time win rate so a champion that curdles recently gets caught even
+    if its early live trades were strong enough to keep the cumulative
+    average above the floor.
+    """
+    closed = _closed_trades_chronological(db, strategy_id)
+    if len(closed) < ROLLING_WR_WINDOW:
+        return {"demote": False, "reason": ""}
+
+    window = closed[-ROLLING_WR_WINDOW:]
+    wins = sum(1 for t in window if (t.gross_pnl or 0) > 0)
+    win_rate = wins / len(window) * 100.0
+
+    demote = win_rate < ROLLING_WR_FLOOR
+    reason = (
+        f"rolling_win_rate: {win_rate:.1f}% over last {len(window)} trades "
+        f"< floor {ROLLING_WR_FLOOR}%"
+    )
+    if demote:
+        log.warning("Strategy %s rolling WR breach: %s", strategy_id, reason)
+    return {"demote": demote, "reason": reason}
+
+
+def _check_drawdown_breach(db: Session, strategy_id: str) -> dict:
+    """
+    Trigger: live drawdown (peak-to-trough on the cumulative live P&L curve)
+    exceeds DRAWDOWN_BREACH_FACTOR x the strategy's validated backtest
+    max_drawdown. A strategy losing far more live than its backtest ever
+    showed is exactly the "picking up pennies in front of a steamroller"
+    failure mode promotion_config.py's MAX_DRAWDOWN_LIMIT exists to catch
+    in backtest — this is its live-trading counterpart.
+    """
+    strat = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
+    if not strat or not strat.max_drawdown:
+        return {"demote": False, "reason": ""}
+
+    closed = _closed_trades_chronological(db, strategy_id)
+    if len(closed) < DEMOTION_MIN_TRADES:
+        return {"demote": False, "reason": ""}
+
+    equity = 0.0
+    peak = 0.0
+    max_dd_pct = 0.0
+    for t in closed:
+        equity += (t.gross_pnl or 0.0)
+        peak = max(peak, equity)
+        if peak > 0:
+            dd_pct = (equity - peak) / peak * 100.0
+            max_dd_pct = min(max_dd_pct, dd_pct)
+
+    bt_dd = strat.max_drawdown  # negative, percent
+    breach_threshold = bt_dd * DRAWDOWN_BREACH_FACTOR  # more negative than bt_dd
+
+    demote = max_dd_pct < breach_threshold
+    reason = (
+        f"drawdown_breach: live_dd={max_dd_pct:.1f}% exceeds "
+        f"{DRAWDOWN_BREACH_FACTOR}x backtest_dd={bt_dd:.1f}% (threshold={breach_threshold:.1f}%)"
+    )
+    if demote:
+        log.warning("Strategy %s drawdown breach: %s", strategy_id, reason)
+    return {"demote": demote, "reason": reason}
+
+
+def _check_regime_shift(db: Session, strategy_id: str) -> dict:
+    """
+    Trigger: the market has shifted into a regime this strategy was never
+    validated in (not in its allowed_regimes / no bull_sharpe|bear_sharpe|
+    sideways_sharpe|volatile_sharpe recorded for it). A strategy trading on
+    while the regime moves outside its proven envelope is running blind —
+    cut the signal stream rather than let it fire on an unvalidated premise.
+    """
+    strat = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
+    if not strat:
+        return {"demote": False, "reason": ""}
+
+    current_regime = _current_regime(db)
+
+    allowed = []
+    if strat.allowed_regimes:
+        try:
+            allowed = json.loads(strat.allowed_regimes)
+        except (ValueError, TypeError):
+            allowed = []
+    if allowed and current_regime not in allowed:
+        reason = f"regime_shift: current={current_regime} not in allowed_regimes={allowed}"
+        log.warning("Strategy %s regime shift: %s", strategy_id, reason)
+        return {"demote": True, "reason": reason}
+
+    # Even if nominally "allowed", a regime the strategy has literally never
+    # traded in (no per-regime Sharpe recorded) is unvalidated in practice.
+    regime_sharpe = {
+        "BULL":     strat.bull_sharpe,
+        "BEAR":     strat.bear_sharpe,
+        "SIDEWAYS": strat.sideways_sharpe,
+        "VOLATILE": strat.volatile_sharpe,
+    }.get(current_regime)
+    if regime_sharpe is None:
+        reason = f"regime_shift: no validated Sharpe for current regime {current_regime}"
+        log.warning("Strategy %s regime shift: %s", strategy_id, reason)
+        return {"demote": True, "reason": reason}
+
+    return {"demote": False, "reason": ""}
 
 
 def _demote_to_shadow(db: Session, strategy_id: str, reason: str) -> None:

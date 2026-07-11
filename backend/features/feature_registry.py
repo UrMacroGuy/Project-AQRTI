@@ -193,6 +193,38 @@ FEATURE_CATALOG: List[FeatureDef] = [
                "mean(peer_rsi_14, top10_corr_peers)", ["close"], 15),
     FeatureDef("peer_mean_vol_21d",        "market", "Mean 21d vol of top-10 correlation peers",
                "mean(peer_rolling_vol_21d, top10_corr_peers)", ["close"], 22),
+
+    # ── RESEARCH-DERIVED FEATURES (research_synthesis funnel) ─
+    # LLM-derived, point-in-time joined from research_synthesis. Null when no
+    # synthesis exists for the symbol as of date d — never fabricated.
+    FeatureDef("research_sentiment",       "research", "Most recent research_synthesis.sentiment_score (-1..1), lookback <=5d",
+               "research_synthesis.sentiment_score as-of d (lookback window 5d)", ["research_synthesis"], 1),
+    FeatureDef("research_confidence",      "research", "Most recent research_synthesis.confidence (0..1), lookback <=5d",
+               "research_synthesis.confidence as-of d (lookback window 5d)", ["research_synthesis"], 1),
+    FeatureDef("research_risk_flag_negative", "research", "1 if most recent research_synthesis has any risk_flags, else 0",
+               "1 if len(risk_flags) > 0 as-of d (lookback window 5d) else 0", ["research_synthesis"], 1, output_type="bool"),
+
+    # ── EVENT/CATALYST FEATURES (earnings_events, nse_corporate_filings, news_events) ─
+    FeatureDef("catalyst_earnings_beat",   "events", "1 if EarningsEvent.beat_miss=='BEAT' within lookback window prior to d",
+               "1 if any earnings_events.beat_miss=='BEAT' in [d-N, d] else 0", ["earnings_events"], 1, output_type="bool"),
+    FeatureDef("catalyst_buyback",         "events", "1 if a buyback filing/news event occurred within lookback window prior to d",
+               "1 if nse_corporate_filings.filing_type=='buyback' or news_events.event_type=='Buyback' in [d-N, d] else 0",
+               ["nse_corporate_filings", "news_events"], 1, output_type="bool"),
+    FeatureDef("catalyst_order_win",       "events", "1 if a large-order-win news event occurred within lookback window prior to d",
+               "1 if news_events.event_type=='LargeOrder' in [d-N, d] else 0", ["news_events"], 1, output_type="bool"),
+    FeatureDef("catalyst_dividend_hike",   "events", "1 if a dividend filing occurred within lookback window prior to d",
+               "1 if nse_corporate_filings.filing_type=='dividend' or news_events.event_type=='Dividend' in [d-N, d] else 0",
+               ["nse_corporate_filings", "news_events"], 1, output_type="bool"),
+    FeatureDef("management_change_recent", "events", "1 if a management_change NewsEvent exists for the symbol within 10d prior to d",
+               "1 if news_events.event_type=='ManagementChange' in [d-10, d] else 0", ["news_events"], 1, output_type="bool"),
+    FeatureDef("days_to_earnings",         "events", "Calendar days to nearest upcoming EarningsEvent.earnings_date, null if none scheduled",
+               "min(earnings_date - d) for earnings_date >= d", ["earnings_events"], 1, output_type="int"),
+    FeatureDef("days_since_earnings",      "events", "Calendar days since nearest past EarningsEvent.earnings_date, null if none in lookback",
+               "min(d - earnings_date) for earnings_date <= d, capped at 90d lookback", ["earnings_events"], 1, output_type="int"),
+
+    # ── REGIME FEATURE (backend/markov module) ────────────────
+    FeatureDef("regime_markov",            "market", "Current observable Markov regime label (BULL|BEAR|SIDEWAYS) as-of d",
+               "markov_chain_daily.regime_state as-of d (most recent row <= d)", ["markov_chain_daily"], 1, output_type="str"),
 ]
 
 # Fast lookup by name

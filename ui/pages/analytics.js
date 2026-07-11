@@ -27,9 +27,9 @@ async function loadSectorBreadth() {
   if (canvas) new Chart(canvas, {
     type: 'bar',
     data: { labels, datasets: [
-      { label: 'Above 20MA',  data: above20,  backgroundColor: 'rgba(0,204,102,0.7)' },
-      { label: 'Above 50MA',  data: above50,  backgroundColor: 'rgba(0,170,255,0.6)' },
-      { label: 'Above 200MA', data: above200, backgroundColor: 'rgba(255,140,0,0.5)' },
+      { label: 'Above 20MA',  data: above20,  backgroundColor: 'rgba(240,240,242,0.7)' },
+      { label: 'Above 50MA',  data: above50,  backgroundColor: 'rgba(196,196,200,0.6)' },
+      { label: 'Above 200MA', data: above200, backgroundColor: 'rgba(140,140,144,0.5)' },
     ]},
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
@@ -90,10 +90,11 @@ async function loadCorrelationMatrix() {
     for (let j = 0; j < n; j++) {
       const val = matrix[i][j];
       if (val === null) { html += `<td style="width:${cellSize}px;height:${cellSize}px;background:#111"></td>`; continue; }
-      const r     = val < 0 ? Math.round(255 * Math.abs(val)) : 0;
-      const g     = val > 0 ? Math.round(180 * val) : 0;
+      // Grayscale heatmap: positive correlation -> brighter grey, negative -> dimmer grey,
+      // luminance encodes |val| (strength), never hue.
+      const lum   = val >= 0 ? Math.round(60 + 195 * val) : Math.round(60 - 40 * Math.abs(val));
       const alpha = Math.min(0.9, Math.abs(val) * 0.8 + 0.1);
-      const bg    = i === j ? '#1a1a1a' : `rgba(${r},${g},0,${alpha})`;
+      const bg    = i === j ? '#1a1a1a' : `rgba(${lum},${lum},${lum},${alpha})`;
       const tc    = Math.abs(val) > 0.55 ? '#fff' : '#888';
       const disp  = i === j ? '1.0' : val.toFixed(2);
       html += `<td title="${symbols[i]} vs ${symbols[j]}: ${disp}" style="width:${cellSize}px;height:${cellSize}px;background:${bg};text-align:center;vertical-align:middle;color:${tc};font-size:0.52rem;cursor:default">${disp}</td>`;

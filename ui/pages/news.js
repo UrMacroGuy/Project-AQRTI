@@ -121,13 +121,13 @@ async function hydrateNews() {
         datasets: [{
           label: 'Avg Sentiment',
           data: sentVals,
-          borderColor: '#ff8c00',
+          borderColor: 'var(--accent)',
           borderWidth: 2,
           pointRadius: 2,
-          pointBackgroundColor: '#ff8c00',
+          pointBackgroundColor: 'var(--accent)',
           tension: 0.4,
           fill: true,
-          backgroundColor: 'rgba(255,140,0,0.06)',
+          backgroundColor: 'rgba(232,232,234,0.06)',
           spanGaps: true,
         }],
       },
@@ -141,6 +141,49 @@ async function hydrateNews() {
       },
     });
   }
+}
+
+// ── Research Synthesis — LLM-derived per-symbol thesis, cited sources ──
+// Part of the merged Research page (news.js + sentiment.js, see CLAUDE.md
+// §7 UI revamp). Every row must trace to real source_event_ids — if the
+// synthesizer hasn't run yet for a symbol, that symbol shows NO DATA
+// rather than a fabricated thesis.
+async function hydrateResearchSynthesis() {
+  const body = el('research-synthesis-body');
+  if (!body) return;
+  const data = await Api.researchSynthesisLatest();
+  if (!data) {
+    body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:0.78rem">Backend offline — start the backend server to load research synthesis.</div>';
+    return;
+  }
+  const rows = data.synthesis || [];
+  if (!rows.length) {
+    body.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:0.78rem">NO DATA — no research synthesis generated yet. Run the research pipeline from Research Ops.</div>';
+    return;
+  }
+  const dirCls = d => d === 'bullish' ? 'positive' : d === 'bearish' ? 'negative' : '';
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+      ${rows.map(r => {
+        const catalysts = (r.key_catalysts || []).slice(0, 3);
+        const risks = (r.risk_flags || []).slice(0, 2);
+        const sourceCount = (r.source_event_ids || []).length;
+        return `
+        <div class="panel" style="margin:0">
+          <div class="panel-header" style="padding:8px 10px">
+            <span class="panel-title" style="font-size:0.82rem">${r.symbol}</span>
+            <span class="${dirCls(r.thesis_direction)}" style="margin-left:auto;font-size:0.72rem;font-weight:600;text-transform:uppercase">${r.thesis_direction}</span>
+          </div>
+          <div class="panel-body" style="padding:8px 10px;font-size:0.74rem">
+            <div style="color:var(--text-muted);font-size:0.68rem">${r.synthesis_date} · ${r.model_used || '—'}${r.confidence != null ? ' · conf ' + Math.round(r.confidence * 100) + '%' : ''}</div>
+            ${catalysts.length ? `<div style="margin-top:6px"><strong>Catalysts:</strong> ${catalysts.join(', ')}</div>` : ''}
+            ${risks.length ? `<div style="margin-top:4px;color:var(--negative)"><strong>Risks:</strong> ${risks.join(', ')}</div>` : ''}
+            ${r.management_change_flag ? `<div style="margin-top:4px;color:var(--warning)">⚠ Management change flagged</div>` : ''}
+            <a href="javascript:void(0)" onclick="showCockpitSources('${r.symbol}')" style="display:inline-block;margin-top:6px;font-size:0.68rem;color:var(--accent)">${sourceCount} cited source${sourceCount !== 1 ? 's' : ''} →</a>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 
 // ── Sentiment Center — live hydration ────────────────────────

@@ -56,9 +56,9 @@ async function hydrateSentiment() {
           label: 'Sentiment Score',
           data: top.map(s => s.score),
           backgroundColor: top.map(s =>
-            s.score >= 70 ? 'rgba(34,197,94,0.7)'
-            : s.score >= 50 ? 'rgba(255,140,0,0.7)'
-            : 'rgba(239,68,68,0.6)'
+            s.score >= 70 ? 'rgba(240,240,242,0.7)'
+            : s.score >= 50 ? 'rgba(200,200,204,0.7)'
+            : 'rgba(154,154,159,0.6)'
           ),
           borderRadius: 4,
         }],
@@ -105,9 +105,9 @@ async function hydrateSentiment() {
         datasets: [{
           label: 'Sector Sentiment',
           data: sectors.map(s => s.score),
-          borderColor: '#ff8c00',
-          backgroundColor: 'rgba(255,140,0,0.08)',
-          pointBackgroundColor: '#ff8c00',
+          borderColor: 'var(--accent)',
+          backgroundColor: 'rgba(232,232,234,0.08)',
+          pointBackgroundColor: 'var(--accent)',
           borderWidth: 1.5, pointRadius: 3,
         }],
       },
