@@ -307,14 +307,14 @@ function _sessionToast(session) {
 // COMMAND PALETTE — Bloomberg-style GO function
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const CMD_PAGES = [
-  { icon: 'â—ˆ', label: 'Portfolio Cockpit',     hint: '12-symbol overview',    page: 'cockpit' },
+  { icon: '◈', label: 'Portfolio Cockpit',     hint: '12-symbol overview',    page: 'cockpit' },
   { icon: '◎', label: 'Market',                hint: 'Indices · Sectors',     page: 'market' },
-  { icon: 'â—ˆ', label: 'Analytics',             hint: 'Portfolio performance', page: 'analytics' },
+  { icon: '◈', label: 'Analytics',             hint: 'Portfolio performance', page: 'analytics' },
   { icon: '◉', label: 'Research',              hint: 'News · Sentiment · Synthesis', page: 'news' },
   { icon: '◎', label: 'Agents',                hint: 'Research agents · Daily Brief', page: 'agents' },
   { icon: '▣', label: 'Algos',                 hint: 'Leaderboard · Replay',  page: 'strategy' },
-  { icon: 'âš”', label: 'Arena',                 hint: 'Promotion gates',       page: 'arena' },
-  { icon: 'âœ…', label: 'Go / No-Go',            hint: 'Morning decision',      page: 'gonogo' },
+  { icon: '⚔', label: 'Arena',                 hint: 'Promotion gates',       page: 'arena' },
+  { icon: '✅', label: 'Go / No-Go',            hint: 'Morning decision',      page: 'gonogo' },
   { icon: '◇', label: 'Markov Regime',         hint: 'Bull · Bear · Sideways',page: 'markov' },
   { icon: '◈', label: 'Paper Portfolio',       hint: 'Positions · P&L',       page: 'paper' },
   { icon: '⬡', label: 'Risk Center',           hint: 'VaR · Drawdown · CB',   page: 'risk' },
@@ -533,109 +533,95 @@ async function hydrateWatchdogRestartPill() {
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function hydrateGoNogo() {
-  const condEl    = el('gonogo-conditions');
+  const scoreEl   = el('gonogo-scorecard-card');
   const quarEl    = el('gonogo-quarantine');
   const sigEl     = el('gonogo-signals');
-  const bannerEl  = el('gonogo-overall-banner');
-  if (!condEl) return;
+  if (!scoreEl) return;
 
   let data = null;
-  try { data = await Api.goNogo(); } catch (_) {}
+  try {
+    data = await Api.goNogo();
+  } catch (_) {
+    data = null;
+  }
 
   if (!data) {
-    if (condEl) condEl.innerHTML = '<div style="grid-column:1/-1;color:var(--text-muted);padding:24px;text-align:center">Backend unavailable — start the backend server to see scorecard.</div>';
+    scoreEl.innerHTML = '<div class="offline-text">Backend offline — start the backend server to see the readiness scorecard.</div>';
+    if (quarEl) quarEl.innerHTML = '<div class="offline-text">Backend offline.</div>';
+    if (sigEl) sigEl.innerHTML = '<div class="offline-text">Backend offline.</div>';
     return;
   }
 
-  // â”€â”€ Overall banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  if (bannerEl) {
-    const overallColor = data.overall === 'green' ? '#22c55e' : data.overall === 'partial' ? '#fbbf24' : '#ef4444';
-    const overallIcon  = data.overall === 'green' ? 'âœ… ALL CLEAR' : data.overall === 'partial' ? 'âš ï¸ PARTIAL' : 'âŒ NOT READY';
-    bannerEl.style.cssText = `margin-bottom:20px;padding:12px 16px;border-radius:6px;font-size:0.8rem;letter-spacing:0.06em;background:${overallColor}18;border:1px solid ${overallColor}40;color:${overallColor};font-weight:600`;
-    bannerEl.textContent = overallIcon + (data.overall === 'green' ? ' — All 5 conditions met. Ready for real capital.' : data.overall === 'partial' ? ' — Some conditions met. Not ready for real capital.' : ' — Conditions not met. Do NOT trade real capital.');
-    bannerEl.style.display = 'block';
-  }
+  // -- Readiness Scorecard (summary strip + condition rows) --
+  const conditions = data.conditions || [];
+  const greenCount = conditions.filter(c => c.status === 'green').length;
+  const overallColor = data.overall === 'green' ? 'var(--positive)' : data.overall === 'partial' ? 'var(--warning)' : 'var(--negative)';
+  const overallText  = data.overall === 'green'
+    ? 'All 5 conditions met — ready for real capital.'
+    : data.overall === 'partial'
+      ? 'Some conditions met — not ready for real capital.'
+      : 'Conditions not met — do NOT trade real capital.';
 
-  // â”€â”€ Condition cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  function condCard(c) {
-    const color = c.status === 'green' ? '#22c55e' : c.status === 'partial' ? '#fbbf24' : '#ef4444';
-    const icon  = c.status === 'green' ? 'âœ…' : c.status === 'partial' ? 'âš ï¸' : 'âŒ';
-    return `<div style="background:var(--card-bg);border:1px solid ${color}40;border-left:3px solid ${color};border-radius:6px;padding:14px 16px">
-      <div style="font-size:1rem">${icon} <strong style="color:${color}">${c.label}</strong></div>
-      <div style="color:var(--text-muted);font-size:0.78rem;margin-top:6px">${c.detail}</div>
+  function condRow(c) {
+    const pillCls = c.status === 'green' ? 'pill-pass' : c.status === 'partial' ? 'pill-pending' : 'pill-fail';
+    const pillTxt = c.status === 'green' ? 'PASS' : c.status === 'partial' ? 'PENDING' : 'FAIL';
+    return `<div class="scorecard-row">
+      <div class="scorecard-cond"><strong>${c.label}</strong><div style="color:var(--text-muted);font-size:0.74rem;margin-top:2px">${c.detail || ''}</div></div>
+      <span class="pill ${pillCls}">${pillTxt}</span>
     </div>`;
   }
-  condEl.innerHTML = (data.conditions || []).map(condCard).join('');
 
-  // â”€â”€ Quarantine progress â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  if (conditions.length === 0) {
+    scoreEl.innerHTML = '<div class="empty-text">No readiness conditions returned yet.</div>';
+  } else {
+    scoreEl.innerHTML = `
+      <div class="scorecard-summary" style="color:${overallColor}">${greenCount} of ${conditions.length} green — ${overallText}</div>
+      ${conditions.map(condRow).join('')}
+    `;
+  }
+
+  // -- Quarantine progress --
   if (quarEl) {
     const algos = data.quarantine_algos || [];
     if (algos.length === 0) {
-      quarEl.innerHTML = '<span style="color:var(--text-muted)">No promoted algos yet — quarantine clock hasn\'t started.</span>';
+      quarEl.innerHTML = '<div class="empty-text">No promoted algos yet — quarantine clock hasn\'t started.</div>';
     } else {
-      const rows = algos.map(a => {
-        const ok = a.quarantine_ok;
-        const rowColor = ok ? '#22c55e' : '#fbbf24';
+      quarEl.innerHTML = algos.map(a => {
         const gates = a.gates || {};
-        const gateHtml = [
-          ['>=60d', gates.days_60],
-          ['>=20 trades', gates.trades_20],
-          ['>=50% WR', gates.wr_50pct],
-          ['+P&L', gates.positive_pnl],
-        ].map(([lbl, v]) =>
-          `<span style="margin-right:8px;color:${v ? '#22c55e' : '#75757a'}">${v ? 'âœ“' : 'â—‹'} ${lbl}</span>`
-        ).join('');
-        return `<tr style="border-bottom:1px solid var(--border-faint)">
-          <td style="padding:8px 6px;color:${rowColor};font-size:0.8rem">${ok ? 'âœ…' : 'â³'} ${a.name}</td>
-          <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${a.strategy_id}</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.days_in_quarantine}d</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.shadow_trades}</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${a.shadow_wr}%</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:${a.net_pnl >= 0 ? '#22c55e' : '#ef4444'}">â‚¹${a.net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
-          <td style="padding:8px 6px;font-size:0.72rem">${gateHtml}</td>
-        </tr>`;
+        const daysPct   = Math.max(0, Math.min(100, (a.days_in_quarantine / 60) * 100));
+        const tradesPct = Math.max(0, Math.min(100, (a.shadow_trades / 20) * 100));
+        const wrPct     = Math.max(0, Math.min(100, a.shadow_wr || 0));
+        return `
+        <div class="quarantine-card">
+          <div class="quarantine-name">${a.quarantine_ok ? '✅' : '⏳'} ${a.name} <span style="color:var(--text-muted);font-weight:400;font-size:0.74rem">${a.strategy_id}</span></div>
+          <div class="qbar-row"><span class="qbar-label">Days / 60</span><div class="qbar-track"><div class="qbar-fill ${gates.days_60 ? 'ok' : ''}" style="width:${daysPct}%"></div></div><span class="qbar-val">${a.days_in_quarantine}d</span></div>
+          <div class="qbar-row"><span class="qbar-label">Trades / 20</span><div class="qbar-track"><div class="qbar-fill ${gates.trades_20 ? 'ok' : ''}" style="width:${tradesPct}%"></div></div><span class="qbar-val">${a.shadow_trades}</span></div>
+          <div class="qbar-row"><span class="qbar-label">WR vs 50%</span><div class="qbar-track"><div class="qbar-fill ${gates.wr_50pct ? 'ok' : 'warn'}" style="width:${wrPct}%"></div></div><span class="qbar-val">${a.shadow_wr}%</span></div>
+          <div class="qbar-row"><span class="qbar-label">Net P&amp;L</span><span style="color:${a.net_pnl >= 0 ? 'var(--positive)' : 'var(--negative)'};font-family:var(--font-mono)">₹${a.net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</span></div>
+        </div>`;
       }).join('');
-      quarEl.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.78rem">
-        <thead><tr style="border-bottom:1px solid var(--border-faint)">
-          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Algo</th>
-          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">ID</th>
-          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Days</th>
-          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Trades</th>
-          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">WR</th>
-          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Net P&L</th>
-          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Gates</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`;
     }
   }
 
-  // â”€â”€ Actionable signals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // -- Today's actionable signals --
   if (sigEl) {
     const sigs = data.actionable_signals || [];
     if (sigs.length === 0) {
-      sigEl.innerHTML = '<span style="color:var(--text-muted)">No open positions from promoted algos — nothing actionable today.</span>';
+      sigEl.innerHTML = '<div class="empty-text">No open positions from promoted algos — nothing actionable today.</div>';
     } else {
       const rows = sigs.map(s => {
-        const pnlColor = (s.current_pnl_pct || 0) >= 0 ? '#22c55e' : '#ef4444';
-        return `<tr style="border-bottom:1px solid var(--border-faint)">
-          <td style="padding:8px 6px;font-weight:600;font-size:0.82rem">${s.symbol}</td>
-          <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.algo_name}</td>
-          <td style="padding:8px 6px;font-size:0.78rem">${s.direction || '—'}</td>
-          <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.entry_date || '—'}</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.78rem">â‚¹${(s.entry_price || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-          <td style="padding:8px 6px;text-align:right;font-size:0.82rem;color:${pnlColor}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
+        const pnlColor = (s.current_pnl_pct || 0) >= 0 ? 'var(--positive)' : 'var(--negative)';
+        return `<tr>
+          <td style="font-weight:600">${s.symbol}</td>
+          <td style="color:var(--text-muted)">${s.algo_name}</td>
+          <td>${s.direction || '—'}</td>
+          <td style="color:var(--text-muted)">${s.entry_date || '—'}</td>
+          <td style="text-align:right">₹${(s.entry_price || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+          <td style="text-align:right;color:${pnlColor}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
         </tr>`;
       }).join('');
-      sigEl.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.78rem">
-        <thead><tr style="border-bottom:1px solid var(--border-faint)">
-          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Symbol</th>
-          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Algo</th>
-          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Direction</th>
-          <th style="text-align:left;padding:6px;color:var(--text-muted);font-weight:500">Entry Date</th>
-          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">Entry Price</th>
-          <th style="text-align:right;padding:6px;color:var(--text-muted);font-weight:500">P&L %</th>
-        </tr></thead>
+      sigEl.innerHTML = `<div class="table-container"><table class="data-table compact">
+        <thead><tr><th>Symbol</th><th>Algo</th><th>Direction</th><th>Entry Date</th><th style="text-align:right">Entry Price</th><th style="text-align:right">P&amp;L %</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>`;
     }
@@ -646,29 +632,40 @@ async function hydrateGoNogoUptime() {
   const el = id => document.getElementById(id);
   const uptimeEl = el('gonogo-uptime');
   if (!uptimeEl) return;
+  uptimeEl.innerHTML = '<div class="loading-text">Loading…</div>';
 
   let rows = null;
-  try { rows = await Api.goNogoUptimeLog(); } catch (_) {}
+  try {
+    rows = await Api.goNogoUptimeLog();
+  } catch (_) {
+    rows = null;
+  }
 
-  if (!rows || !Array.isArray(rows) || rows.length === 0) {
-    uptimeEl.innerHTML = '<span style="color:var(--text-muted)">No health check records yet — pipeline watchdog not running.</span>';
+  if (rows === null) {
+    uptimeEl.innerHTML = '<div class="offline-text">Backend offline.</div>';
+    return;
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    uptimeEl.innerHTML = '<div class="empty-text">No health check records yet — pipeline watchdog not running.</div>';
     return;
   }
 
   const greenCount = rows.filter(r => r.overall_ok).length;
-  const dots = rows.map(r => {
-    const color   = r.overall_ok ? '#22c55e' : '#ef4444';
-    const dt      = r.checked_at ? new Date(r.checked_at).toLocaleDateString('en-IN') : '—';
+  const uptimePct = ((greenCount / rows.length) * 100).toFixed(1);
+  const last30 = rows.slice(-30);
+  const squares = last30.map(r => {
+    const cls = r.overall_ok ? 'green' : 'red';
+    const dt = r.checked_at ? new Date(r.checked_at).toLocaleDateString('en-IN') : '—';
     const tooltip = `${dt}: ${r.overall_ok ? 'OK' : 'FAILED'}${r.failures ? ' — ' + r.failures : ''}`;
-    return `<span title="${tooltip}" style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${color};margin:2px;cursor:default"></span>`;
+    return `<span class="uptime-day ${cls}" title="${tooltip}"></span>`;
   }).join('');
 
   uptimeEl.innerHTML = `
-    <div style="margin-bottom:8px;font-size:0.78rem;color:var(--text-muted)">${greenCount}/${rows.length} checks green (most recent on right)</div>
-    <div style="display:flex;flex-wrap:wrap;gap:2px">${dots}</div>
-    <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted)">
-      <span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;margin-right:4px"></span>Green = pipeline OK
-      <span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin-right:4px;margin-left:12px"></span>Red = check failed
+    <div class="uptime-pct">${uptimePct}% uptime <span style="color:var(--text-muted);font-weight:400;font-size:0.74rem">(${greenCount}/${rows.length} checks green, most recent last)</span></div>
+    <div class="uptime-strip">${squares}</div>
+    <div class="uptime-legend">
+      <span><i style="background:var(--positive)"></i>Green = pipeline OK</span>
+      <span><i style="background:var(--negative)"></i>Red = check failed</span>
     </div>`;
 }
 
@@ -676,17 +673,22 @@ async function hydrateGoNogoMonthlyReview() {
   const el = id => document.getElementById(id);
   const mrEl = el('gonogo-monthly-review');
   if (!mrEl) return;
+  mrEl.innerHTML = '<div class="loading-text">Loading…</div>';
 
   let data = null;
-  try { data = await Api.goNogoMonthlyReview(); } catch (_) {}
+  try {
+    data = await Api.goNogoMonthlyReview();
+  } catch (_) {
+    data = null;
+  }
 
   if (!data) {
-    mrEl.innerHTML = '<span style="color:var(--text-muted)">Backend unavailable.</span>';
+    mrEl.innerHTML = '<div class="offline-text">Backend offline.</div>';
     return;
   }
 
   if (data.no_data) {
-    mrEl.innerHTML = `<span style="color:var(--text-muted)">${data.empty_reason || 'No data yet.'}</span>`;
+    mrEl.innerHTML = `<div class="empty-text">${data.empty_reason || 'No data yet.'}</div>`;
     return;
   }
 
@@ -697,36 +699,29 @@ async function hydrateGoNogoMonthlyReview() {
   if (algos.length > 0) {
     const rows = algos.map(a => {
       const wrDiff = a.wr_vs_backtest_pp;
-      const wrColor = wrDiff == null ? '#888' : wrDiff >= 0 ? '#22c55e' : '#ef4444';
-      return `<tr style="border-bottom:1px solid var(--border-faint)">
-        <td style="padding:7px 6px;font-size:0.8rem;font-weight:500">${a.name}</td>
-        <td style="padding:7px 6px;text-align:right;font-size:0.78rem">${a.backtest_win_rate != null ? (a.backtest_win_rate * 100).toFixed(1) + '%' : '—'}</td>
-        <td style="padding:7px 6px;text-align:right;font-size:0.78rem">${a.live_30d_win_rate != null ? a.live_30d_win_rate + '%' : '—'}</td>
-        <td style="padding:7px 6px;text-align:right;font-size:0.78rem;color:${wrColor}">${wrDiff != null ? (wrDiff >= 0 ? '+' : '') + wrDiff + 'pp' : '—'}</td>
-        <td style="padding:7px 6px;text-align:right;font-size:0.78rem">${a.live_30d_trades}</td>
-        <td style="padding:7px 6px;text-align:right;font-size:0.78rem;color:${a.live_30d_net_pnl >= 0 ? '#22c55e' : '#ef4444'}">Rs ${a.live_30d_net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
+      const wrColor = wrDiff == null ? 'var(--text-muted)' : wrDiff >= 0 ? 'var(--positive)' : 'var(--negative)';
+      return `<tr>
+        <td style="font-weight:500">${a.name}</td>
+        <td style="text-align:right">${a.backtest_win_rate != null ? (a.backtest_win_rate * 100).toFixed(1) + '%' : '—'}</td>
+        <td style="text-align:right">${a.live_30d_win_rate != null ? a.live_30d_win_rate + '%' : '—'}</td>
+        <td style="text-align:right;color:${wrColor}">${wrDiff != null ? (wrDiff >= 0 ? '+' : '') + wrDiff + 'pp' : '—'}</td>
+        <td style="text-align:right">${a.live_30d_trades}</td>
+        <td style="text-align:right;color:${a.live_30d_net_pnl >= 0 ? 'var(--positive)' : 'var(--negative)'}">₹${a.live_30d_net_pnl.toLocaleString('en-IN', {minimumFractionDigits:0, maximumFractionDigits:0})}</td>
       </tr>`;
     }).join('');
-    algoHtml = `<div style="overflow-x:auto;margin-bottom:16px"><table style="width:100%;border-collapse:collapse;font-size:0.78rem">
-      <thead><tr style="border-bottom:1px solid var(--border-faint)">
-        <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Algo</th>
-        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">BT WR%</th>
-        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Live WR%</th>
-        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Diff</th>
-        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Trades</th>
-        <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Net P&L</th>
-      </tr></thead>
+    algoHtml = `<div class="table-container" style="margin-bottom:14px"><table class="data-table compact">
+      <thead><tr><th>Algo</th><th style="text-align:right">BT WR%</th><th style="text-align:right">Live WR%</th><th style="text-align:right">Diff</th><th style="text-align:right">Trades</th><th style="text-align:right">Net P&amp;L</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
   }
 
   const cr = data.cost_reconciliation || {};
   mrEl.innerHTML = `
-    <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:12px">Period: ${data.month_start} to ${data.report_date} &nbsp;|&nbsp; Uptime: ${uptime.checks_green ?? '—'}/${uptime.checks_total ?? '—'} checks (${uptime.uptime_pct ?? '—'}%)</div>
+    <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:12px">Period: ${data.month_start} to ${data.report_date} &nbsp;·&nbsp; Uptime: ${uptime.checks_green ?? '—'}/${uptime.checks_total ?? '—'} checks (${uptime.uptime_pct ?? '—'}%)</div>
     ${algoHtml}
-    <div style="font-size:0.74rem;color:var(--text-muted);padding:8px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px">
+    <div style="font-size:0.76rem;color:var(--text-muted);padding:10px 12px;background:var(--bg-hover);border:1px solid var(--border-faint);border-radius:var(--radius-md)">
       <strong style="color:var(--text-primary)">Cost reconciliation:</strong> ${cr.note || '—'}
-      ${cr.real_cost_pct != null ? ` | Real cost: <strong>${cr.real_cost_pct}%</strong> vs modeled ${cr.modeled_cost_pct}%` : ''}
+      ${cr.real_cost_pct != null ? ` — real cost <strong>${cr.real_cost_pct}%</strong> vs modeled ${cr.modeled_cost_pct}%` : ''}
     </div>`;
 }
 
@@ -734,195 +729,201 @@ async function hydrateGoNogoRiskRails() {
   const el = id => document.getElementById(id);
   const railsEl = el('gonogo-risk-rails');
   if (!railsEl) return;
+  railsEl.innerHTML = '<div class="loading-text">Loading…</div>';
 
   let data = null;
-  try { data = await Api.goNogoRiskRails(); } catch (_) {}
+  try {
+    data = await Api.goNogoRiskRails();
+  } catch (_) {
+    data = null;
+  }
 
-  if (!data || !data.rules) {
-    railsEl.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem">Could not load risk rails.</span>';
+  if (!data) {
+    railsEl.innerHTML = '<div class="offline-text">Backend offline.</div>';
+    return;
+  }
+  if (!data.rules || !data.rules.length) {
+    railsEl.innerHTML = '<div class="empty-text">No risk rails configured yet.</div>';
     return;
   }
 
   const rows = data.rules.map(r => `
-    <div style="border:1px solid var(--border-faint);border-left:3px solid #fbbf24;border-radius:5px;padding:10px 14px;margin-bottom:8px">
-      <div style="font-size:0.8rem;font-weight:600;color:#fbbf24">Rule ${r.id}: ${r.rule}</div>
-      <div style="font-size:0.76rem;color:var(--text-muted);margin-top:4px">${r.detail}</div>
+    <div class="rail-row">
+      <span class="rail-label">Rule ${r.id}: ${r.rule}<div style="color:var(--text-muted);font-size:0.72rem;margin-top:2px">${r.detail || ''}</div></span>
+      <span class="rail-value">${r.limit != null ? r.limit : ''}</span>
     </div>`).join('');
 
-  railsEl.innerHTML = rows + `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:8px;padding:8px 12px;background:var(--card-bg);border-radius:4px;border:1px solid var(--border-faint)">${data.note || ''}</div>`;
+  railsEl.innerHTML = `<div class="card-title" style="margin-top:4px">Real-Capital Risk Rails</div>${rows}` +
+    (data.note ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:10px;padding:8px 12px;background:var(--bg-hover);border-radius:var(--radius-md);border:1px solid var(--border-faint)">${data.note}</div>` : '');
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════════════
 // GO-7: Morning Decision Screen hydration
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ══════════════════════════════════════════════════════════════════════
 
 async function hydrateMorningDecision() {
   const panelEl = document.getElementById('morning-decision-panel');
   const logEl   = document.getElementById('morning-act-log');
   if (!panelEl) return;
+  panelEl.innerHTML = '<div class="loading-text">Loading morning briefing…</div>';
 
   let data = null;
-  try { data = await Api.morningDecision(); } catch (_) {}
+  try {
+    data = await Api.morningDecision();
+  } catch (_) {
+    data = null;
+  }
 
   if (!data) {
-    panelEl.innerHTML = '<div style="color:var(--text-muted);font-size:0.78rem;text-align:center;padding:16px">Backend unavailable — start the backend to see today\'s briefing.</div>';
+    panelEl.innerHTML = '<div class="offline-text">Backend offline — start the backend to see today\'s briefing.</div>';
     return;
   }
 
   const hasNoAction  = data.no_action;
   const noActionText = data.no_action_reason || '';
+  const sigs = data.signals || [];
 
-  // â”€â”€ NO ACTION banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  let noActionHtml = '';
-  if (hasNoAction) {
-    noActionHtml = `
-      <div style="margin-bottom:14px;padding:12px 16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:6px;display:flex;align-items:flex-start;gap:10px">
-        <span style="font-size:1.2rem;color:#ef4444;flex-shrink:0">â›”</span>
-        <div>
-          <div style="color:#ef4444;font-weight:700;font-size:0.82rem;letter-spacing:0.04em;margin-bottom:4px">NO ACTION TODAY</div>
-          <div style="color:var(--text-muted);font-size:0.76rem">${noActionText}</div>
-        </div>
-      </div>`;
-  }
+  // ── Row 1 verdict: GO if there's at least one actionable signal and no
+  // blocking "no action" condition, NO-GO otherwise. This mirrors the
+  // scorecard's overall gate but answers "what should I do today" directly.
+  const isGo = !hasNoAction && sigs.length > 0;
+  const verdictWhy = hasNoAction
+    ? (noActionText || 'Conditions for action are not met today.')
+    : (sigs.length > 0
+        ? `${sigs.length} actionable signal${sigs.length > 1 ? 's' : ''} from promoted algos in the current ${data.regime || '—'} regime.`
+        : 'No open positions from promoted/active algos — nothing actionable today.');
 
-  // â”€â”€ Regime + Risk posture bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  let verdictHtml = `
+    <div class="verdict-banner">
+      <span class="verdict-badge ${isGo ? 'go' : 'no-go'}">${isGo ? 'GO' : 'NO-GO'}</span>
+      <span class="verdict-line">${isGo ? 'Actionable signals today' : (hasNoAction ? 'No action today' : 'Nothing actionable today')}</span>
+    </div>
+    <div class="verdict-why">${verdictWhy}</div>`;
+
+  // ── Regime + Risk posture bar ──────────────────────────────────────
   const regime      = data.regime || '—';
   const regimeDate  = data.regime_date || '';
   const posture     = data.risk_posture || 'normal';
   const cbOk        = data.circuit_breaker_ok;
-  const postureIcon = posture === 'high' ? 'ðŸ”´' : posture === 'elevated' ? 'ðŸŸ¡' : 'ðŸŸ¢';
-  const postureCls  = posture === 'high' ? '#ef4444' : posture === 'elevated' ? '#fbbf24' : '#22c55e';
-  const cbIcon      = cbOk === true ? 'ðŸŸ¢' : cbOk === false ? 'ðŸ”´' : 'âšª';
+  const postureIcon = posture === 'high' ? '🔴' : posture === 'elevated' ? '🟡' : '🟢';
+  const postureCls  = posture === 'high' ? 'var(--negative)' : posture === 'elevated' ? 'var(--warning)' : 'var(--positive)';
+  const cbIcon      = cbOk === true ? '🟢' : cbOk === false ? '🔴' : '⚪';
 
   let regimeHtml = `
-    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;font-size:0.76rem">
-      <div style="padding:6px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px;display:flex;align-items:center;gap:6px">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin:14px 0;font-size:0.78rem">
+      <div style="padding:6px 12px;background:var(--bg-hover);border:1px solid var(--border-faint);border-radius:var(--radius-md);display:flex;align-items:center;gap:6px">
         <span style="font-weight:600;color:var(--text-primary)">Regime:</span>
-        <span style="color:${regime === 'BULL' ? '#22c55e' : regime === 'BEAR' ? '#ef4444' : '#fbbf24'}">${regime}</span>
-        ${regimeDate ? `<span style="color:var(--text-muted);font-size:0.68rem">(${regimeDate})</span>` : ''}
+        <span style="color:${regime === 'BULL' ? 'var(--positive)' : regime === 'BEAR' ? 'var(--negative)' : 'var(--warning)'}">${regime}</span>
+        ${regimeDate ? `<span style="color:var(--text-muted);font-size:0.7rem">(${regimeDate})</span>` : ''}
       </div>
-      <div style="padding:6px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px;display:flex;align-items:center;gap:6px">
+      <div style="padding:6px 12px;background:var(--bg-hover);border:1px solid var(--border-faint);border-radius:var(--radius-md);display:flex;align-items:center;gap:6px">
         <span>${postureIcon}</span>
         <span style="font-weight:600;color:var(--text-primary)">Risk Posture:</span>
         <span style="color:${postureCls};text-transform:uppercase">${posture}</span>
       </div>
-      <div style="padding:6px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px;display:flex;align-items:center;gap:6px">
+      <div style="padding:6px 12px;background:var(--bg-hover);border:1px solid var(--border-faint);border-radius:var(--radius-md);display:flex;align-items:center;gap:6px">
         <span>${cbIcon}</span>
         <span style="font-weight:600;color:var(--text-primary)">Circuit Breaker:</span>
-        <span style="color:${cbOk === true ? '#22c55e' : cbOk === false ? '#ef4444' : '#888'}">${cbOk === true ? 'OK' : cbOk === false ? 'TRIPPED' : 'No data'}</span>
+        <span style="color:${cbOk === true ? 'var(--positive)' : cbOk === false ? 'var(--negative)' : 'var(--text-muted)'}">${cbOk === true ? 'OK' : cbOk === false ? 'TRIPPED' : 'No data'}</span>
       </div>
-      <div style="padding:6px 12px;background:var(--card-bg);border:1px solid var(--border-faint);border-radius:4px;font-size:0.72rem;color:var(--text-muted)">
+      <div style="padding:6px 12px;background:var(--bg-hover);border:1px solid var(--border-faint);border-radius:var(--radius-md);font-size:0.74rem;color:var(--text-muted)">
         Date: ${data.date || '—'} · ${data.promoted_algo_count || 0} promoted algo(s)
       </div>
     </div>`;
 
-  // â”€â”€ Signals table â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Signals table ──────────────────────────────────────────────────
   let signalsHtml = '';
-  const sigs = data.signals || [];
 
   if (!hasNoAction && sigs.length > 0) {
     const rows = sigs.map(s => {
-      const dirCls   = (s.direction || '').toLowerCase().includes('bull') ? '#22c55e' : '#ef4444';
-      const pnlCls   = (s.current_pnl_pct || 0) >= 0 ? '#22c55e' : '#ef4444';
-      const wrColor  = s.shadow_wr != null ? (s.shadow_wr >= 50 ? '#22c55e' : '#ef4444') : '#888';
-      return `<tr style="border-bottom:1px solid var(--border-faint)">
-        <td style="padding:8px 6px;font-weight:600;font-size:0.82rem">${s.symbol}</td>
-        <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.algo_name}</td>
-        <td style="padding:8px 6px;font-size:0.78rem;color:${dirCls}">${s.direction || '—'}</td>
-        <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:${pnlCls}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
-        <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:var(--text-muted)">â‚¹${(s.position_size_inr || 0).toLocaleString('en-IN')}</td>
-        <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.stop_loss_pct != null ? (s.stop_loss_pct * 100).toFixed(1) + '%' : '—'}</td>
-        <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.take_profit_pct != null ? (s.take_profit_pct * 100).toFixed(1) + '%' : '—'}</td>
-        <td style="padding:8px 6px;font-size:0.78rem;color:var(--text-muted)">${s.confidence != null ? s.confidence + '%' : '—'}</td>
-        <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${s.quarantine_days}d</td>
-        <td style="padding:8px 6px;text-align:right;font-size:0.78rem">${s.shadow_trades}</td>
-        <td style="padding:8px 6px;text-align:right;font-size:0.78rem;color:${wrColor}">${s.shadow_wr != null ? s.shadow_wr + '%' : '—'}</td>
+      const dirCls   = (s.direction || '').toLowerCase().includes('bull') ? 'var(--positive)' : 'var(--negative)';
+      const pnlCls   = (s.current_pnl_pct || 0) >= 0 ? 'var(--positive)' : 'var(--negative)';
+      const wrColor  = s.shadow_wr != null ? (s.shadow_wr >= 50 ? 'var(--positive)' : 'var(--negative)') : 'var(--text-muted)';
+      return `<tr>
+        <td style="font-weight:600">${s.symbol}</td>
+        <td style="color:var(--text-muted)">${s.algo_name}</td>
+        <td style="color:${dirCls}">${s.direction || '—'}</td>
+        <td style="text-align:right;color:${pnlCls}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
+        <td style="text-align:right;color:var(--text-muted)">₹${(s.position_size_inr || 0).toLocaleString('en-IN')}</td>
+        <td style="color:var(--text-muted)">${s.stop_loss_pct != null ? (s.stop_loss_pct * 100).toFixed(1) + '%' : '—'}</td>
+        <td style="color:var(--text-muted)">${s.take_profit_pct != null ? (s.take_profit_pct * 100).toFixed(1) + '%' : '—'}</td>
+        <td style="color:var(--text-muted)">${s.confidence != null ? s.confidence + '%' : '—'}</td>
+        <td style="text-align:right">${s.quarantine_days}d</td>
+        <td style="text-align:right">${s.shadow_trades}</td>
+        <td style="text-align:right;color:${wrColor}">${s.shadow_wr != null ? s.shadow_wr + '%' : '—'}</td>
       </tr>`;
     }).join('');
 
     signalsHtml = `
-      <div style="overflow-x:auto;margin-bottom:8px">
+      <div class="table-container" style="margin-bottom:8px">
         <div style="font-size:0.72rem;font-weight:700;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:6px">
-          TODAY'S ACTIONABLE SIGNALS — Open paper trades on promoted algos (cap: ₹${(data.position_cap_inr || 1000).toLocaleString('en-IN')}/trade)
+          TODAY'S ACTIONABLE SIGNALS — open paper trades on promoted algos (cap: ₹${(data.position_cap_inr || 1000).toLocaleString('en-IN')}/trade)
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:0.76rem">
-          <thead><tr style="border-bottom:1px solid var(--border-faint)">
-            <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Symbol</th>
-            <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Algo</th>
-            <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Dir</th>
-            <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">P&L%</th>
-            <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Size â‚¹</th>
-            <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">SL</th>
-            <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">TP</th>
-            <th style="text-align:left;padding:5px;color:var(--text-muted);font-weight:500">Conf</th>
-            <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Q-Days</th>
-            <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">Tr</th>
-            <th style="text-align:right;padding:5px;color:var(--text-muted);font-weight:500">WR</th>
+        <table class="data-table compact">
+          <thead><tr>
+            <th>Symbol</th><th>Algo</th><th>Dir</th><th style="text-align:right">P&amp;L%</th>
+            <th style="text-align:right">Size ₹</th><th>SL</th><th>TP</th><th>Conf</th>
+            <th style="text-align:right">Q-Days</th><th style="text-align:right">Tr</th><th style="text-align:right">WR</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <div style="font-size:0.68rem;color:var(--text-muted);padding:6px 0">${data.note || 'Click "Acted" or "Skip" to log compliance — AQRTI never executes real trades.'}</div>`;
+      <div style="font-size:0.7rem;color:var(--text-muted);padding:6px 0">${data.note || 'Click "Acted" or "Skip" to log compliance — AQRTI never executes real trades.'}</div>`;
   } else if (!hasNoAction) {
-    signalsHtml = '<div style="color:var(--text-muted);font-size:0.78rem;padding:8px 0">No open positions from promoted/active algos. All signals flat — no action needed.</div>';
+    signalsHtml = '<div class="empty-text" style="padding:8px 0;text-align:left">No open positions from promoted/active algos. All signals flat — no action needed.</div>';
   }
 
-  // â”€â”€ Act/Skip buttons (only when there are signals and no NO ACTION) â”€â”€
+  // ── Act/Skip buttons (only when there are signals and no NO ACTION) ──
   let actHtml = '';
   if (!hasNoAction && sigs.length > 0) {
     const btnRows = sigs.map((s, i) => {
       const actId = `m-act-${i}`;
       const skipId = `m-skip-${i}`;
-      return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-faint);font-size:0.76rem">
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-faint);font-size:0.78rem">
         <span style="flex:0 0 100px;font-weight:600">${s.symbol}</span>
-        <span style="flex:0 0 120px;color:var(--text-muted);font-size:0.72rem">${s.algo_name}</span>
-        <button id="${actId}" class="btn-sm" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);color:#22c55e" onclick="morningAct('${s.strategy_id}','${s.symbol}','acted')">âœ“ Acted</button>
-        <button id="${skipId}" class="btn-sm" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444" onclick="morningAct('${s.strategy_id}','${s.symbol}','skipped')">âœ— Skip</button>
-        <span id="m-feedback-${i}" style="font-size:0.68rem;color:var(--text-muted)"></span>
+        <span style="flex:0 0 120px;color:var(--text-muted);font-size:0.74rem">${s.algo_name}</span>
+        <button id="${actId}" class="btn" style="border-color:var(--positive);color:var(--positive)" onclick="morningAct('${s.strategy_id}','${s.symbol}','acted')">Acted</button>
+        <button id="${skipId}" class="btn btn-secondary" onclick="morningAct('${s.strategy_id}','${s.symbol}','skipped')">Skip</button>
+        <span id="m-feedback-${i}" style="font-size:0.7rem;color:var(--text-muted)"></span>
       </div>`;
     }).join('');
     actHtml = `
       <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border-faint)">
-        <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:6px">COMPLIANCE LOG — Did you act or skip this signal?</div>
+        <div class="card-title">Compliance log — did you act or skip this signal?</div>
         ${btnRows}
       </div>`;
   }
 
-  panelEl.innerHTML = noActionHtml + regimeHtml + signalsHtml + actHtml;
+  panelEl.innerHTML = verdictHtml + regimeHtml + signalsHtml + actHtml;
 
-  // â”€â”€ Load act log â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Load act log ────────────────────────────────────────────────────
   if (logEl) {
     let logData = null;
-    try { logData = await Api.morningActLog(20); } catch (_) {}
+    try { logData = await Api.morningActLog(20); } catch (_) { logData = null; }
     if (logData && Array.isArray(logData) && logData.length > 0) {
       const logRows = logData.map(r => `
-        <tr style="border-bottom:1px solid var(--border-faint)">
-          <td style="padding:4px 6px;font-size:0.72rem;color:var(--text-muted)">${r.trade_date}</td>
-          <td style="padding:4px 6px;font-size:0.72rem;color:var(--text-muted)">${r.symbol}</td>
-          <td style="padding:4px 6px;font-size:0.72rem">${r.strategy_id.slice(0, 16)}…</td>
-          <td style="padding:4px 6px;font-size:0.72rem;color:${r.action === 'acted' ? '#22c55e' : '#ef4444'}">${r.action}</td>
-          <td style="padding:4px 6px;font-size:0.68rem;color:var(--text-muted)">${r.regime || ''}${r.risk_posture ? ' · ' + r.risk_posture : ''}</td>
+        <tr>
+          <td style="color:var(--text-muted)">${r.trade_date}</td>
+          <td style="color:var(--text-muted)">${r.symbol}</td>
+          <td>${r.strategy_id.slice(0, 16)}…</td>
+          <td style="color:${r.action === 'acted' ? 'var(--positive)' : 'var(--negative)'}">${r.action}</td>
+          <td style="color:var(--text-muted)">${r.regime || ''}${r.risk_posture ? ' · ' + r.risk_posture : ''}</td>
         </tr>`).join('');
       logEl.style.display = 'block';
       logEl.innerHTML = `
-        <div style="background:var(--card-bg);border:1px solid var(--border-faint);border-radius:6px;padding:10px 14px">
-          <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:6px">RECENT ACT/SKIP LOG</div>
-          <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.74rem">
-            <thead><tr style="border-bottom:1px solid var(--border-faint)">
-              <th style="text-align:left;padding:3px 6px;color:var(--text-muted);font-weight:500">Date</th>
-              <th style="text-align:left;padding:3px 6px;color:var(--text-muted);font-weight:500">Symbol</th>
-              <th style="text-align:left;padding:3px 6px;color:var(--text-muted);font-weight:500">Algo</th>
-              <th style="text-align:left;padding:3px 6px;color:var(--text-muted);font-weight:500">Action</th>
-              <th style="text-align:left;padding:3px 6px;color:var(--text-muted);font-weight:500">Context</th>
-            </tr></thead>
+        <div class="card">
+          <div class="card-title">Recent Act/Skip log</div>
+          <div class="table-container"><table class="data-table compact">
+            <thead><tr><th>Date</th><th>Symbol</th><th>Algo</th><th>Action</th><th>Context</th></tr></thead>
             <tbody>${logRows}</tbody>
           </table></div>
         </div>`;
+    } else {
+      logEl.style.display = 'none';
     }
   }
 }
 
-// â”€â”€ Global function for act/skip buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function morningAct(strategyId, symbol, action) {
   const result = await Api.morningAct(strategyId, symbol, action);
   if (result && result.logged) {
@@ -1115,7 +1116,7 @@ function animateCounter(element, target, prefix = '', suffix = '', duration = 80
       const el = document.getElementById('boot-s-' + key);
       if (!el) return;
       const s = steps[key] || { status: 'pending', msg: '' };
-      const icon  = ICONS[s.status] || 'â¬¡';
+      const icon  = ICONS[s.status] || '⬡';
       const color = COLORS[s.status] || '#3a3a3e';
       el.style.color = color;
       el.textContent = icon + ' ' + (STEP_LABELS[key] || key).replace('…', '') + (s.msg ? '  — ' + s.msg : '');

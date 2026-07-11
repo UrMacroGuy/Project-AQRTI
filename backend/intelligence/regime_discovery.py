@@ -186,7 +186,12 @@ def run_regime_discovery(db: Session, n_clusters: int = N_CLUSTERS) -> dict:
                 # Distance from each small-cluster row to all retained centroids
                 dists = np.linalg.norm(X_norm[mask][:, None] - centroids_retain[None], axis=2)
                 nearest_retain = np.argmin(dists, axis=1)
-                new_labels = retain[nearest_retain[0]] if n_small == 1 else retain[nearest_retain]
+                # `retain` is a plain Python list — numpy fancy-indexing it
+                # directly (retain[nearest_retain] for n_small > 1) raises
+                # "only integer scalar arrays can be converted to a scalar
+                # index". Index via np.array(retain) instead.
+                retain_arr = np.array(retain)
+                new_labels = retain[nearest_retain[0]] if n_small == 1 else retain_arr[nearest_retain]
                 labels[mask] = new_labels
                 # Move rows into the correct regime_stats bucket
                 for orig_pos in np.where(mask)[0]:

@@ -23,8 +23,26 @@ def _build_handler_stream() -> logging.StreamHandler:
     return handler
 
 
-def _build_handler_file(filename: str) -> RotatingFileHandler:
-    handler = RotatingFileHandler(
+class _SafeRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that tolerates Windows file-lock races.
+
+    On Windows, os.rename() during rollover fails with PermissionError if
+    another process (e.g. a stale prior server instance) still has the log
+    file open. That's non-fatal to the app but the base handler lets the
+    exception escape from emit(), which logging.Handler.handleError() then
+    prints as a full traceback on every single log call until the lock
+    clears. Skip rollover for this emit instead of crashing the log call.
+    """
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except PermissionError:
+            pass
+
+
+def _build_handler_file(filename: str) -> _SafeRotatingFileHandler:
+    handler = _SafeRotatingFileHandler(
         LOG_DIR / filename,
         maxBytes=10 * 1024 * 1024,  # 10 MB
         backupCount=5,

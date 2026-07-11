@@ -250,9 +250,56 @@ def _fetch_parallel(index_map: dict, timeout: int = 12) -> list:
             for key, (sym, label) in items]
 
 
+# Maps a topbar key to the index_data.index_name it can fall back to when
+# yfinance is unreachable or the market is closed. VIX and USD/INR have no
+# other data source anywhere in the system, so they correctly stay null
+# (honest NO DATA) rather than a fabricated fallback — only nifty50/
+# banknifty have real DB history (the Markov module depends on NIFTY50).
+_TOPBAR_DB_FALLBACK = {
+    "nifty50":   "NIFTY50",
+    "banknifty": "BANKNIFTY",
+}
+
+
+def _latest_index_quote(db: Session, key: str, label: str) -> dict:
+    from aqrti.database.models import IndexData
+    index_name = _TOPBAR_DB_FALLBACK.get(key)
+    if not index_name:
+        return {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None}
+    rows = (
+        db.query(IndexData.close, IndexData.date)
+        .filter(IndexData.index_name == index_name)
+        .order_by(IndexData.date.desc())
+        .limit(2)
+        .all()
+    )
+    if not rows:
+        return {"key": key, "label": label, "price": None, "prev": None, "change": None, "changePct": None}
+    price = float(rows[0][0] or 0.0)
+    prev = float(rows[1][0] or 0.0) if len(rows) > 1 and rows[1][0] else None
+    change = (price - prev) if prev else 0.0
+    change_pct = (change / prev * 100) if prev else 0.0
+    return {
+        "key": key,
+        "label": label,
+        "price": round(price, 2),
+        "prev": round(prev, 2) if prev else None,
+        "change": round(change, 2),
+        "changePct": round(change_pct, 2),
+        "source": "database",
+        "asOf": str(rows[0][1]),
+    }
+
+
 @router.get("/topbar")
-def get_topbar_prices():
-    """Fast endpoint: only the 4 topbar symbols, server-side cached for 4s."""
+def get_topbar_prices(db: Session = Depends(get_db_dependency)):
+    """Fast endpoint: only the 4 topbar symbols, server-side cached for 4s.
+
+    Falls back to the last DB close (index_data) for nifty50/banknifty when
+    yfinance fails or the market is closed — previously this endpoint had no
+    fallback at all, so the topbar showed "——" stuck indefinitely on any
+    yfinance hiccup even though NIFTY/BANKNIFTY history exists in the DB.
+    """
     global _topbar_cache
     try:
         import yfinance  # noqa — confirm installed
@@ -264,30 +311,36 @@ def get_topbar_prices():
         return _topbar_cache["data"]
 
     data = _fetch_parallel(_TOPBAR_MAP, timeout=12)
+    data = [
+        item if item.get("price") is not None else _latest_index_quote(db, item["key"], item["label"])
+        for item in data
+    ]
     _topbar_cache = {"ts": now, "data": data}
     return data
 
 
-_NSE_STOCKS_MAP = {
-    "RELIANCE":   ("RELIANCE.NS",   "Reliance"),
-    "HDFCBANK":   ("HDFCBANK.NS",   "HDFC Bank"),
-    "ICICIBANK":  ("ICICIBANK.NS",  "ICICI Bank"),
-    "INFY":       ("INFY.NS",       "Infosys"),
-    "TCS":        ("TCS.NS",        "TCS"),
-    "AXISBANK":   ("AXISBANK.NS",   "Axis Bank"),
-    "SBIN":       ("SBIN.NS",       "SBI"),
-    "BAJFINANCE": ("BAJFINANCE.NS", "Bajaj Finance"),
-    "MARUTI":     ("MARUTI.NS",     "Maruti"),
-    "TITAN":      ("TITAN.NS",      "Titan"),
-    "WIPRO":      ("WIPRO.NS",      "Wipro"),
-    "ONGC":       ("ONGC.NS",       "ONGC"),
-    "SUNPHARMA":  ("SUNPHARMA.NS",  "Sun Pharma"),
-    "NESTLEIND":  ("NESTLEIND.NS",  "Nestle"),
-    "BHARTIARTL": ("BHARTIARTL.NS", "Bharti Airtel"),
-    "KOTAKBANK":  ("KOTAKBANK.NS",  "Kotak Bank"),
-    "TATASTEEL":  ("TATASTEEL.NS",  "Tata Steel"),
-    "HINDALCO":   ("HINDALCO.NS",   "Hindalco"),
-}
+# Single-sourced from settings.universe_clean (the curated 9-symbol NSE
+# universe — see docs/RESEARCH_DRIVEN_REARCHITECTURE.md §1) rather than
+# re-hardcoded here, per CLAUDE.md hard rule 4 ("the curated universe is
+# fixed... never let boot/scheduler code silently re-expand it"). This was
+# previously a stale dict from the old ~950-symbol era (RELIANCE, TCS,
+# AXISBANK, SBIN...) whose only overlap with the curated universe was
+# HDFCBANK/ICICIBANK/INFY — every other Cockpit card showed "NO DATA" even
+# though the DB had full price history for them. VOO/QQQ (US, plain tickers,
+# no .NS suffix — settings.universe intentionally excludes them from the
+# NSE list) are appended separately since yfinance supports them directly.
+def _build_nse_stocks_map() -> dict[str, tuple[str, str]]:
+    settings = get_settings()
+    result = {
+        sym: (f"{sym}.NS", STOCK_META.get(sym, {}).get("name", sym))
+        for sym in settings.universe_clean
+    }
+    result["VOO"] = ("VOO", "Vanguard S&P 500 ETF")
+    result["QQQ"] = ("QQQ", "Invesco QQQ Trust")
+    return result
+
+
+_NSE_STOCKS_MAP = _build_nse_stocks_map()
 
 _stocks_cache: dict = {"ts": 0, "data": None}
 _STOCKS_TTL = 60  # 60s — live price cache for stocks
@@ -295,7 +348,7 @@ _STOCKS_TTL = 60  # 60s — live price cache for stocks
 
 @router.get("/live/stocks")
 def get_live_stock_prices(db: Session = Depends(get_db_dependency)):
-    """Live prices for all 18 NSE stocks in the universe (60s server-side cache)."""
+    """Live prices for the curated universe: 9 NSE stocks + VOO/QQQ (60s server-side cache)."""
     now = _time.time()
     if _stocks_cache["data"] and (now - _stocks_cache["ts"]) < _STOCKS_TTL:
         return _stocks_cache["data"]
