@@ -65,6 +65,7 @@ _DEFAULT_FAMILY_WEIGHTS = {
     "event_catalyst":          0.08,
     "regime_dca_timing":       0.05,
     "rotation_monitor":        0.08,
+    "regime_pullback_v2":      0.05,  # docs/STRATEGY_LAB.md §5 candidate — low weight, expected to keep failing gates
     "quality_momentum":   0.12,
     "institutional_flow": 0.08,
     "rl_momentum":         0.09,

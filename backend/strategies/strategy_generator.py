@@ -267,6 +267,60 @@ def _generate_mean_reversion_quality(rng: random.Random) -> StrategyDSL:
     )
 
 
+def _generate_regime_pullback_v2(rng: random.Random) -> StrategyDSL:
+    """
+    Trend-pullback with a regime filter — docs/STRATEGY_LAB.md §5. Origin:
+    this is a post-hoc revision of a candidate that FAILED its single
+    out-of-sample shot in the 2026-07-11 strategy-lab R&D cycle (finalist B:
+    close>200DMA + RSI(3) pullback + slow RSI-exit + 12-day hold; OOS 2025-26
+    result was 61.7% WR but avg/trade -0.71%, a blown-up loss tail during a
+    bear-regime hold). v2's published remedy for that failure mode is a
+    faster exit and an index-level regime filter — tested honestly in the
+    same doc: full-period PF 1.60 but the 2025-26 slice alone nets -0.09%/
+    trade, and because v2 was designed AFTER seeing v1's OOS failure, its own
+    numbers are post-hoc and carry contamination. This template exists so the
+    promotion gates keep re-evaluating it as real history accumulates, NOT
+    because it is trusted — it is exactly as likely to keep failing as any
+    other candidate, by design.
+
+    Two documented substitutions (same discipline as mean_reversion_quality's
+    RSI(2)->RSI(14) substitution above): (1) no RSI(3) feature exists, so the
+    entry pullback again uses adapted rsi_14; (2) the doc's regime filter is
+    "NIFTY > its own 200DMA" — a true cross-symbol index condition the DSL
+    cannot express (see rotation_monitor's analogous documented gap) — so
+    the closest available honest proxy is regime_markov == BULL. The doc's
+    fast "exit close>5DMA" has no 5DMA feature either; substituted with an
+    rsi_14 recovery exit (same style, faster than mean_reversion_quality's,
+    on a materially shorter max_holding_days matching the doc's 7-day stop).
+    """
+    rsi_lo   = round(rng.uniform(28, 38), 1)   # adapted RSI(14) oversold band — see docstring
+    rsi_exit = round(rng.uniform(45, 55), 1)   # faster exit than mean_reversion_quality's 50-60 band
+
+    conds = [
+        _make_condition("rsi_14", "<", rsi_lo),
+        _make_condition("price_vs_ema200_pct", ">", round(rng.uniform(0.0, 3.0), 2)),
+        _make_condition("regime_markov", "==", REGIME_MARKOV_BULL),
+        _make_condition("research_risk_flag_negative", "==", 0),
+    ]
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("rsi_14", ">", rsi_exit),
+    ])
+
+    sl = round(-rng.uniform(4, 8), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS["bull_only"],
+        family           = "regime_pullback_v2",
+        name             = f"RegimePullbackV2_RSI{rsi_lo}",
+        min_confidence   = _rand_confidence(rng, 50.0, 65.0),
+        max_holding_days = rng.randint(5, 7),   # doc's 7-day time stop
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
+    )
+
+
 def _generate_event_catalyst(rng: random.Random) -> StrategyDSL:
     """
     Event-study drift — corporate-action announcement effects (buybacks:
@@ -688,6 +742,7 @@ _GENERATORS = {
     "event_catalyst":          _generate_event_catalyst,
     "regime_dca_timing":       _generate_regime_dca_timing,
     "rotation_monitor":        _generate_rotation_monitor,
+    "regime_pullback_v2":      _generate_regime_pullback_v2,  # docs/STRATEGY_LAB.md §5 — candidate, not trusted; see docstring
     # Pre-existing research-backed families (unaffected by this change)
     "quality_momentum":    _generate_quality_momentum,
     "institutional_flow":  _generate_institutional_flow,

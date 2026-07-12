@@ -116,6 +116,8 @@ FEATURE_CATALOG: List[FeatureDef] = [
                "(close - ema_21) / ema_21 * 100", ["close"], 21),
     FeatureDef("price_vs_ema50_pct","trend", "% deviation of close from EMA50",
                "(close - ema_50) / ema_50 * 100", ["close"], 50),
+    FeatureDef("price_vs_ema200_pct","trend", "% deviation of close from EMA200",
+               "(close - ema_200) / ema_200 * 100", ["close"], 200),
     FeatureDef("macd_line",         "trend", "MACD line (EMA12 - EMA26)",
                "EMA(close,12) - EMA(close,26)", ["close"], 26),
     FeatureDef("macd_signal",       "trend", "MACD signal line (EMA9 of MACD)",

@@ -677,7 +677,8 @@ function renderMetaLearningPanel(ms, rt) {
     const defaults = {
       post_earnings_drift: 0.10, momentum_trend: 0.10, mean_reversion_quality: 0.08,
       event_catalyst: 0.08, regime_dca_timing: 0.05, rotation_monitor: 0.08,
-      quality_momentum: 0.09, institutional_flow: 0.06, rl_momentum: 0.09,
+      regime_pullback_v2: 0.05,
+      quality_momentum: 0.12, institutional_flow: 0.08, rl_momentum: 0.09,
       relative_strength: 0.12, breadth_momentum: 0.09, long_hold_momentum: 0.14,
     };
     html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';

@@ -89,7 +89,7 @@ def compute_trend_features(df: pd.DataFrame) -> dict:
         results["close_ma50_diff"] = None
 
     # ── Price vs EMA % ───────────────────────────────────────────
-    for span in (21, 50):
+    for span in (21, 50, 200):
         ema_val = ema_cache.get(span)
         if ema_val and ema_val != 0:
             results[f"price_vs_ema{span}_pct"] = (curr_close - ema_val) / ema_val * 100
