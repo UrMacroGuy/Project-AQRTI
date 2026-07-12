@@ -1,33 +1,101 @@
-# AQRTI
+<div align="center">
 
-Research-driven quant engine for a curated real-money-adjacent Indian equity portfolio (NSE), built around actual research — corporate filings, earnings, news, LLM-synthesized theses — rather than random strategy mutation.
+# AQRTI — Intelligence Terminal
 
-**Status:** personal project, active development. AQRTI suggests; the user decides — there is no broker write API anywhere in the codebase, by design.
+**A research-driven quant strategy engine for a hand-picked, real-money NSE portfolio.**
 
-## Overview
+Scrapes real filings, earnings, and news → synthesizes cited research with an LLM → generates algos from academically-grounded templates → validates them through brutal, honest gates.
 
-AQRTI tracks a fixed curated universe (9 NSE symbols + VOO/QQQ monitor-only + NIFTY 50 benchmark/regime) rather than a broad market screen. Its daily pipeline scrapes real corporate filings/earnings/news, synthesizes them via LLM into a cited research thesis per symbol (every conclusion traceable to a real source row — fabricated citations are rejected before ever reaching the database), and generates candidate algos from six named, academically-grounded quant templates (post-earnings drift, momentum, mean-reversion, event-catalyst, regime-conditioned DCA timing, cross-sectional rotation). Every algo must clear an honest backtest, an out-of-sample holdout, a benchmark-vs-buy-and-hold gate, a duplicate-detection gate, 12-fold walk-forward validation, and a ≥60-day forward-paper quarantine before a human ever gets to approve it — and even then, it never trades automatically. AQRTI surfaces suggestions; the user reviews and executes every trade manually.
+*AQRTI suggests. The human decides. It never places a trade.*
 
-## Stack
+![Python](https://img.shields.io/badge/Python-FastAPI%20%2B%20SQLAlchemy-3776AB?logo=python&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)
+![Frontend](https://img.shields.io/badge/UI-Vanilla%20JS%20%2B%20Chart.js-F7DF1E?logo=javascript&logoColor=black)
+![LLM](https://img.shields.io/badge/LLM-NVIDIA%20NIM%20%2F%20OpenRouter-76B900?logo=nvidia&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
+![License](https://img.shields.io/badge/use-personal%20research-lightgrey)
 
-Python (FastAPI, SQLAlchemy) · SQLite (WAL) · vanilla JS + Chart.js frontend · LLM research synthesis via OpenRouter/NVIDIA NIM.
+</div>
 
-## Running locally
+---
+
+## Why this exists
+
+Most retail "algo trading" projects mutate random indicator combinations against price history until something backtests well — then lose money live. AQRTI is built on the opposite premise: **strategies must be grounded in real research and proven effects, and every metric must survive honest validation before anyone acts on it.** When nothing passes the gates, the correct output is *zero signals* — the bar never moves to make results look better.
+
+The project's own history proves the point: its strategy lab recently pre-registered a pullback system showing a 74.5% win rate in-sample, then watched it **fail out-of-sample** (-0.71%/trade) — and published that negative result instead of tuning until it passed ([docs/STRATEGY_LAB.md](docs/STRATEGY_LAB.md)).
+
+## The universe
+
+A fixed, curated 12-instrument portfolio — not a market-wide screen:
+
+| Tier | Instruments | Role |
+|---|---|---|
+| **Owned** | BEL · HDFCBANK · NTPC | Monthly SIP accumulation; algos generate actionable signals |
+| **Bench** | ICICIBANK · INFY · CDSL · DRREDDY · LT · HAL | Monitored for research-backed rotation suggestions |
+| **US (monitor)** | VOO · QQQ | Fractional monthly buys; price-tracked only |
+| **Benchmark** | NIFTY 50 | Regime detection + the bar every algo must beat |
+
+## How it works
+
+```
+  NSE filings ─┐
+  Earnings ────┤   ┌─────────────┐   ┌──────────────────┐   ┌─────────────────┐
+  News RSS ────┼──▶│ LLM synthesis│──▶│ Strategy templates│──▶│ Honest gates     │
+  FII/DII ─────┘   │ (cited, or   │   │ (PEAD, momentum,  │   │ OOS · ≥50% WR ·  │
+                   │  rejected)   │   │  pullback, events,│   │ 0.8×NIFTY · WFO ·│
+  Price history ──▶│              │   │  regime DCA,      │   │ 60d quarantine   │
+  Markov regimes ─▶└─────────────┘   │  rotation)        │   └────────┬────────┘
+                                      └──────────────────┘            ▼
+                                                              Suggestions only —
+                                                              human executes
+```
+
+1. **Collect** — free official/public sources only: NSE corporate filings, quarterly results, FII/DII flows, financial news RSS (MoneyControl, ET, LiveMint, Business Standard).
+2. **Synthesize** — a free-tier hosted LLM turns each day's events into a structured research note (sentiment, catalysts, risk flags). Every conclusion must cite real source event IDs; fabricated citations are rejected before they touch the database.
+3. **Generate** — algos come from **seven named templates** backed by published research (post-earnings drift, momentum, quality mean-reversion, event catalysts, regime-timed DCA, cross-sectional rotation, regime pullback) — never from random mutation. Evolution tunes parameters *within* templates.
+4. **Validate** — out-of-sample holdout, a hard ≥50% win-rate floor net of 0.28% NSE round-trip costs, a 0.8× NIFTY buy-and-hold Sharpe gate, duplicate detection, 12-fold walk-forward, then ≥60 days of forward-paper quarantine with ≥20 closed trades. Current honest status: **0/7 templates promoted** — and that's the system working, not failing.
+5. **Monitor** — promoted algos are audited daily; win-rate decay, drawdown breach, or an unvalidated regime shift auto-demotes them. A monthly allocator ranks live signals for the SIP budget; paper-vs-real reconciliation flags any gap between simulated and actual fills.
+
+## The dashboard
+
+A terminal-style web UI (vanilla JS, no frameworks) with a strict no-mock-data rule — every number traces to a real database row from a real source, or the panel says `NO DATA — source unavailable`.
+
+**Portfolio Cockpit** (all 12 instruments, live prices, research snippets, signals, SIP tilt) · **Research** (per-symbol news + filings + LLM synthesis with cited sources) · **Algos / Arena / Go-No-Go** (the promotion pipeline and a morning "what should I do today" verdict) · **Markov Regime** (Bull/Bear/Sideways transition matrix + HMM) · **Paper Portfolio · Risk Center**
+
+## Quickstart
 
 ```bash
+# Backend (Python 3.11+)
 cd backend
-python -m venv .venv && .venv\Scripts\activate
+python -m venv .venv && .venv\Scripts\activate     # Windows
 pip install -r requirements.txt
-cp .env.example .env     # fill in your own free-tier API keys
-python main.py          # http://localhost:8000, docs at /docs
+cp .env.example .env      # add your own free-tier API keys
+python main.py            # http://localhost:8000 — Swagger at /docs
 
-npm run dev              # http://localhost:3000
+# Frontend
+npm run dev               # http://localhost:3000
 ```
+
+On boot the backend runs a self-healing catch-up pipeline (prices → filings → news → synthesis → features → regimes) and schedules the daily 15:30 IST cron automatically.
 
 ## Documentation
 
-`plans/CHANGELOG.md` — session history, newest first, start here for the latest state. `docs/RESEARCH_DRIVEN_REARCHITECTURE.md` — full current architecture reference. `docs/MARKOV_STRATEGY_PLAN.md` — the isolated Markov/HMM regime module.
+| Doc | What's in it |
+|---|---|
+| [plans/CHANGELOG.md](plans/CHANGELOG.md) | Session-by-session history with verification evidence — start here |
+| [docs/RESEARCH_DRIVEN_REARCHITECTURE.md](docs/RESEARCH_DRIVEN_REARCHITECTURE.md) | Full architecture reference and design rationale |
+| [docs/STRATEGY_LAB.md](docs/STRATEGY_LAB.md) | A complete honest R&D cycle — including the OOS failure |
+| [docs/MARKOV_STRATEGY_PLAN.md](docs/MARKOV_STRATEGY_PLAN.md) | The Markov/HMM regime module |
+
+## Principles (non-negotiable)
+
+- **No fabricated data, ever.** An honest gap beats a plausible lie.
+- **No gate-weakening.** If a metric looks too good (Sharpe > 3, AUC ≈ 1.0), it's treated as a bug until proven otherwise.
+- **Point-in-time correctness.** A feature for date *d* may only read data known on date *d*.
+- **Negative results get published.** Failed strategies are documented, not deleted.
+- **The human is the last gate.** No broker write API exists anywhere in this codebase, by design.
 
 ## Disclaimer
 
-Research and suggestion engine only. No real-money execution, no broker integration, no auto-trading. Nothing here constitutes financial advice — the user makes every trade decision manually.
+Personal research software. Nothing in this repository is financial advice; all outputs are data-backed suggestions that the owner reviews and acts on manually, at their own risk. Past backtest performance — even honestly validated — does not guarantee future results.
