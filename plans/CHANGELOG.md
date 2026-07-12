@@ -1,4 +1,10 @@
-﻿## [2026-07-12a] — Executed docs/STRATEGY_LAB.md §7: verified FIX.md items 1/2/4 already fixed, purged stale entity_mentions rows, added regime_pullback_v2 as 7th strategy template
+﻿## [2026-07-12b] — Handoff doc created; implemented docs deleted; README + CLAUDE.md rewrites pushed
+
+- **docs/HANDOFF.md (new):** self-serve walkthrough for user + future sessions — key-rotation steps (repo is public, keys in git history), daily/monthly/quarterly operating routine, still-open items with commands (synthesis coverage wait + weekly check SQL, VOO/QQQ live verification, zero-trade WFO status), the three user-only decisions (momentum vs 50% WR floor with an expectancy-gate option spec'd, Telegram alerts, Markov graduation), small adds (weekly DB backup task, mojibake pre-commit guard), safe removals (AQRTINet files), troubleshooting table.
+- **Deleted docs/FIX.md + docs/UI_SPEC.md** — all their items verified implemented (2026-07-11b/e, 2026-07-12a); grep confirmed zero dangling references.
+- **README.md** fully rewritten (badges, universe table, pipeline diagram, honest principles incl. the published OOS failure) — pushed 9e9916a. **CLAUDE.md** stripped of an 866-line pasted chat system-prompt blob (935→92 lines) and given a quant-strategist doctrine section (India-specific anomaly evidence, STRATEGY_LAB's paid-for failure modes, one-OOS-look discipline) — pushed dabf1d3.
+
+## [2026-07-12a] — Executed docs/STRATEGY_LAB.md §7: verified FIX.md items 1/2/4 already fixed, purged stale entity_mentions rows, added regime_pullback_v2 as 7th strategy template
 
 **Scope:** ran the "what's next" plan from `docs/STRATEGY_LAB.md` §7 end to end.
 
