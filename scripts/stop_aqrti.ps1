@@ -35,9 +35,26 @@ Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" | ForEach-Object {
 }
 
 # Now kill the leaf python/node processes themselves.
+#
+# The "*AQRTI*main.py*" command-line pattern misses a real, common case:
+# start_backend.bat runs `python main.py` from an already-cd'd shell, so
+# the live CommandLine is just ".venv\Scripts\python.exe  main.py" with no
+# "AQRTI" substring anywhere in it -- confirmed live, this let two backend
+# processes (a plain venv main.py plus its uv-managed sibling) survive a
+# stop_aqrti run entirely. ExecutablePath is a much stronger signal: the
+# venv interpreter's path is *always* under this repo's backend\.venv
+# regardless of what the command line looks like or what the shell's CWD
+# was when it launched, so match on that in addition to the command-line
+# checks (keeps the AQRTI/strategy_loop_cycle/ui-http.server/markov.app
+# patterns for python/node processes NOT running from this venv, e.g. the
+# uv-managed sibling interpreter, which has its own path but the same
+# "main.py" command line).
+$backendVenvDir = Join-Path (Split-Path $PSScriptRoot -Parent) "backend\.venv"
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='node.exe'" | ForEach-Object {
-    $cmd = $_.CommandLine
-    if ($cmd -and ($cmd -like "*AQRTI*main.py*" -or $cmd -like "*strategy_loop_cycle.py*" -or $cmd -like "*ui*http.server*3000*" -or $cmd -like "*serve*ui*" -or $cmd -like "*markov.app*" -or $cmd -like "*http.server*3000*")) {
+    $cmd  = $_.CommandLine
+    $exe  = $_.ExecutablePath
+    $isVenvMain = ($exe -and $exe.StartsWith($backendVenvDir, [System.StringComparison]::OrdinalIgnoreCase) -and $cmd -like "*main.py*")
+    if ($isVenvMain -or ($cmd -and ($cmd -like "*AQRTI*main.py*" -or $cmd -like "*strategy_loop_cycle.py*" -or $cmd -like "*ui*http.server*3000*" -or $cmd -like "*serve*ui*" -or $cmd -like "*markov.app*" -or $cmd -like "*http.server*3000*"))) {
         try {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
             Write-Status "Killed PID $($_.ProcessId): $cmd" "Red"
