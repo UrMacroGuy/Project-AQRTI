@@ -45,7 +45,20 @@ BENCHMARK_SHARPE_FACTOR = 0.8
 MAX_TRADE_OVERLAP = 0.60
 
 # Retirement
-RETIRE_THRESHOLD     = 15.0   # composite fitness floor
+# Raised from 15.0 -> 30.0 (2026-07-13) after fixing a fitness_engine.py bug
+# where deeply negative Sharpe (down to -8.0) was clamped to a 0
+# contribution on ONLY the Sharpe sub-term of profitability_score, letting
+# strategies that lose money on every trade still earn full profit_factor/
+# total_return credit and land at fitness 18-30 from win-rate/robustness/
+# cost/regime/longevity components alone. 15.0 sat near the 5th percentile
+# of the honest post-fix population (median 48, PROMOTE_THRESHOLD 50) and
+# caught almost nothing. 30.0 sits below the 25th percentile -- retires the
+# bottom quarter (including every Sharpe<-1 strategy, which now scores 0 on
+# profitability per the fitness_engine.py fix) while still giving
+# middling-but-not-broken candidates a chance to be refined by mutation
+# before being cut. Recalibrate again after the next full re-score per the
+# module docstring's standing guidance.
+RETIRE_THRESHOLD     = 30.0   # composite fitness floor
 # Max drawdown gate — was hardcoded to -100.0 (effectively unreachable,
 # meaning no strategy could ever be retired for a real drawdown blowout)
 # with a comment claiming "fitness captures drawdown indirectly." Fitness

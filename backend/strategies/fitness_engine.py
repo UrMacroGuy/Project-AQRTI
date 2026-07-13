@@ -60,7 +60,24 @@ ROUND_TRIP_COST_PCT  = 0.28    # % — realistic NSE delivery round-trip
 MIN_EXPECTANCY_NET   = 0.10    # % per trade — must net > 0.10% after costs
 
 
+SHARPE_HARD_FAIL = -1.0  # below this, the strategy is losing badly and consistently,
+                          # not just "not yet profitable" -- zero the whole profitability
+                          # bucket rather than clamping just the Sharpe sub-term to 0.
+                          #
+                          # Previously sharpe_norm = max(sharpe + 0.3, 0.0) / ... floored
+                          # ONLY the Sharpe sub-term at 0 for anything below -0.3, so
+                          # Sharpe -0.5 and Sharpe -8.0 scored identically on s1 (=0) and
+                          # a strategy could still earn its full profit_factor (s2) and
+                          # total_return (s3) contributions. Confirmed live: 298 candidates
+                          # with real backtests (60-253 trades) and Sharpe as low as -8.0
+                          # scored fitness 18-68 -- comfortably above the RETIRE_THRESHOLD
+                          # of 15, i.e. catastrophically unprofitable strategies were
+                          # scoring as "fine" and never got retired/graveyarded, which
+                          # also starved the meta-learner's family-suppression logic of
+                          # real failure signal (see meta_learner.py).
 def profitability_score(sharpe: float, profit_factor: float, total_return: float) -> float:
+    if (sharpe or 0.0) < SHARPE_HARD_FAIL:
+        return 0.0
     # Sharpe: 0 at 0, full at TARGET_SHARPE (with soft penalty for negative)
     sharpe_norm = max(sharpe + 0.3, 0.0) / (TARGET_SHARPE + 0.3)
     s1 = min(sharpe_norm, 1.0) * 45

@@ -553,7 +553,7 @@ def _alert_check_job():
                 scheduler_logger.warning("ALERT: Portfolio drawdown %.1f%% exceeded -15%% threshold", eq.drawdown_pct)
                 try:
                     from aqrti.alerts.telegram_alerts import alert_drawdown
-                    alert_drawdown(eq.drawdown_pct, eq.portfolio_value or 0)
+                    alert_drawdown(eq.drawdown_pct, eq.total_value or 0)
                 except Exception as _ae:
                     scheduler_logger.warning("GO-4 drawdown alert failed: %s", _ae)
             if ks and ks.overall_score and ks.overall_score < 35:

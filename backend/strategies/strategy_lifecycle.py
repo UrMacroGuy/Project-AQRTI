@@ -352,6 +352,43 @@ def run_lifecycle_sweep(db: Session) -> dict:
             if r["success"]:
                 promoted.append(s.strategy_id)
 
+    # Retire never-promoted candidates that have a trustworthy, completed
+    # backtest (>= MIN_BACKTEST_TRADES, same trade-count floor used to trust
+    # a fitness score for promotion) but decisively failed it.
+    #
+    # Previously only "shadow"/"promoted" strategies were ever retired here
+    # -- plain "candidate" strategies that failed their very first backtest
+    # gate just sat at status=candidate forever, never reaching
+    # retire_strategy() and therefore never writing to StrategyGraveyard.
+    # Since the meta-learner's family-suppression logic (compute_meta_state
+    # in meta_learner.py) reads graveyard mortality to downweight failing
+    # families, an empty graveyard meant that feedback loop had nothing to
+    # learn from even though the vast majority of generated candidates
+    # (confirmed: ~90% of a 735-candidate population) fail decisively. This
+    # closes that gap so genuine failures actually feed the family-weight
+    # suppression the self-learning loop is supposed to run on.
+    failed_candidates = (
+        db.query(StrategyV2)
+        .filter(
+            StrategyV2.status == "candidate",
+            StrategyV2.trade_count >= MIN_TRADES,
+            StrategyV2.fitness_score.isnot(None),
+            StrategyV2.fitness_score < RETIRE_THRESHOLD,
+        )
+        .all()
+    )
+    for s in failed_candidates:
+        r = retire_strategy(
+            db, s.strategy_id,
+            failure_reason="candidate_gate_failed",
+            failure_detail=(
+                f"fitness={s.fitness_score:.1f} below {RETIRE_THRESHOLD} "
+                f"on {s.trade_count} backtest trades — never reached promotion"
+            ),
+        )
+        if r["success"]:
+            retired.append(s.strategy_id)
+
     # Retire shadow/promoted strategies that fall below thresholds
     at_risk = (
         db.query(StrategyV2)
@@ -394,6 +431,10 @@ def _extract_retirement_lessons(row: StrategyV2, failure_reason: str) -> list[st
     if failure_reason == "low_fitness":
         lessons.append(f"Family '{row.family}' gen {row.generation}: fitness degraded to {row.fitness_score or 0}. "
                        f"Sharpe={row.sharpe or 0}, win_rate={row.win_rate or 0}.")
+    if failure_reason == "candidate_gate_failed":
+        lessons.append(f"Family '{row.family}' gen {row.generation}: never cleared the initial backtest gate — "
+                       f"fitness={row.fitness_score or 0}, sharpe={row.sharpe or 0}, win_rate={row.win_rate or 0}%, "
+                       f"trades={row.trade_count or 0}.")
     if failure_reason == "drawdown":
         lessons.append(f"Max drawdown {row.max_drawdown or 0}% exceeded limits — position sizing or stop-loss insufficient.")
     if row.trade_count and row.trade_count < MIN_TRADES:

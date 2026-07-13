@@ -54,7 +54,7 @@ log = get_logger("meta_learner")
 # any family missing from meta's adapted weights, so this didn't zero out
 # generation by itself — but it did mean these 4 families were permanently
 # invisible to the death-suppression / live-performance-boost mechanisms.
-_DEFAULT_FAMILY_WEIGHTS = {
+_RAW_DEFAULT_FAMILY_WEIGHTS = {
     # Named, research-backed templates (replaced the old 8 generic random
     # families — momentum/mean_reversion/breakout/sentiment_driven/
     # regime_adaptive/volume_surge/volatility_play/hybrid — see
@@ -73,6 +73,22 @@ _DEFAULT_FAMILY_WEIGHTS = {
     "breadth_momentum":    0.09,
     "long_hold_momentum":  0.14,
 }
+# The raw values above sum to 1.18, not 1.0. compute_meta_state() always
+# renormalizes its output to sum to 1.0 (line ~511) — even when NO family
+# gets any multiplier applied at all, that renormalization alone divides
+# every weight by ~1.18, producing an apparent "downweight" for every
+# single family on every single cycle (e.g. breadth_momentum 0.09 -> 0.076,
+# rounds to 0.08). persist_meta_insights() then logged this pure arithmetic
+# artifact as "downweighted based on live performance and graveyard
+# analysis" every cycle for every family (confirmed: 416/416 recorded shifts
+# were downweights, zero upweights, even with an empty graveyard) — a false
+# "the system is learning" signal with no real learning behind it.
+# Normalizing the defaults to sum to 1.0 here makes the post-renormalization
+# baseline match what compute_meta_state() actually outputs when no
+# adjustment fires, so persist_meta_insights()'s before/after comparison
+# reflects genuine multiplier-driven shifts instead of this artifact.
+_default_total = sum(_RAW_DEFAULT_FAMILY_WEIGHTS.values())
+_DEFAULT_FAMILY_WEIGHTS = {f: round(w / _default_total, 4) for f, w in _RAW_DEFAULT_FAMILY_WEIGHTS.items()}
 
 # Caps on how far meta-learning can shift a family weight
 MIN_FAMILY_WEIGHT = 0.02

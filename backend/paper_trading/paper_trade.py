@@ -68,39 +68,85 @@ def _live_price_finnhub(symbol: str) -> Optional[float]:
         return None
 
 
+# yfinance's underlying requests session has no default timeout -- a slow
+# or unresponsive Yahoo endpoint can hang for minutes (bounded only by the
+# OS TCP timeout), and get_open_positions() calls this once per open
+# position sequentially. Confirmed live: with the market closed, a single
+# GET /paper-portfolio request with 7 open positions hung indefinitely in a
+# real browser (a direct fetch() to the same endpoint from the page's own
+# JS context also hung past 20s) -- this is unacceptable for an endpoint
+# the paper portfolio page calls on every visit.
+#
+# A custom requests.Session passed to yf.Ticker(session=...) was tried
+# first but breaks yfinance 1.4.1's internal cookie/crumb auth flow
+# entirely (fast_info silently returned None instead of a real price with
+# no error) -- yfinance's YfData wraps its own session-management logic
+# that a bare custom session doesn't replicate. Running the call in a
+# worker thread with a hard wall-clock join timeout is version-independent
+# and doesn't touch yfinance's internals at all: if it doesn't finish in
+# time the calling thread moves on and the worker is abandoned (daemon
+# thread, does not block process exit).
+_YF_TIMEOUT_SECONDS = 4
+
+
+def _yf_fetch_price(symbol: str) -> Optional[float]:
+    """Blocking yfinance fetch — only ever called inside a bounded worker thread."""
+    yf_sym = _NSE_TO_YF.get(symbol, f"{symbol}.NS")
+    import yfinance as yf
+    ticker = yf.Ticker(yf_sym)
+    price = None
+    try:
+        yf_stderr = StringIO()
+        with redirect_stderr(yf_stderr):
+            fi = ticker.fast_info
+        price = getattr(fi, "last_price", None)
+        if price is not None:
+            price = float(price)
+    except Exception:
+        pass
+    if price is None:
+        yf_stderr = StringIO()
+        with redirect_stderr(yf_stderr):
+            hist = ticker.history(period="1d", interval="1m", auto_adjust=True)
+        if not hist.empty:
+            price = float(hist["Close"].iloc[-1])
+    return price if price and price > 0 else None
+
+
+# Reused across calls (not a `with ThreadPoolExecutor() as ex:` block) --
+# the executor's context-manager __exit__ calls shutdown(wait=True), which
+# would block waiting for an already-abandoned, still-hanging worker thread
+# and reintroduce the exact hang this is meant to prevent. A module-level
+# pool lets future.result(timeout=...) return promptly on timeout while the
+# stuck worker is simply left running in the background (daemon-owned by
+# the pool, does not block process exit) instead of being waited on.
+import concurrent.futures as _cf
+_yf_executor = _cf.ThreadPoolExecutor(max_workers=4, thread_name_prefix="yf-price")
+
+
 def _live_price_yf(symbol: str) -> Optional[float]:
-    """Fetch current price from yfinance (fallback, 60s in-memory cache)."""
+    """Fetch current price from yfinance (fallback, 60s in-memory cache).
+    Bounded to _YF_TIMEOUT_SECONDS wall-clock time via a worker thread --
+    returns None on timeout instead of blocking the caller.
+    """
     now = _time.time()
     cached = _price_cache.get(symbol)
     if cached and (now - cached[1]) < _CACHE_TTL:
         return cached[0]
 
-    yf_sym = _NSE_TO_YF.get(symbol, f"{symbol}.NS")
     try:
-        import yfinance as yf
-        ticker = yf.Ticker(yf_sym)
-        price = None
-        try:
-            yf_stderr = StringIO()
-            with redirect_stderr(yf_stderr):
-                fi = ticker.fast_info
-            price = getattr(fi, "last_price", None)
-            if price is not None:
-                price = float(price)
-        except Exception:
-            pass
-        if price is None:
-            yf_stderr = StringIO()
-            with redirect_stderr(yf_stderr):
-                hist = ticker.history(period="1d", interval="1m", auto_adjust=True)
-            if not hist.empty:
-                price = float(hist["Close"].iloc[-1])
-        if price and price > 0:
-            _price_cache[symbol] = (price, now)
-            return price
+        future = _yf_executor.submit(_yf_fetch_price, symbol)
+        price = future.result(timeout=_YF_TIMEOUT_SECONDS)
+    except _cf.TimeoutError:
+        log.debug("yfinance price fetch timed out for %s after %ss", symbol, _YF_TIMEOUT_SECONDS)
+        return None
     except Exception as e:
         log.debug("yfinance price fetch failed for %s: %s", symbol, e)
-    return None
+        return None
+
+    if price:
+        _price_cache[symbol] = (price, now)
+    return price
 
 
 def _latest_price(db: Session, symbol: str) -> Optional[float]:
@@ -114,6 +160,29 @@ def _latest_price(db: Session, symbol: str) -> Optional[float]:
     return row[0] if row else None
 
 
+# Reject any live quote that deviates more than this fraction from the DB's
+# last EOD close before trusting it as a fill price. Guards against a bad
+# Finnhub/yfinance tick (wrong symbol match, stale/adjusted quote, API
+# glitch) closing a position at a fabricated ~99% "loss" -- this happened
+# live on 2026-07-11 (HAL ~4514 -> live quote ~34, INFY ~1070 -> ~11),
+# wiping ~71,000 of fake stop-loss P&L across 27 trades in one evening.
+_LIVE_QUOTE_MAX_DEVIATION = 0.25  # 25% vs last close in a single tick is implausible intraday
+
+
+def _sane_vs_eod(db: Session, symbol: str, price: float) -> bool:
+    eod = _latest_price(db, symbol)
+    if not eod or eod <= 0:
+        return True  # nothing to compare against -- don't block on absence of a reference
+    deviation = abs(price - eod) / eod
+    if deviation > _LIVE_QUOTE_MAX_DEVIATION:
+        log.warning(
+            "Rejected implausible live price for %s: quote=%.2f eod_close=%.2f (%.0f%% deviation)",
+            symbol, price, eod, deviation * 100,
+        )
+        return False
+    return True
+
+
 def _current_price(db: Session, symbol: str, entry_price: float) -> float:
     """
     Best available price for an open position:
@@ -121,12 +190,14 @@ def _current_price(db: Session, symbol: str, entry_price: float) -> float:
     2. yfinance live price (fallback, 60s cache)
     3. Latest EOD close from DB
     4. Entry price as last resort
+    Any live quote (1/2) that deviates >25% from the DB's last EOD close is
+    rejected as implausible and the next source is tried instead.
     """
     finnhub = _live_price_finnhub(symbol)
-    if finnhub and finnhub > 0:
+    if finnhub and finnhub > 0 and _sane_vs_eod(db, symbol, finnhub):
         return finnhub
     live = _live_price_yf(symbol)
-    if live and live > 0:
+    if live and live > 0 and _sane_vs_eod(db, symbol, live):
         return live
     eod = _latest_price(db, symbol)
     if eod and eod > 0:
@@ -306,7 +377,20 @@ def _get_sector(db: Session, symbol: str) -> str:
 
 
 def get_open_positions(db: Session) -> list[dict]:
-    """Return all open positions with current unrealized P&L."""
+    """Return all open positions with current unrealized P&L.
+
+    Uses the DB's last EOD close (_latest_price), NOT a live Finnhub/
+    yfinance call. This is a read endpoint hit on every Paper Portfolio
+    page load; calling out to two live-quote vendors per open position
+    made it take ~11s with 7 positions and the market closed (each vendor
+    attempt is bounded to a few seconds but they're sequential), which
+    exceeded the frontend's 10s fetch timeout -- the page silently fell
+    back to its honest-empty state even though the backend eventually
+    responded fine. The EOD close is already refreshed daily by the
+    scheduled pipeline and is accurate enough for a display/unrealized-P&L
+    view; live intraday pricing still matters for the actual close/
+    stop-loss execution path (close_position -> _current_price, unchanged).
+    """
     positions = (
         db.query(PaperPosition)
         .filter_by(portfolio_name=PORTFOLIO_NAME)
@@ -315,7 +399,7 @@ def get_open_positions(db: Session) -> list[dict]:
     )
     result = []
     for pos in positions:
-        current_price = _current_price(db, pos.symbol, pos.entry_price)
+        current_price = _latest_price(db, pos.symbol) or pos.entry_price
         unrealized_pct = (current_price - pos.entry_price) / pos.entry_price * 100
         unrealized_pnl = unrealized_pct / 100 * pos.capital_deployed
         current_value  = pos.capital_deployed + unrealized_pnl
