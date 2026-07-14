@@ -658,7 +658,13 @@ def _run_arena_cycle_sync():
                 StrategyV2.status.in_(["promoted", "active"]),
                 StrategyV2.arena_status == "refining",
             ),
-            StrategyV2.arena_status != "champion",
+            # NULL-safe: SQL's `!= 'champion'` silently excludes rows where
+            # arena_status IS NULL (every strategy that has never entered the
+            # arena, including every freshly-promoted one), so a brand-new
+            # promotion could never get its first arena cycle. or_ with an
+            # explicit IS NULL check restores the intended "not already a
+            # champion" semantics.
+            or_(StrategyV2.arena_status.is_(None), StrategyV2.arena_status != "champion"),
             StrategyV2.dsl_json.isnot(None),
             # This arena cycle runs replay_engine.run_replay(), which is
             # stock-specific (DailyPrice/get_backtest_universe). Index-futures

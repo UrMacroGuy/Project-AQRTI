@@ -8,6 +8,8 @@ Output: dict {feature_name: value} for the LAST row (most recent date).
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 from typing import Optional
@@ -39,6 +41,51 @@ def compute_price_features(df: pd.DataFrame, nifty_df: Optional[pd.DataFrame] = 
 
     # return_63d
     results["return_63d"] = _pct_change(close, 63)
+
+    # return_126d — 6-month return, the horizon behind the 52-week-high
+    # momentum evidence (docs/STRATEGY_LAB.md variant D: 6m return > 10%
+    # confirmation; Jegadeesh-Titman 6-12mo momentum replicates on NSE per
+    # CLAUDE.md's India evidence). Same pattern as return_63d.
+    results["return_126d"] = _pct_change(close, 126)
+
+    # tom_window — turn-of-month flag: 1 if this date is among the FIRST 3
+    # trading days of its calendar month, else 0. NSE turn-of-month days
+    # carry ~4x the average daily return (CLAUDE.md India evidence, window
+    # [-1,+2]). The T-1 leg (last trading day of the month) is deliberately
+    # EXCLUDED: knowing d is the month's last trading day requires knowing
+    # the next trading day — future calendar knowledge relative to the
+    # expanding data slice this function receives. Counting how many
+    # trading rows of the current month exist in the slice up to and
+    # including d is fully point-in-time.
+    last_date = pd.Timestamp(df["date"].iloc[-1])
+    periods = pd.to_datetime(df["date"]).dt.to_period("M")
+    month_mask = periods == last_date.to_period("M")
+    trading_days_this_month = int(month_mask.sum())
+    # Guard: the slice must actually contain the month boundary (at least
+    # one bar from an earlier month), otherwise a symbol whose history
+    # STARTS mid-month would falsely flag its first 3 bars as
+    # turn-of-month. If every bar in the slice is from the current month,
+    # we cannot know how many trading days the month already had -> 0.
+    saw_prior_month = bool((~month_mask).any())
+    results["tom_window"] = 1.0 if (saw_prior_month and trading_days_this_month <= 3) else 0.0
+
+    # trend_tstat_63d — t-statistic of the 63-day drift:
+    #   mean(daily returns) / std(daily returns) * sqrt(63)
+    # i.e. the in-window Sharpe of the trend scaled to the window length.
+    # This is the statistically-honest trend filter: |t| >= ~1.7 means the
+    # drift is distinguishable from zero at ~90% confidence, so entries
+    # conditioned on it buy MEASURED trend, not noise. It is the natural
+    # DSL-expressible form of vol-scaled time-series momentum (Moskowitz,
+    # Ooi & Pedersen 2012), since the DSL cannot divide two features.
+    # Point-in-time: uses only the trailing 64 closes in the slice.
+    if n >= 64:
+        rets = close.iloc[-64:].pct_change().dropna()
+        std = float(rets.std())
+        results["trend_tstat_63d"] = (
+            round(float(rets.mean()) / std * math.sqrt(63), 4) if std > 0 else 0.0
+        )
+    else:
+        results["trend_tstat_63d"] = None
 
     # momentum_10d: acceleration = recent 5d return minus prior 5d return
     # Measures whether momentum is accelerating (positive) or decelerating (negative)

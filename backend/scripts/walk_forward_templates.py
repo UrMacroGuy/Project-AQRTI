@@ -68,6 +68,18 @@ TEMPLATE_FAMILIES = [
     "event_catalyst",
     "regime_dca_timing",
     "rotation_monitor",
+    "regime_pullback_v2",     # docs/STRATEGY_LAB.md §5 candidate (added 2026-07-12)
+    # Proven-edge templates added 2026-07-14 — these fire on price/calendar
+    # features with full history available, unlike the research-conditioned
+    # families above (still data-starved). week52_high_momentum is
+    # expectancy-gated (promotion_config): judge it on expectancy/PF too,
+    # not the WR-oriented summary alone.
+    "week52_high_momentum",
+    "turn_of_month",
+    # Math-grounded additions 2026-07-14c (vol gate per Barroso-Santa-Clara;
+    # t-stat significance filter per Moskowitz-Ooi-Pedersen lineage)
+    "vol_managed_momentum",
+    "tstat_trend",
 ]
 
 
@@ -209,7 +221,7 @@ def run_walk_forward(n_folds: int = 12, n_candidates: int = 2) -> dict:
 
         # ── Honest final summary ──────────────────────────────────
         print("=" * 78)
-        print("SUMMARY — 6 new template families, WFO Sharpe >= 0.7 gate")
+        print(f"SUMMARY — {len(TEMPLATE_FAMILIES)} template families, WFO Sharpe >= {PASS_SHARPE} gate")
         print("=" * 78)
         for family in TEMPLATE_FAMILIES:
             results = summary[family]

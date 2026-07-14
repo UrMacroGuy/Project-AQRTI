@@ -14,7 +14,7 @@ Human approval remains mandatory before 'active' status.
 
 from __future__ import annotations
 
-import sys, os, json, random
+import sys, os, json, random, time
 from datetime import date, timedelta
 from typing import Optional
 
@@ -208,7 +208,17 @@ def evolve_population(
     bad_conditions = set(meta_state.get("bad_conditions", [])) if meta_state else set()
     prescreen_rejected = 0
 
-    for i in range(n_offspring):
+    # Slot queue instead of a plain range so a slot that dies to a TRANSIENT
+    # "database is locked" (SQLite deferred-transaction upgrade conflict with
+    # the concurrent paper-trading/agent writers — busy_timeout cannot save an
+    # already-stale read snapshot) gets ONE re-attempt at the back of the
+    # queue. Before this, every 5-min evolution cycle silently lost 2-3 of
+    # its offspring to these collisions (observed errors=2/errors=3 on every
+    # single cycle in the production log).
+    _slots = list(range(n_offspring))
+    _lock_retried: set[int] = set()
+    while _slots:
+        i = _slots.pop(0)
         try:
             parent_a = _tournament_select(parents, rng)
             dsl_a    = StrategyDSL.from_json(parent_a.dsl_json)
@@ -223,17 +233,29 @@ def evolve_population(
             # have accepted; if every retry fails structurally, skip the
             # slot rather than persist a known-invalid child.
             child_dsl = op = desc = parent_ids = operation = None
+            # Crossover partners must share parent_a's family — the
+            # re-architecture doctrine is "evolution refines within
+            # templates, it doesn't invent" (docs/RESEARCH_DRIVEN_
+            # REARCHITECTURE.md §5). Cross-family blends produced children
+            # labeled with one family but carrying another family's
+            # conditions: random-mutation soup by the back door, and it
+            # also poisoned the meta-learner's family-keyed condition
+            # statistics (pitfall C16) with conditions no generator of
+            # that family ever emits.
+            same_family_partners = [
+                p for p in parents
+                if p.family == parent_a.family and p.strategy_id != parent_a.strategy_id
+            ]
             for _attempt in range(4):
-                if rng.random() < MUTATION_RATE or len(parents) < 2:
+                if rng.random() < MUTATION_RATE or not same_family_partners:
                     # Mutation — pass meta_state so op selection is biased toward best ops
+                    # (also the fallback when no same-family crossover partner exists)
                     cand_dsl, cand_op, cand_desc = mutate(dsl_a, rng=rng, meta_state=meta_state)
                     cand_parent_ids              = [parent_a.strategy_id]
                     cand_operation               = f"mutation:{cand_op}"
                 else:
-                    # Crossover
-                    parent_b = _tournament_select(parents, rng)
-                    while parent_b.strategy_id == parent_a.strategy_id and len(parents) > 1:
-                        parent_b = _tournament_select(parents, rng)
+                    # Crossover — same-family only
+                    parent_b = _tournament_select(same_family_partners, rng)
                     dsl_b = StrategyDSL.from_json(parent_b.dsl_json)
                     cand_dsl, cand_op, cand_desc = crossover(
                         dsl_a, dsl_b,
@@ -282,15 +304,35 @@ def evolve_population(
                 save_version(db, child_id, child_dsl.to_json(), version=1,
                              change_type=operation, change_desc=desc)
                 sp.commit()
+                # Commit the child NOW: backtest_and_update persists its
+                # metrics through a separate short-lived write session that
+                # cannot see this session's uncommitted rows. Without this
+                # commit, upsert_strategy in that session hits its
+                # missing-family/dsl_json insert guard and silently drops the
+                # child's backtest metrics (observed as the recurring
+                # "skipping insert" warnings in production logs) — children
+                # then get scored on empty metrics until the next rescore
+                # sweep heals them.
+                db.commit()
             except Exception as sp_exc:
-                sp.rollback()
+                try:
+                    sp.rollback()
+                except Exception:
+                    # Savepoint already released (failure came from the outer
+                    # db.commit(), not the savepoint body) — roll back the
+                    # session itself instead.
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                 log.error("Evolution: failed to persist offspring %d (%s): %s", i, child_id, sp_exc)
                 errors.append(str(sp_exc))
                 continue
 
-            # Backtest (has its own db.commit inside)
+            # Backtest (writes metrics via its own short-lived session)
             bt_result = backtest_and_update(
-                db, child_dsl, start_date=start_date, end_date=end_date
+                db, child_dsl, start_date=start_date, end_date=end_date,
+                strategy_id_override=child_id,
             )
 
             # Score
@@ -317,12 +359,18 @@ def evolve_population(
             })
 
         except Exception as exc:
-            log.error("Evolution error on offspring %d: %s", i, exc)
-            errors.append(str(exc))
             try:
                 db.rollback()
             except Exception:
                 pass
+            if "database is locked" in str(exc).lower() and i not in _lock_retried:
+                _lock_retried.add(i)
+                log.warning("Evolution offspring %d hit transient DB lock — retrying slot once", i)
+                time.sleep(1.0 + rng.random())
+                _slots.append(i)
+                continue
+            log.error("Evolution error on offspring %d: %s", i, exc)
+            errors.append(str(exc))
 
     db.commit()
 

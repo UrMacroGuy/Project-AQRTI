@@ -197,8 +197,31 @@ class StrategyDSL:
         return cls.from_dict(json.loads(s))
 
     def strategy_id(self) -> str:
-        """Deterministic hash-based ID from the entry conditions."""
-        content = json.dumps(self.entry_conditions.to_dict(), sort_keys=True)
+        """
+        Deterministic hash-based ID from the FULL strategy genome: entry
+        conditions, exit conditions, allowed regimes, and the risk
+        parameters (SL/TP/hold/confidence).
+
+        Previously this hashed entry_conditions ONLY, so two strategies
+        differing solely in exits, regimes, or risk params collided on the
+        same ID — evolution's param_blend/regime_union offspring were
+        silently deduplicated against their own parents, and
+        crossover_engine had to mutate an entry threshold +-15% purely to
+        mint a unique ID (distorting the crossover's actual semantics).
+        Existing DB rows are unaffected: strategy_id is a stored string,
+        and every re-backtest path for stored rows passes the stored ID
+        explicitly (backtest_and_update's strategy_id_override) instead of
+        recomputing it.
+        """
+        content = json.dumps({
+            "entry":   self.entry_conditions.to_dict(),
+            "exit":    self.exit_conditions.to_dict() if self.exit_conditions else None,
+            "regimes": sorted(self.allowed_regimes or []),
+            "sl":      self.stop_loss_pct,
+            "tp":      self.take_profit_pct,
+            "hold":    self.max_holding_days,
+            "conf":    self.min_confidence,
+        }, sort_keys=True)
         h = hashlib.md5(content.encode()).hexdigest()[:10].upper()
         return f"AQRTI_STR_{h}"
 

@@ -49,6 +49,7 @@ def _quarantine_status(db: Session, row: StrategyV2) -> dict | None:
     from aqrti.database.models import PaperTrade
     from strategies.promotion_config import (
         QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
+        is_expectancy_gated,
     )
     days_promoted = (_dt.utcnow() - row.promoted_at).days if row.promoted_at else 0
     closed = (
@@ -61,10 +62,16 @@ def _quarantine_status(db: Session, row: StrategyV2) -> dict | None:
     wins = sum(1 for t in closed if (t.gross_pnl_pct or 0) > 0)
     wr = wins / n * 100 if n else 0.0
     net_pnl = sum(t.gross_pnl or 0 for t in closed)
+    # Expectancy-gated families (promotion_config, user decision 2026-07-14)
+    # are held to live profitability instead of the WR floor in quarantine —
+    # a 43% WR family would otherwise be structurally unable to ever clear
+    # quarantine despite being promoted under the expectancy standard. The
+    # net_pnl > 0 requirement below still applies to them unchanged.
+    wr_gate_ok = True if is_expectancy_gated(row.family) else (n == 0 or wr >= QUARANTINE_MIN_WIN_RATE)
     ready = (
         days_promoted >= QUARANTINE_MIN_DAYS
         and n >= QUARANTINE_MIN_TRADES
-        and (n == 0 or wr >= QUARANTINE_MIN_WIN_RATE)
+        and wr_gate_ok
         and (n == 0 or net_pnl > 0)
     )
     return {
@@ -576,6 +583,7 @@ def activate(strategy_id: str, force: bool = False, db: Session = Depends(get_db
     from aqrti.database.models import PaperTrade
     from strategies.promotion_config import (
         QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
+        is_expectancy_gated,
     )
 
     row = get_strategy(db, strategy_id)
@@ -607,7 +615,10 @@ def activate(strategy_id: str, force: bool = False, db: Session = Depends(get_db
             failures.append(f"only {days_promoted}/{QUARANTINE_MIN_DAYS} days in quarantine")
         if n < QUARANTINE_MIN_TRADES:
             failures.append(f"only {n}/{QUARANTINE_MIN_TRADES} closed paper trades")
-        if n and wr < QUARANTINE_MIN_WIN_RATE:
+        # Expectancy-gated families are held to live profitability, not the
+        # WR floor (see promotion_config.EXPECTANCY_GATED_FAMILIES) — the
+        # net-P&L-positive check below still applies to them unchanged.
+        if n and wr < QUARANTINE_MIN_WIN_RATE and not is_expectancy_gated(row.family):
             failures.append(f"paper win rate {wr:.1f}% < {QUARANTINE_MIN_WIN_RATE}%")
         if n and net_pnl <= 0:
             failures.append(f"paper net P&L {net_pnl:.0f} not positive")
@@ -799,7 +810,9 @@ def replay_strategy(
 
     try:
         dsl = StrategyDSL.from_dict(_json.loads(row.dsl_json))
-        result = backtest_and_update(db, dsl)
+        # Stored-row re-backtest: keep the row's stored ID (strategy_id() is
+        # now a full-genome hash; recomputing would fork a duplicate row).
+        result = backtest_and_update(db, dsl, strategy_id_override=row.strategy_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

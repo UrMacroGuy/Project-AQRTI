@@ -32,7 +32,7 @@ from aqrti.database.models import DailyPrice, MarketRegime, Prediction, IndexDat
 from aqrti.utils.logger import get_logger
 from strategies.strategy_metrics import (
     compute_sharpe, compute_sortino, compute_max_drawdown,
-    compute_profit_factor, compute_expectancy,
+    compute_profit_factor, compute_expectancy, RISK_FREE,
 )
 
 log = get_logger("strategy_backtester")
@@ -371,6 +371,8 @@ def build_daily_portfolio_returns(
     closes_by_sym:       dict,
     sorted_dates_by_sym: dict,
     position_size:       float = POSITION_SIZE,
+    window_start:        Optional[date] = None,
+    window_end:          Optional[date] = None,
 ) -> tuple[list[float], float]:
     """
     Build a REAL mark-to-market daily portfolio return series (percent units).
@@ -379,9 +381,21 @@ def build_daily_portfolio_returns(
       entry_price (cost-loaded) → daily closes → final value implied by the
       recorded net pnl_pct (so per-trade daily returns compound EXACTLY to
       the trade's net-of-cost result).
-    Portfolio daily return = position_size × Σ(open-trade daily returns);
-    uninvested capital earns 0. Days between the first entry and last exit
-    with no open positions contribute 0.0 (honest exposure accounting).
+    Portfolio daily return = position_size × Σ(open-trade daily returns),
+    PLUS the uninvested fraction of capital earning the daily risk-free rate.
+
+    The RF credit is not a nicety — it is what makes the Sharpe ratio
+    leverage-invariant. Before it, uninvested days contributed 0.0 while
+    compute_sharpe subtracted RISK_FREE from every day, so a low-exposure
+    strategy ate -RISK_FREE × idle_days of pure penalty scaled against a
+    position_size-shrunken std. Verified on a real strategy
+    (AQRTI_STR_86394F830B: 65% WR, +2.97%/trade net, mdd -0.7%): the old
+    series scored Sharpe ≈ -14 while a hypothetical ZERO-return strategy
+    scored -16 — i.e. nearly the entire population's negative Sharpe was
+    this artifact, not trading performance. With idle capital earning RF
+    the same strategy scores ≈ +1.8. Idle cash in a real brokerage sits in
+    liquid funds earning ~the RF rate, so this is the honest model, not an
+    embellishment.
 
     Returns (daily_returns_pct, exposure_pct).
     """
@@ -394,6 +408,7 @@ def build_daily_portfolio_returns(
     # Per-trade daily return contributions keyed by mark date
     contrib: dict[date, float] = {}
     active_days: set[date] = set()
+    n_open: dict[date, int] = {}   # open-trade count per mark date (for invested fraction)
 
     for t in closed:
         sym_dates = sorted_dates_by_sym.get(t.symbol, [])
@@ -420,13 +435,23 @@ def build_daily_portfolio_returns(
                 r = (price - prev) / prev * 100
                 contrib[md] = contrib.get(md, 0.0) + r
                 active_days.add(md)
+                n_open[md] = n_open.get(md, 0) + 1
             prev = price
 
     if not contrib:
         return [], 0.0
 
-    first_day = min(active_days)
-    last_day  = max(active_days)
+    # Span the FULL evaluation window, not just [first trade, last trade].
+    # A fund's Sharpe covers every day of the period including days it sat in
+    # cash (earning RF, excess = 0). Truncating to the active span annualised
+    # tiny trade clusters into absurd |Sharpe| > 6 on short WFO folds and
+    # reported 100% exposure for a strategy that was idle most of the window.
+    first_day = window_start or min(active_days)
+    last_day  = window_end   or max(active_days)
+    # Never clip an active day out of the series (e.g. force-closed trades
+    # marked at window_end when a symbol's last bar is earlier).
+    first_day = min(first_day, min(active_days))
+    last_day  = max(last_day,  max(active_days))
 
     # Use the union of all symbols' trading dates in [first_day, last_day]
     all_days: set[date] = set()
@@ -437,7 +462,9 @@ def build_daily_portfolio_returns(
 
     series = []
     for dd in sorted(all_days):
-        series.append(position_size * contrib.get(dd, 0.0))
+        invested_frac = min(1.0, position_size * n_open.get(dd, 0))
+        rf_credit     = (1.0 - invested_frac) * RISK_FREE
+        series.append(position_size * contrib.get(dd, 0.0) + rf_credit)
 
     exposure = round(len(active_days) / max(len(all_days), 1) * 100, 2)
     return series, exposure
@@ -1034,7 +1061,8 @@ def backtest_strategy(
 
     # Real mark-to-market daily portfolio return series (percent units)
     daily_series, exposure = build_daily_portfolio_returns(
-        result.trades, closes_by_sym, sorted_dates_by_sym
+        result.trades, closes_by_sym, sorted_dates_by_sym,
+        window_start=start_date, window_end=end_date,
     )
     result.compute_metrics(daily_returns=daily_series)
     result.exposure_pct = exposure
@@ -1121,13 +1149,29 @@ def _walk_forward_oos_check(
         oos_wr     = oos_result.win_rate
         oos_trades = oos_result.trade_count
         oos_sharpe = oos_result.sharpe
-        # Hard pass requires: enough trades, win rate >= 50%, and positive
-        # net expectancy in the held-out window (profitable after costs).
-        oos_passed = (
-            oos_trades >= min_oos_trades
-            and oos_wr >= min_oos_win_rate
-            and oos_result.expectancy > 0
+        family     = getattr(strategy, "family", None)
+        from strategies.promotion_config import (
+            is_expectancy_gated, MIN_EXPECTANCY_PCT, MIN_PROFIT_FACTOR_EXPECTANCY,
         )
+        if is_expectancy_gated(family):
+            # Expectancy-gated families (promotion_config, user decision
+            # 2026-07-14): the OOS window must prove the expectancy standard
+            # itself — expectancy >= +1%/trade net AND PF >= 1.5 — instead of
+            # the 50% WR floor these low-WR/high-payoff profiles cannot meet.
+            # A STRICTER expectancy bar than the standard path's ">0".
+            oos_passed = (
+                oos_trades >= min_oos_trades
+                and oos_result.expectancy >= MIN_EXPECTANCY_PCT
+                and (oos_result.profit_factor or 0) >= MIN_PROFIT_FACTOR_EXPECTANCY
+            )
+        else:
+            # Hard pass requires: enough trades, win rate >= 50%, and positive
+            # net expectancy in the held-out window (profitable after costs).
+            oos_passed = (
+                oos_trades >= min_oos_trades
+                and oos_wr >= min_oos_win_rate
+                and oos_result.expectancy > 0
+            )
     except Exception as e:
         log.debug("OOS check failed (non-fatal): %s", e)
         return {"oos_win_rate": None, "oos_trades": 0, "oos_sharpe": None, "oos_passed": None, "oos_penalty": 0.0}
@@ -1150,8 +1194,17 @@ def backtest_and_update(
     shared_feature_cache: Optional[dict] = None,
     shared_price_data: Optional[tuple] = None,
     shared_signal_cache: Optional[dict] = None,
+    strategy_id_override: Optional[str] = None,
 ) -> BacktestResult:
-    """Backtest a strategy and write results to StrategyV2 + individual trades."""
+    """Backtest a strategy and write results to StrategyV2 + individual trades.
+
+    strategy_id_override: REQUIRED when re-backtesting an EXISTING StrategyV2
+    row via a StrategyDSL rebuilt from its stored dsl_json — pass the row's
+    stored strategy_id. StrategyDSL.strategy_id() now hashes the full genome
+    (entry+exit+regimes+params, see strategy_dsl.py), so recomputing it for a
+    row created under the old entry-only hash would mint a DIFFERENT id and
+    upsert a duplicate row instead of updating the original.
+    """
     from strategies.strategy_store import upsert_strategy
     from aqrti.database.models import StrategyBacktestTrade
 
@@ -1162,7 +1215,7 @@ def backtest_and_update(
     entry_conds = None
     exit_conds  = None
     if hasattr(strategy, "strategy_id"):
-        sid               = strategy.strategy_id()
+        sid               = strategy_id_override or strategy.strategy_id()
         min_confidence    = getattr(strategy, "min_confidence",   50.0)
         stop_loss_pct     = getattr(strategy, "stop_loss_pct",    -7.0)
         take_profit_pct   = getattr(strategy, "take_profit_pct",  12.0)
@@ -1173,7 +1226,7 @@ def backtest_and_update(
         entry_conds       = getattr(strategy, "entry_conditions", None)
         exit_conds        = getattr(strategy, "exit_conditions",  None)
     else:
-        sid               = strategy.get("strategy_id", "UNKNOWN")
+        sid               = strategy_id_override or strategy.get("strategy_id", "UNKNOWN")
         min_confidence    = strategy.get("min_confidence",   50.0)
         stop_loss_pct     = strategy.get("stop_loss_pct",    -7.0)
         take_profit_pct   = strategy.get("take_profit_pct",  12.0)
@@ -1230,10 +1283,15 @@ def backtest_and_update(
     if oos_win_rate is not None and result.win_rate > 0:
         wr_gap = result.win_rate - oos_win_rate
         if wr_gap > 12.0:
-            # Penalise Sharpe proportional to the overfit gap
+            # Penalise Sharpe proportional to the overfit gap. A penalty must
+            # never IMPROVE a metric: multiplying a negative Sharpe by a
+            # factor < 1 moved it toward 0 (rewarding overfit losers), so
+            # shrink only positive values and leave negative ones untouched.
             penalty_factor = max(0.5, 1.0 - (wr_gap - 12.0) / 50.0)
-            result.sharpe  = round(result.sharpe * penalty_factor, 4)
-            result.sortino = round(result.sortino * penalty_factor, 4)
+            if result.sharpe > 0:
+                result.sharpe = round(result.sharpe * penalty_factor, 4)
+            if result.sortino > 0:
+                result.sortino = round(result.sortino * penalty_factor, 4)
             log.info(
                 "OOS overfit detected %s: IS_WR=%.1f%% OOS_WR=%.1f%% gap=%.1fpp -> sharpe penalised x%.2f",
                 sid, result.win_rate, oos_win_rate, wr_gap, penalty_factor,

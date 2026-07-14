@@ -34,6 +34,34 @@ MIN_OOS_SHARPE       = 0.2
 # MIN_OOS_SHARPE check immediately below it.
 MIN_OOS_WIN_RATE     = 50.0
 
+# ── Expectancy-gated families (USER DECISION, 2026-07-14) ──────────────
+# Some documented edges are structurally low-win-rate/high-payoff: the lab
+# measured 52-week-high momentum on this exact universe at 43.8% WR but
+# +3.62%/trade NET of costs (docs/STRATEGY_LAB.md variant D) — the
+# strongest raw edge found, permanently blocked by the WR floors above.
+# The lab also proved WHY a WR floor alone is a trap: its OOS-failed
+# finalist KEPT a 61.7% win rate while expectancy collapsed to
+# -0.71%/trade. For the families listed here (and ONLY these), the
+# in-sample/OOS/quarantine/live win-rate floors are REPLACED by all three
+# of the checks below — every other gate (fitness, trades, Sharpe,
+# oos_passed, benchmark, dedup, quarantine days/trades/P&L) is unchanged.
+# This is an alternate proof standard, not a weakening: expectancy AND
+# profit factor AND a TIGHTER drawdown cap must all hold, net of the
+# 0.28% round-trip cost model.
+EXPECTANCY_GATED_FAMILIES = {"week52_high_momentum"}
+MIN_EXPECTANCY_PCT           = 1.0    # avg %/trade net of costs (lab edge measured +3.62%)
+MIN_PROFIT_FACTOR_EXPECTANCY = 1.5    # gross wins / gross losses
+# Tighter than the universal MAX_DRAWDOWN_LIMIT (-35.0): low-WR strategies
+# run longer losing streaks by construction, so waiving the WR floor
+# demands a stricter drawdown proof in exchange.
+MAX_DRAWDOWN_EXPECTANCY      = -25.0
+
+
+def is_expectancy_gated(family: str | None) -> bool:
+    """True if this family promotes via the expectancy gate instead of WR floors."""
+    return family in EXPECTANCY_GATED_FAMILIES
+
+
 # Benchmark gate (promotion): the strategy's honest daily Sharpe must reach
 # at least this fraction of buy-and-hold NIFTY50's Sharpe over the same
 # window. A strategy that can't approach doing-nothing is not worth capital.

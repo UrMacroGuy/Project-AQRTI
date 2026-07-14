@@ -57,7 +57,8 @@ REGIME_MARKOV_SIDEWAYS = REGIME_MARKOV_CODES["SIDEWAYS"]
 # ── Feature pools by category ─────────────────────────────────
 
 PRICE_FEATURES = [
-    "return_1d", "return_5d", "return_21d", "momentum_10d", "momentum_20d",
+    "return_1d", "return_5d", "return_21d", "return_126d",
+    "momentum_10d", "momentum_20d",
     "breakout_distance_52w", "price_position_52w", "relative_strength_nifty_21d",
     "support_distance_20d", "resistance_distance_20d",
 ]
@@ -67,11 +68,13 @@ VOLUME_FEATURES = [
 ]
 VOLATILITY_FEATURES = [
     "atr_14", "bb_width_20", "realized_vol_20d", "vol_ratio_short_long",
-    "hv_percentile_252d",
+    "hv_percentile_252d", "historical_vol_63d",
 ]
 TREND_FEATURES = [
     "ema_20", "ema_50", "macd_signal", "adx_14", "rsi_14", "stoch_k",
     "price_above_ema50", "ema20_above_ema50",
+    "price_vs_ema21_pct", "price_vs_ema50_pct", "price_vs_ema200_pct",
+    "ma_20_slope", "ma_spread", "close_ma20_diff", "trend_tstat_63d",
 ]
 SENTIMENT_FEATURES = [
     "sentiment_score", "sentiment_velocity", "news_impact_score",
@@ -87,6 +90,10 @@ REGIME_FEATURES = [
     "breadth_pct_above_ema50", "breadth_pct_above_ema200",
     # Markov observable-chain regime label (backend/markov module)
     "regime_markov",
+    # Calendar/seasonality flag (turn-of-month) — grouped here alongside the
+    # other timing/regime-style conditions since it's not a technical or
+    # research feature.
+    "tom_window",
 ]
 # Research-derived features (research_synthesis funnel) — registered in
 # feature_registry.py, category="research". Point-in-time joined, null when
@@ -118,7 +125,11 @@ def _make_condition(feature: str, op: str, threshold: float, weight: float = 1.0
     return Condition(feature=feature, operator=op, threshold=threshold, weight=weight)
 
 
-def _rand_confidence(rng: random.Random, lo: float = 50.0, hi: float = 68.0) -> float:
+def _rand_confidence(rng: random.Random, lo: float = 52.0, hi: float = 68.0) -> float:
+    # lo floor matches MIN_CONFIDENCE (prescreen) — a lo of 50 generated
+    # candidates that _passes_prescreen auto-rejected in direct-generation
+    # paths (e.g. walk_forward_templates.py calls _GENERATORS[fam](rng)
+    # without generate_candidates()' conf-floor rewrite). Pure waste.
     """Generate a realistic min_confidence — biased toward lower values that fire more signals."""
     return round(rng.uniform(lo, hi), 1)
 
@@ -253,14 +264,24 @@ def _generate_mean_reversion_quality(rng: random.Random) -> StrategyDSL:
         _make_condition("rsi_14", ">", round(rng.uniform(50, 60), 1)),
     ])
 
-    sl = round(-rng.uniform(4, 8), 1)
+    # Doctrine fix (2026-07-14, docs/STRATEGY_LAB.md): hard stops DEGRADE
+    # mean-reversion on NSE — the lab measured +0.34%/trade collapsing to
+    # +0.04% when a 3xATR stop was added, matching Connors' published US
+    # result. The lab's own B variant used a time stop and NO price stop.
+    # This template previously used a tight -4..-8% stop, directly
+    # contradicting that paid-for lesson. The primary exits are the RSI
+    # recovery rule above and the short max_holding_days time stop; the
+    # stop below is a wide catastrophe-only brake (a live system still
+    # needs a disaster floor), sized to almost never trigger on a normal
+    # mean-reversion excursion.
+    sl = round(-rng.uniform(15, 20), 1)
     return StrategyDSL(
         entry_conditions = ConditionGroup(conditions=conds),
         exit_conditions  = exit_,
         allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
         family           = "mean_reversion_quality",
         name             = f"MeanRevQ_RSI{rsi_lo}",
-        min_confidence   = _rand_confidence(rng, 50.0, 65.0),
+        min_confidence   = _rand_confidence(rng, 52.0, 65.0),
         max_holding_days = rng.randint(5, 15),
         stop_loss_pct    = sl,
         take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
@@ -307,14 +328,19 @@ def _generate_regime_pullback_v2(rng: random.Random) -> StrategyDSL:
         _make_condition("rsi_14", ">", rsi_exit),
     ])
 
-    sl = round(-rng.uniform(4, 8), 1)
+    # Doctrine fix (2026-07-14): same as mean_reversion_quality above —
+    # hard stops degrade NSE mean-reversion (lab-measured), and the lab's B
+    # variant this template descends from used a time stop with NO price
+    # stop. Wide catastrophe-only brake; the RSI recovery exit + 5-7 day
+    # time stop are the real exits.
+    sl = round(-rng.uniform(15, 20), 1)
     return StrategyDSL(
         entry_conditions = ConditionGroup(conditions=conds),
         exit_conditions  = exit_,
         allowed_regimes  = REGIME_SETS["bull_only"],
         family           = "regime_pullback_v2",
         name             = f"RegimePullbackV2_RSI{rsi_lo}",
-        min_confidence   = _rand_confidence(rng, 50.0, 65.0),
+        min_confidence   = _rand_confidence(rng, 52.0, 65.0),
         max_holding_days = rng.randint(5, 7),   # doc's 7-day time stop
         stop_loss_pct    = sl,
         take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
@@ -395,7 +421,7 @@ def _generate_regime_dca_timing(rng: random.Random) -> StrategyDSL:
         allowed_regimes  = REGIME_SETS["defensive"],
         family           = "regime_dca_timing",
         name             = f"RegimeDCA_pos{pos_th}",
-        min_confidence   = _rand_confidence(rng, 50.0, 62.0),
+        min_confidence   = _rand_confidence(rng, 52.0, 62.0),
         max_holding_days = rng.randint(30, 60),
         stop_loss_pct    = sl,
         take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
@@ -734,6 +760,177 @@ def _generate_long_hold_momentum(rng: random.Random) -> StrategyDSL:
     )
 
 
+def _generate_week52_high_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    52-week-high momentum — George & Hwang (2004); separately robust on NSE
+    (SSRN, 2004-2023 NSE data, per CLAUDE.md's India evidence). The single
+    strongest raw edge the strategy lab measured on this exact universe
+    (docs/STRATEGY_LAB.md variant D: price >= 0.95x 52wk high + 6-month
+    return > 10% -> 43.8% WR but +3.62%/trade NET of 0.28% costs — a
+    low-win-rate/high-payoff profile).
+
+    This family is EXPECTANCY-GATED (promotion_config.
+    EXPECTANCY_GATED_FAMILIES): instead of the 50% win-rate floor it
+    structurally cannot meet, it promotes on expectancy >= +1.0%/trade net
+    AND profit factor >= 1.5 AND a tighter max-drawdown cap — an explicit
+    user decision (2026-07-14); every other gate (OOS, benchmark, dedup,
+    quarantine) unchanged. Hard stops are appropriate here — lab doctrine
+    reserves hard stops for trend/momentum entries.
+    """
+    pos_th   = round(rng.uniform(0.90, 0.97), 3)   # position in 52wk range (lab: >=0.95x high)
+    ret6m_th = round(rng.uniform(8.0, 15.0), 1)    # 6-month return confirmation (lab: >10%)
+    n_conds  = rng.randint(2, 3)
+
+    conds = [
+        _make_condition("price_position_52w", ">=", pos_th),
+        _make_condition("return_126d",        ">",  ret6m_th),
+    ]
+    if n_conds >= 3:
+        # Trend-strength confirmation — avoid chopping sideways at the high
+        conds.append(_make_condition("adx_14", ">", round(rng.uniform(18, 26), 1)))
+
+    # Exit on trend break: price falls out of the top of its 52wk range, or
+    # medium-term momentum flips hard negative.
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("price_position_52w", "<", round(rng.uniform(0.72, 0.85), 3)),
+        _make_condition("return_21d",         "<", round(-rng.uniform(4.0, 7.0), 1)),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(8, 12), 1)   # proper hard stop — trend entry
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "week52_high_momentum",
+        name             = f"W52High_{pos_th}_{ret6m_th}",
+        min_confidence   = _rand_confidence(rng, 52.0, 66.0),
+        max_holding_days = rng.randint(30, 60),   # ride the drift — long holds are cost-advantaged
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_turn_of_month(rng: random.Random) -> StrategyDSL:
+    """
+    Turn-of-month seasonality — TOM days carry ~4x the average daily return
+    on NSE (CLAUDE.md India evidence; globally Lakonishok & Smidt 1988,
+    McConnell & Xu 2008). Entry: the tom_window feature flags the first 3
+    trading days of the month (the T-1 leg is deliberately excluded for
+    strict point-in-time computability — see price_features.py), paired
+    with a trend confirmation so the window is never bought into a falling
+    market (doctrine: never trade the calendar alone). Short hold matched
+    to the window; a modest hard stop is fine (timing trade, not mean
+    reversion). Standard WR gates apply — no evidence this is a low-WR
+    profile.
+    """
+    trend_feat, trend_th = rng.choice([
+        ("price_vs_ema50_pct", round(rng.uniform(-1.0, 1.0), 2)),
+        ("return_21d",         round(rng.uniform(0.0, 2.0), 2)),
+        ("ma_20_slope",        round(rng.uniform(0.0, 0.3), 3)),
+    ])
+
+    conds = [
+        _make_condition("tom_window", "==", 1.0),
+        _make_condition(trend_feat,   ">",  trend_th),
+    ]
+
+    sl = round(-rng.uniform(4.0, 7.0), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = None,               # time stop / SL / TP only — the window itself is the exit thesis
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_sideways", "all_weather"])],
+        family           = "turn_of_month",
+        name             = f"TOM_{trend_feat[:10]}_{trend_th}",
+        min_confidence   = _rand_confidence(rng, 52.0, 62.0),
+        max_holding_days = rng.randint(3, 6),  # window is ~3 days; the time stop is the primary exit
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 1.5),
+    )
+
+
+def _generate_vol_managed_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    Volatility-managed momentum — Barroso & Santa-Clara (2015) "Momentum has
+    its moments"; Moreira & Muir (2017) "Volatility-Managed Portfolios".
+    The math: momentum's crashes concentrate in high-volatility states, and
+    scaling exposure inversely to realized variance roughly doubles the
+    factor's Sharpe. The DSL cannot size positions, so the discrete
+    equivalent is a vol GATE: take the 6-month momentum entry ONLY when
+    63-day realized vol is in the calm half of its distribution (universe
+    p50 ≈ 25% annualized, measured 2026-07-14 on real feature history) and
+    exit when vol spikes into the p75+ regime. Momentum entry → hard stop
+    is doctrine-appropriate.
+    """
+    ret6m_th = round(rng.uniform(8.0, 15.0), 1)     # same evidence base as week52 (6m confirmation)
+    vol_in   = round(rng.uniform(20.0, 27.0), 1)    # calm regime: at/below ~p50 of universe vol
+    vol_out  = round(rng.uniform(32.0, 40.0), 1)    # crash regime: p75-p90 — the Barroso danger zone
+
+    conds = [
+        _make_condition("return_126d",        ">",  ret6m_th),
+        _make_condition("historical_vol_63d", "<",  vol_in),
+    ]
+    if rng.random() < 0.5:
+        # Optional trend-quality confirmation
+        conds.append(_make_condition("ma_20_slope", ">", round(rng.uniform(0.0, 0.3), 3)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("historical_vol_63d", ">", vol_out),   # vol spike = momentum-crash regime
+        _make_condition("return_21d",         "<", round(-rng.uniform(4.0, 7.0), 1)),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(8, 12), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "vol_managed_momentum",
+        name             = f"VolMom_{ret6m_th}_{vol_in}",
+        min_confidence   = _rand_confidence(rng, 52.0, 64.0),
+        max_holding_days = rng.randint(25, 50),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_tstat_trend(rng: random.Random) -> StrategyDSL:
+    """
+    Statistically-significant trend — the DSL-expressible form of vol-scaled
+    time-series momentum (Moskowitz, Ooi & Pedersen 2012). Entry requires
+    trend_tstat_63d = mean(ret)/std(ret)·√63 above ~1.5-2.2: the 63-day
+    drift must be distinguishable from zero at roughly 90-97% confidence
+    before capital is committed, so the template buys MEASURED trend, not
+    noise. The same statistic exits the position when significance decays
+    (t < ~0.2-0.5) — a regime exit, before the price fully round-trips.
+    Trend entry → hard stop per lab doctrine.
+    """
+    t_in  = round(rng.uniform(1.5, 2.2), 2)
+    t_out = round(rng.uniform(0.2, 0.5), 2)
+
+    conds = [_make_condition("trend_tstat_63d", ">", t_in)]
+    conds.append(rng.choice([
+        _make_condition("adx_14",       ">", round(rng.uniform(18.0, 25.0), 1)),   # directional strength
+        _make_condition("return_21d",   ">", round(rng.uniform(0.0, 2.0), 1)),     # recent leg confirms
+        _make_condition("ma_20_slope",  ">", round(rng.uniform(0.0, 0.3), 3)),
+    ]))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("trend_tstat_63d", "<", t_out),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(8, 12), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways", "all_weather"])],
+        family           = "tstat_trend",
+        name             = f"TStat_{t_in}_{t_out}",
+        min_confidence   = _rand_confidence(rng, 52.0, 64.0),
+        max_holding_days = rng.randint(20, 45),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
 _GENERATORS = {
     # Named, research-backed templates (replace the old 8 generic random families)
     "post_earnings_drift":     _generate_post_earnings_drift,
@@ -751,26 +948,51 @@ _GENERATORS = {
     "relative_strength":   _generate_relative_strength,
     "breadth_momentum":    _generate_breadth_momentum,
     "long_hold_momentum":  _generate_long_hold_momentum,
+    # Proven-edge templates added 2026-07-14 (see each docstring for citations)
+    "week52_high_momentum": _generate_week52_high_momentum,   # EXPECTANCY-GATED family
+    "turn_of_month":        _generate_turn_of_month,
+    # Math-grounded additions (2026-07-14c): vol-managed momentum (Barroso &
+    # Santa-Clara 2015 / Moreira & Muir 2017) and t-stat trend (statistical
+    # significance filter on 63d drift, Moskowitz-Ooi-Pedersen lineage)
+    "vol_managed_momentum": _generate_vol_managed_momentum,
+    "tstat_trend":          _generate_tstat_trend,
 }
 
-# Family weights for generation — bias toward historically stronger families
-# GO-5b families get high initial weights: diagnosis showed cost drag kills short-hold
-# families; cross-sectional RS and long-hold families are structurally cost-advantaged.
+# Family weights for generation — bias toward EVIDENCE, per lab doctrine
+# (docs/STRATEGY_LAB.md). Rebalanced 2026-07-14: mean-reversion families
+# dropped to the 0.02 floor (short-term reversal on this liquid large-cap
+# universe is a VALIDATED dead end — lab measured ~0 net of costs, and the
+# regime_pullback_v2 finalist failed its one OOS shot; both templates stay
+# registered for honest-gate demonstration, not population share).
+# week52_high_momentum gets a strong initial weight — the lab's strongest
+# measured raw edge (+3.62%/trade net). Also fixes regime_pullback_v2
+# being absent from this dict entirely, which silently gave it the 0.1
+# fallback in generate_candidates — DOUBLE its intended 0.05.
+# Weights sum to exactly 1.00 (generate_candidates renormalizes anyway,
+# but a clean sum keeps the meta-learner's deltas interpretable).
+# LOCKSTEP (pitfall C16): meta_learner._DEFAULT_FAMILY_WEIGHTS and
+# ui/pages/strategy.js `defaults` must list the same families.
 _FAMILY_WEIGHTS = {
-    # New research-backed templates — initial weights, meta-learner adapts over time
-    "post_earnings_drift":     0.10,
-    "momentum_trend":          0.10,
-    "mean_reversion_quality":  0.08,
-    "event_catalyst":          0.08,
-    "regime_dca_timing":       0.05,   # allocation-tilt signal, not a core trading family
-    "rotation_monitor":        0.08,
-    "quality_momentum":    0.09,
-    "institutional_flow":  0.06,
-    "rl_momentum":         0.09,
-    # GO-5b: cross-sectional and long-hold families weighted up per diagnosis
-    "relative_strength":   0.12,   # RS signal is cross-sectional — cost-advantaged
-    "breadth_momentum":    0.09,   # breadth filter avoids bad-market entries
-    "long_hold_momentum":  0.14,   # 30-60d hold: cost drag ~0.005-0.009%/day vs 0.037%/day at 3d
+    "post_earnings_drift":     0.07,   # legit basis (PEAD) — data-starved today, keep moderate
+    "momentum_trend":          0.07,
+    "mean_reversion_quality":  0.02,   # FLOOR — validated dead end on this universe
+    "event_catalyst":          0.06,
+    "regime_dca_timing":       0.04,   # allocation-tilt signal, not a core trading family
+    "rotation_monitor":        0.06,
+    "regime_pullback_v2":      0.02,   # FLOOR — failed its pre-registered OOS shot
+    "quality_momentum":        0.08,
+    "institutional_flow":      0.04,
+    "rl_momentum":             0.06,
+    # GO-5b: cross-sectional and long-hold families — structurally cost-advantaged
+    "relative_strength":       0.08,
+    "breadth_momentum":        0.06,
+    "long_hold_momentum":      0.09,   # 30-60d hold: cost drag ~0.005-0.009%/day vs 0.037%/day at 3d
+    # Proven-edge additions (2026-07-14)
+    "week52_high_momentum":    0.10,   # strongest measured edge on this exact universe
+    "turn_of_month":           0.04,   # real effect, narrow window — small initial share
+    # Math-grounded additions (2026-07-14c)
+    "vol_managed_momentum":    0.06,   # Barroso-Santa-Clara / Moreira-Muir vol gate on 6m momentum
+    "tstat_trend":             0.05,   # statistical-significance trend filter (t >= ~1.5-2.2)
 }
 
 

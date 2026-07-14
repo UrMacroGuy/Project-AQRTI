@@ -77,11 +77,21 @@ def get_quote(symbol: str) -> Optional[float]:
 
 
 def _fetch_quote(symbol: str, key: str) -> Optional[float]:
-    """Internal: try BSE:SYMBOL first, then bare symbol."""
+    """Internal: exchange-qualified symbol ONLY — never the bare symbol.
+
+    The old bare-symbol fallback was a wrong-company bug, not a fallback:
+    on Finnhub, bare "HAL" is Halliburton (US) and bare "INFY" is the
+    Infosys NYSE ADR in dollars. Free-tier keys don't cover Indian
+    exchanges, so the BSE: attempt failed and the fallback returned the
+    wrong company's price on every call — the source of the 2026-07-11
+    fake-stop-loss incident (HAL ~4514 quoted as ~34) and the recurring
+    "Rejected implausible live price" warnings. No quote is strictly
+    better than a quote for a different company.
+    """
     import urllib.request
     import json
 
-    for fh_sym in (_finnhub_symbol(symbol), symbol):
+    for fh_sym in (_finnhub_symbol(symbol),):
         try:
             url = f"{_QUOTE_URL}?symbol={fh_sym}&token={key}"
             req = urllib.request.Request(url, headers={"User-Agent": "AQRTI/1.0"})

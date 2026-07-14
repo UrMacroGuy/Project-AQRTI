@@ -299,12 +299,34 @@ def _check_rolling_win_rate_floor(db: Session, strategy_id: str) -> dict:
     all-time win rate so a champion that curdles recently gets caught even
     if its early live trades were strong enough to keep the cumulative
     average above the floor.
+
+    Expectancy-gated families (promotion_config.EXPECTANCY_GATED_FAMILIES,
+    user decision 2026-07-14) are held to the standard they were promoted
+    under instead: rolling average pnl%/trade over the same window must stay
+    positive. Without this branch, a 43%-WR champion promoted via the
+    expectancy gate would be auto-demoted here on its very first sweep —
+    the gate change would be self-defeating.
     """
     closed = _closed_trades_chronological(db, strategy_id)
     if len(closed) < ROLLING_WR_WINDOW:
         return {"demote": False, "reason": ""}
 
     window = closed[-ROLLING_WR_WINDOW:]
+
+    from strategies.promotion_config import is_expectancy_gated
+    strat = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
+    if strat is not None and is_expectancy_gated(strat.family):
+        pnls = [(t.gross_pnl_pct or 0.0) for t in window]
+        rolling_expectancy = sum(pnls) / len(pnls)
+        demote = rolling_expectancy < 0.0
+        reason = (
+            f"rolling_expectancy: {rolling_expectancy:+.2f}%/trade over last "
+            f"{len(window)} trades < 0 (expectancy-gated family)"
+        )
+        if demote:
+            log.warning("Strategy %s rolling expectancy breach: %s", strategy_id, reason)
+        return {"demote": demote, "reason": reason}
+
     wins = sum(1 for t in window if (t.gross_pnl or 0) > 0)
     win_rate = wins / len(window) * 100.0
 

@@ -22,26 +22,21 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from aqrti.utils.logger import get_logger
-from strategies.strategy_dsl import StrategyDSL, Condition, ConditionGroup
+from strategies.strategy_dsl import StrategyDSL, ConditionGroup
 from strategies.mutation_engine import _collect_conditions
 
 log = get_logger("crossover_engine")
 
 
-def _nudge_entry_condition(child: StrategyDSL, rng: random.Random) -> None:
-    """Nudge one entry condition threshold so child gets a unique strategy_id()."""
-    conds = _collect_conditions(child.entry_conditions)
-    nudged = False
-    for c in conds:
-        if isinstance(c.threshold, (int, float)):
-            factor = 1.0 + rng.uniform(-0.15, 0.15)
-            c.threshold = round(c.threshold * factor, 4) if isinstance(c.threshold, float) else int(c.threshold * factor)
-            nudged = True
-            break
-    if not nudged:
-        child.entry_conditions.conditions.append(
-            Condition(feature="volume_ratio_20d", operator=">", threshold=0.01)
-        )
+# NOTE (2026-07-14): the old `_nudge_entry_condition` helper is gone. It
+# existed only because StrategyDSL.strategy_id() used to hash entry
+# conditions alone, so param_blend/regime_union/regime_intersect/
+# family_dominant children collided with their parents' IDs — the "fix" was
+# to mutate an entry threshold +-15% purely to mint a unique ID, silently
+# distorting the crossover's actual semantics. strategy_id() now hashes the
+# full genome (entry+exit+regimes+SL/TP/hold/confidence), so those methods'
+# real differences produce distinct IDs on their own; a child that is
+# genuinely identical to its parent now correctly dedups as a true clone.
 
 
 def crossover(
@@ -81,6 +76,21 @@ def crossover(
             if c.feature not in seen:
                 seen.add(c.feature)
                 dedup.append(c)
+        # Guarantee >= 2 entry conditions (the prescreen's curve-fit guard).
+        # When both parents lean on the same features, dedup could collapse
+        # the blend to a single condition — previously this child was
+        # generated anyway and then auto-rejected by _passes_prescreen,
+        # wasting the offspring slot. Top up from the parents' remaining
+        # unused conditions (unique features) instead.
+        if len(dedup) < 2:
+            leftovers = [c for c in (conds_a + conds_b) if c.feature not in seen]
+            rng.shuffle(leftovers)
+            for c in leftovers:
+                if c.feature not in seen:
+                    seen.add(c.feature)
+                    dedup.append(c)
+                    if len(dedup) >= 2:
+                        break
         child.entry_conditions = ConditionGroup(conditions=dedup, logic="AND")
         desc = f"rule_blend: {n_a} from A + {n_b} from B → {len(dedup)} conditions"
 
@@ -91,12 +101,10 @@ def crossover(
         child.max_holding_days = max(1, int((parent_a.max_holding_days + parent_b.max_holding_days) / 2))
         desc = (f"param_blend: sl={child.stop_loss_pct} tp={child.take_profit_pct} "
                 f"conf={child.min_confidence} hold={child.max_holding_days}")
-        _nudge_entry_condition(child, rng)
 
     elif method == "regime_union":
         child.allowed_regimes = sorted(set(parent_a.allowed_regimes) | set(parent_b.allowed_regimes))
         desc = f"regime_union: {child.allowed_regimes}"
-        _nudge_entry_condition(child, rng)
 
     elif method == "regime_intersect":
         intersection = sorted(set(parent_a.allowed_regimes) & set(parent_b.allowed_regimes))
@@ -106,7 +114,6 @@ def crossover(
         else:
             child.allowed_regimes = parent_a.allowed_regimes if fitness_a >= fitness_b else parent_b.allowed_regimes
             desc = "regime_intersect: empty — used dominant parent regimes"
-        _nudge_entry_condition(child, rng)
 
     elif method == "family_dominant":
         # Better parent contributes entry, worse contributes exit
@@ -116,7 +123,6 @@ def crossover(
         child.exit_conditions  = copy.deepcopy(sub.exit_conditions) if sub.exit_conditions else None
         child.family           = dom.family
         desc = f"family_dominant: entry from {dom.family}, exit from {sub.family}"
-        _nudge_entry_condition(child, rng)
 
     # Child name and family
     child.name   = f"X_{parent_a.name[:8]}_{parent_b.name[:8]}"

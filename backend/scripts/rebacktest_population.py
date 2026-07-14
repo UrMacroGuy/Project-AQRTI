@@ -113,12 +113,16 @@ def main():
         try:
             dsl = StrategyDSL.from_json(dsl_json)
             with get_db() as db:
+                # Stored-row re-backtest: keep the stored ID (strategy_id()
+                # is now a full-genome hash; recomputing would fork a
+                # duplicate row instead of updating this one).
                 backtest_and_update(
                     db, dsl,
                     universe=universe,
                     shared_feature_cache=cache,
                     shared_price_data=price_data,
                     shared_signal_cache=signal_cache,
+                    strategy_id_override=sid,
                 )
             done += 1
         except Exception as exc:

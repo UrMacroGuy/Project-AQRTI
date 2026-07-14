@@ -55,23 +55,30 @@ log = get_logger("meta_learner")
 # generation by itself — but it did mean these 4 families were permanently
 # invisible to the death-suppression / live-performance-boost mechanisms.
 _RAW_DEFAULT_FAMILY_WEIGHTS = {
-    # Named, research-backed templates (replaced the old 8 generic random
-    # families — momentum/mean_reversion/breakout/sentiment_driven/
-    # regime_adaptive/volume_surge/volatility_play/hybrid — see
-    # strategy_generator.py and BUG_HUNTING.md for the rationale).
-    "post_earnings_drift":     0.10,
-    "momentum_trend":          0.10,
-    "mean_reversion_quality":  0.08,
-    "event_catalyst":          0.08,
-    "regime_dca_timing":       0.05,
-    "rotation_monitor":        0.08,
-    "regime_pullback_v2":      0.05,  # docs/STRATEGY_LAB.md §5 candidate — low weight, expected to keep failing gates
-    "quality_momentum":   0.12,
-    "institutional_flow": 0.08,
-    "rl_momentum":         0.09,
-    "relative_strength":   0.12,
-    "breadth_momentum":    0.09,
-    "long_hold_momentum":  0.14,
+    # LOCKSTEP (pitfall C16): must list the same families as
+    # strategy_generator._FAMILY_WEIGHTS and ui/pages/strategy.js `defaults`.
+    # Values mirror strategy_generator's 2026-07-14 evidence rebalance:
+    # mean-reversion families floored (validated dead end on this liquid
+    # large-cap universe, docs/STRATEGY_LAB.md), week52_high_momentum
+    # weighted up (the lab's strongest measured raw edge; expectancy-gated
+    # family per promotion_config).
+    "post_earnings_drift":     0.07,
+    "momentum_trend":          0.07,
+    "mean_reversion_quality":  0.02,
+    "event_catalyst":          0.06,
+    "regime_dca_timing":       0.04,
+    "rotation_monitor":        0.06,
+    "regime_pullback_v2":      0.02,  # docs/STRATEGY_LAB.md §5 candidate — expected to keep failing gates
+    "quality_momentum":        0.08,
+    "institutional_flow":      0.04,
+    "rl_momentum":             0.06,
+    "relative_strength":       0.08,
+    "breadth_momentum":        0.06,
+    "long_hold_momentum":      0.09,
+    "week52_high_momentum":    0.10,  # EXPECTANCY-GATED family (promotion_config, 2026-07-14)
+    "turn_of_month":           0.04,
+    "vol_managed_momentum":    0.06,  # Barroso-Santa-Clara / Moreira-Muir vol gate on 6m momentum (2026-07-14c)
+    "tstat_trend":             0.05,  # t-stat significance trend filter, Moskowitz-Ooi-Pedersen lineage (2026-07-14c)
 }
 # The raw values above sum to 1.18, not 1.0. compute_meta_state() always
 # renormalizes its output to sum to 1.0 (line ~511) — even when NO family
@@ -727,17 +734,29 @@ def persist_meta_insights(db: Session, meta_state: dict) -> int:
             None, "low",
         )
 
-    # Best mutation operation
+    # Best mutation operation. mutation_engine._build_op_pool only boosts an
+    # op when avg_delta > 0.5 — when even the top-ranked op is at or below
+    # that bar the honest insight is "no op currently earns preference", not
+    # "engine will prefer it" (a negative-delta op ranked #1 just means every
+    # op is currently destroying fitness on average).
     ranked = meta_state["ranked_mutation_ops"]
     if ranked:
         best_op = ranked[0]
         op_stats = meta_state["mutation_op_stats"].get(best_op, {})
+        best_delta = op_stats.get("avg_delta", 0)
+        if best_delta > 0.5:
+            detail = (f"Over the last 60 days, '{best_op}' produced the highest average fitness improvement "
+                      f"({op_stats.get('positive_pct', 0):.1f}% positive outcomes). "
+                      "Mutation engine will prefer this operation.")
+        else:
+            detail = (f"'{best_op}' ranks highest but its average fitness delta is {best_delta:.3f} "
+                      f"({op_stats.get('positive_pct', 0):.1f}% positive outcomes) — below the +0.5 preference "
+                      "bar, so the mutation engine gives NO operation extra weight this cycle. "
+                      "No mutation operation is currently improving fitness on average.")
         _write(
             "best_mutation_op",
-            f"Top mutation operation: '{best_op}' (avg delta={op_stats.get('avg_delta', 0):.3f})",
-            (f"Over the last 60 days, '{best_op}' produced the highest average fitness improvement "
-             f"({op_stats.get('positive_pct', 0):.1f}% positive outcomes). "
-             "Mutation engine will prefer this operation."),
+            f"Top mutation operation: '{best_op}' (avg delta={best_delta:.3f})",
+            detail,
             {"op": best_op, "stats": op_stats},
             None, "low",
         )

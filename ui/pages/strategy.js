@@ -674,12 +674,19 @@ function renderMetaLearningPanel(ms, rt) {
   if (ms?.family_weights) {
     // Must mirror backend/strategies/strategy_generator.py::_FAMILY_WEIGHTS —
     // update both together if family weights change.
+    // LOCKSTEP (pitfall C16): must mirror strategy_generator._FAMILY_WEIGHTS
+    // and meta_learner._RAW_DEFAULT_FAMILY_WEIGHTS — update all three together.
+    // 2026-07-14 evidence rebalance: MR families floored, week52_high_momentum
+    // (expectancy-gated) + turn_of_month added; 2026-07-14c: vol_managed_momentum
+    // + tstat_trend added.
     const defaults = {
-      post_earnings_drift: 0.10, momentum_trend: 0.10, mean_reversion_quality: 0.08,
-      event_catalyst: 0.08, regime_dca_timing: 0.05, rotation_monitor: 0.08,
-      regime_pullback_v2: 0.05,
-      quality_momentum: 0.12, institutional_flow: 0.08, rl_momentum: 0.09,
-      relative_strength: 0.12, breadth_momentum: 0.09, long_hold_momentum: 0.14,
+      post_earnings_drift: 0.07, momentum_trend: 0.07, mean_reversion_quality: 0.02,
+      event_catalyst: 0.06, regime_dca_timing: 0.04, rotation_monitor: 0.06,
+      regime_pullback_v2: 0.02,
+      quality_momentum: 0.08, institutional_flow: 0.04, rl_momentum: 0.06,
+      relative_strength: 0.08, breadth_momentum: 0.06, long_hold_momentum: 0.09,
+      week52_high_momentum: 0.10, turn_of_month: 0.04,
+      vol_managed_momentum: 0.06, tstat_trend: 0.05,
     };
     html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
     html += '<tr><th style="text-align:left;color:var(--muted);padding:2px 4px">Family</th><th style="color:var(--muted);padding:2px 4px">Default</th><th style="color:var(--muted);padding:2px 4px">Current</th><th style="color:var(--muted);padding:2px 4px">Δ</th></tr>';

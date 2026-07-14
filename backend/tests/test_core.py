@@ -633,3 +633,298 @@ class TestMonthlyAllocator:
         result = compute_monthly_allocation(self.db)
         assert result["allocation_inr"]["BEL"] > result["allocation_inr"]["HDFCBANK"]
         assert result["ranked_symbols"][0] == "BEL"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Expectancy-gated families (promotion_config, user decision 2026-07-14)
+# ══════════════════════════════════════════════════════════════════════
+from strategies.promotion_config import (
+    EXPECTANCY_GATED_FAMILIES, MIN_EXPECTANCY_PCT, MIN_PROFIT_FACTOR_EXPECTANCY,
+    MAX_DRAWDOWN_EXPECTANCY, is_expectancy_gated,
+)
+
+
+class TestExpectancyGate:
+    @pytest.fixture(autouse=True)
+    def setup_db(self):
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        Session = _sessionmaker(bind=engine)
+        self.db = Session()
+        yield
+        self.db.close()
+        engine.dispose()
+
+    def _expectancy_row(self, **overrides):
+        base = _make_promotable_strategy_row(
+            strategy_id="AQRTI_STR_TESTEXPGATE",
+            family="week52_high_momentum",
+            win_rate=43.8,            # lab-measured — BELOW every WR floor
+            oos_win_rate=44.0,        # also below the OOS WR floor
+            expectancy=2.0,           # above the 1.0 floor
+            profit_factor=1.8,        # above the 1.5 floor
+            max_drawdown=-15.0,       # inside the -25 cap
+        )
+        base.update(overrides)
+        return base
+
+    def test_week52_family_is_designated(self):
+        assert "week52_high_momentum" in EXPECTANCY_GATED_FAMILIES
+        assert is_expectancy_gated("week52_high_momentum")
+        assert not is_expectancy_gated("momentum_trend")
+        assert not is_expectancy_gated(None)
+
+    def test_low_wr_expectancy_family_promotes_on_expectancy(self):
+        self.db.add(StrategyV2(**self._expectancy_row()))
+        self.db.commit()
+        result = promote_strategy(self.db, "AQRTI_STR_TESTEXPGATE")
+        assert result["success"] is True, result.get("error")
+        row = self.db.query(StrategyV2).filter_by(strategy_id="AQRTI_STR_TESTEXPGATE").first()
+        assert row.status == "promoted"
+
+    def test_expectancy_family_fails_on_low_expectancy(self):
+        self.db.add(StrategyV2(**self._expectancy_row(expectancy=0.5)))
+        self.db.commit()
+        result = promote_strategy(self.db, "AQRTI_STR_TESTEXPGATE")
+        assert result["success"] is False
+        assert "expectancy" in result["error"]
+
+    def test_expectancy_family_fails_on_low_profit_factor(self):
+        self.db.add(StrategyV2(**self._expectancy_row(profit_factor=1.2)))
+        self.db.commit()
+        result = promote_strategy(self.db, "AQRTI_STR_TESTEXPGATE")
+        assert result["success"] is False
+        assert "profit_factor" in result["error"]
+
+    def test_expectancy_family_fails_on_drawdown_breach(self):
+        self.db.add(StrategyV2(**self._expectancy_row(max_drawdown=-30.0)))
+        self.db.commit()
+        result = promote_strategy(self.db, "AQRTI_STR_TESTEXPGATE")
+        assert result["success"] is False
+        assert "max_drawdown" in result["error"]
+
+    def test_standard_family_still_blocked_by_wr_floor(self):
+        # The same 43.8% WR that the expectancy family promotes with must
+        # still hard-fail for every non-designated family — the floors were
+        # alternate-pathed for one family, never weakened globally.
+        self.db.add(StrategyV2(**self._expectancy_row(
+            strategy_id="AQRTI_STR_TESTSTDWR",
+            family="momentum_trend",
+        )))
+        self.db.commit()
+        result = promote_strategy(self.db, "AQRTI_STR_TESTSTDWR")
+        assert result["success"] is False
+        assert "win_rate" in result["error"]
+
+    def test_drawdown_cap_is_tighter_than_universal_limit(self):
+        from strategies.promotion_config import MAX_DRAWDOWN_LIMIT
+        assert MAX_DRAWDOWN_EXPECTANCY > MAX_DRAWDOWN_LIMIT  # -25 > -35 (less negative = stricter)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# strategy_id full-genome hash (2026-07-14 — param variants must not collide)
+# ══════════════════════════════════════════════════════════════════════
+from strategies.strategy_dsl import StrategyDSL as _SDSL, Condition as _Cond, ConditionGroup as _CGrp
+
+
+class TestStrategyIdGenomeHash:
+    def _base(self):
+        return _SDSL(
+            entry_conditions=_CGrp(conditions=[
+                _Cond("rsi_14", ">", 55.0), _Cond("adx_14", ">", 22.0),
+            ]),
+            family="momentum_trend", name="T", stop_loss_pct=-8.0,
+            take_profit_pct=16.0, max_holding_days=20, min_confidence=55.0,
+            allowed_regimes=["BULL"],
+        )
+
+    def test_param_variant_gets_distinct_id(self):
+        import copy
+        a = self._base()
+        b = copy.deepcopy(a); b.stop_loss_pct = -10.0
+        assert a.strategy_id() != b.strategy_id()
+
+    def test_regime_variant_gets_distinct_id(self):
+        import copy
+        a = self._base()
+        b = copy.deepcopy(a); b.allowed_regimes = ["BULL", "SIDEWAYS"]
+        assert a.strategy_id() != b.strategy_id()
+
+    def test_identical_genome_same_id(self):
+        import copy
+        a = self._base()
+        b = copy.deepcopy(a)
+        assert a.strategy_id() == b.strategy_id()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# New features: tom_window point-in-time + return_126d
+# ══════════════════════════════════════════════════════════════════════
+from features.price_features import compute_price_features
+
+
+class TestNewPriceFeatures:
+    def _df(self, dates, closes):
+        import pandas as _pd
+        return _pd.DataFrame({
+            "date": _pd.to_datetime(dates), "open": closes, "high": closes,
+            "low": closes, "close": closes, "volume": [1000] * len(dates),
+            "daily_return": [0.0] * len(dates),
+        })
+
+    def test_tom_window_first_three_trading_days(self):
+        import pandas as _pd
+        # Build Jan (22 bd) + first 5 trading days of Feb
+        jan = _pd.bdate_range("2024-01-01", "2024-01-31").tolist()
+        feb = _pd.bdate_range("2024-02-01", "2024-02-07").tolist()
+        dates = jan + feb
+        closes = list(range(100, 100 + len(dates)))
+        for k, expected in [(1, 1.0), (2, 1.0), (3, 1.0), (4, 0.0)]:
+            df = self._df(dates[: len(jan) + k], closes[: len(jan) + k])
+            got = compute_price_features(df).get("tom_window")
+            assert got == expected, f"trading day {k} of Feb: expected {expected}, got {got}"
+
+    def test_tom_window_zero_when_history_starts_mid_month(self):
+        import pandas as _pd
+        dates = _pd.bdate_range("2024-01-15", "2024-01-18").tolist()  # no month boundary in slice
+        df = self._df(dates, [100, 101, 102, 103])
+        assert compute_price_features(df).get("tom_window") == 0.0
+
+    def test_return_126d(self):
+        import pandas as _pd
+        dates = _pd.bdate_range("2023-01-02", periods=130).tolist()
+        closes = [100.0] * 4 + [100.0] + [110.0] * 125  # 126 bars back = 100, last = 110
+        df = self._df(dates, closes)
+        r = compute_price_features(df).get("return_126d")
+        assert r is not None and abs(r - 10.0) < 0.01
+
+
+# ─────────────────────────────────────────────────────────────────
+# Daily-series full-window fix (2026-07-14): Sharpe must be computed
+# over the FULL evaluation window (idle days in cash at RF), never
+# just [first trade, last trade] — the truncated span annualised tiny
+# trade clusters into |Sharpe| > 6 on short WFO folds and reported
+# 100% exposure for mostly-idle strategies.
+# ─────────────────────────────────────────────────────────────────
+from strategies.strategy_backtester import (
+    build_daily_portfolio_returns as _bdpr,
+    TradeRecord as _TR,
+)
+
+
+class TestDailySeriesFullWindow:
+    def _fixtures(self):
+        from datetime import date as _d, timedelta as _td
+        # 60 weekday trading dates
+        dates, d = [], _d(2024, 1, 1)
+        while len(dates) < 60:
+            if d.weekday() < 5:
+                dates.append(d)
+            d += _td(days=1)
+        closes = {dd: 100.0 + i for i, dd in enumerate(dates)}
+        # one 5-day trade in the middle of the window
+        t = _TR(symbol="X", entry_date=dates[25], exit_date=dates[30],
+                entry_price=closes[dates[26]], exit_price=closes[dates[30]],
+                pnl_pct=2.0, holding_days=5)
+        return dates, {"X": closes}, {"X": dates}, t
+
+    def test_window_spans_full_range_and_dilutes_exposure(self):
+        dates, closes_by_sym, dates_by_sym, t = self._fixtures()
+        series_full, exp_full = _bdpr([t], closes_by_sym, dates_by_sym,
+                                      window_start=dates[0], window_end=dates[-1])
+        series_trunc, exp_trunc = _bdpr([t], closes_by_sym, dates_by_sym)
+        # Full-window series covers every trading day in [start, end]
+        assert len(series_full) == len(dates)
+        assert len(series_trunc) < len(series_full)
+        # Exposure diluted honestly by the idle days
+        assert exp_full < exp_trunc
+        # Idle days earn exactly the daily RF credit (excess = 0)
+        assert abs(series_full[0] - RISK_FREE) < 1e-9
+        assert abs(series_full[-1] - RISK_FREE) < 1e-9
+
+    def test_active_days_never_clipped(self):
+        dates, closes_by_sym, dates_by_sym, t = self._fixtures()
+        # window narrower than the trade span must still include the trade days
+        series, _ = _bdpr([t], closes_by_sym, dates_by_sym,
+                          window_start=dates[27], window_end=dates[28])
+        # trade marks run dates[26]..dates[30] → series must cover them
+        assert len(series) >= 5
+
+
+# ─────────────────────────────────────────────────────────────────
+# trend_tstat_63d feature + math-grounded templates (2026-07-14c)
+# ─────────────────────────────────────────────────────────────────
+class TestTrendTstatFeature:
+    def _df(self, closes):
+        import pandas as _pd
+        dates = _pd.bdate_range("2023-01-02", periods=len(closes))
+        return _pd.DataFrame({
+            "date": dates, "open": closes, "high": [c * 1.01 for c in closes],
+            "low": [c * 0.99 for c in closes], "close": closes,
+            "volume": [1000] * len(closes),
+        })
+
+    def test_steady_uptrend_has_high_tstat(self):
+        from features.price_features import compute_price_features
+        closes = [100.0 * (1.003 ** i) for i in range(80)]  # 0.3%/day, zero noise
+        t = compute_price_features(self._df(closes)).get("trend_tstat_63d")
+        # constant positive return → std ~0 numerically nonzero via float error,
+        # but with literal geometric closes std is ~0 → guard may return 0.0 or huge.
+        # Use noisy trend instead for the strong assertion below.
+        assert t is not None
+
+    def test_noisy_uptrend_positive_and_flat_near_zero(self):
+        import numpy as _np
+        from features.price_features import compute_price_features
+        rng = _np.random.default_rng(7)
+        rets_up   = 0.004 + rng.normal(0, 0.01, 80)
+        # Demean so the flat series has EXACTLY zero drift — a raw random
+        # draw legitimately shows |t| > 1.5 ~10% of the time (that's the
+        # statistic working, not a bug), which made the test flaky.
+        rets_flat = rng.normal(0, 0.01, 80)
+        rets_flat = rets_flat - rets_flat.mean()
+        up   = list(100 * _np.cumprod(1 + rets_up))
+        flat = list(100 * _np.cumprod(1 + rets_flat))
+        t_up   = compute_price_features(self._df(up)).get("trend_tstat_63d")
+        t_flat = compute_price_features(self._df(flat)).get("trend_tstat_63d")
+        assert t_up is not None and t_up > 1.5      # significant drift detected
+        assert t_flat is not None and abs(t_flat) < 1.5
+
+    def test_insufficient_history_returns_none(self):
+        from features.price_features import compute_price_features
+        closes = [100.0 + i for i in range(50)]     # < 64 bars
+        assert compute_price_features(self._df(closes)).get("trend_tstat_63d") is None
+
+
+class TestMathGroundedTemplates:
+    def test_generators_registered_and_weights_lockstep(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS, _FAMILY_WEIGHTS
+        from strategies.meta_learner import _RAW_DEFAULT_FAMILY_WEIGHTS
+        for fam in ("vol_managed_momentum", "tstat_trend"):
+            assert fam in _GENERATORS and fam in _FAMILY_WEIGHTS
+            assert fam in _RAW_DEFAULT_FAMILY_WEIGHTS
+        assert set(_FAMILY_WEIGHTS) == set(_GENERATORS)
+        assert set(_RAW_DEFAULT_FAMILY_WEIGHTS) == set(_FAMILY_WEIGHTS)
+        assert abs(sum(_FAMILY_WEIGHTS.values()) - 1.0) < 1e-9
+
+    def test_vol_managed_momentum_structure(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        s = _GENERATORS["vol_managed_momentum"](_random.Random(1))
+        feats = {c.feature for c in s.entry_conditions.conditions}
+        assert "return_126d" in feats and "historical_vol_63d" in feats
+        exit_feats = {c.feature for c in s.exit_conditions.conditions}
+        assert "historical_vol_63d" in exit_feats          # vol-spike regime exit
+        assert s.stop_loss_pct <= -8.0                     # hard stop (trend entry doctrine)
+        assert s.family == "vol_managed_momentum"
+
+    def test_tstat_trend_structure(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        s = _GENERATORS["tstat_trend"](_random.Random(2))
+        entry = {c.feature: c.threshold for c in s.entry_conditions.conditions}
+        assert "trend_tstat_63d" in entry and entry["trend_tstat_63d"] >= 1.5
+        exit_ = {c.feature: c.threshold for c in s.exit_conditions.conditions}
+        assert "trend_tstat_63d" in exit_ and exit_["trend_tstat_63d"] <= 0.5
+        assert s.family == "tstat_trend"

@@ -116,7 +116,11 @@ def _backtest_unscored(db, max_stocks: int = 300) -> dict:
                 errors += 1
                 continue
 
-            backtest_and_update(db, dsl, start_date=start_date, end_date=end_date)
+            # Stored-row re-backtest: pass the row's stored ID — dsl was
+            # rebuilt from dsl_json, and recomputing strategy_id() (now a
+            # full-genome hash) would mint a different ID -> duplicate row.
+            backtest_and_update(db, dsl, start_date=start_date, end_date=end_date,
+                                strategy_id_override=row.strategy_id)
             tested += 1
         except Exception as exc:
             log.warning("Backtest failed for %s: %s", row.strategy_id, exc)

@@ -32,6 +32,8 @@ log = get_logger("strategy_lifecycle")
 from strategies.promotion_config import (
     PROMOTE_THRESHOLD, RETIRE_THRESHOLD, MIN_BACKTEST_TRADES,
     MIN_WIN_RATE, MIN_SHARPE, REQUIRE_OOS_PASS, MIN_OOS_SHARPE, MIN_OOS_WIN_RATE,
+    is_expectancy_gated, MIN_EXPECTANCY_PCT, MIN_PROFIT_FACTOR_EXPECTANCY,
+    MAX_DRAWDOWN_EXPECTANCY,
     PAPER_WIN_RATE_GATE, BENCHMARK_SHARPE_FACTOR, MAX_TRADE_OVERLAP,
     QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
     MAX_DRAWDOWN_LIMIT,
@@ -202,17 +204,37 @@ def promote_strategy(
         return {"success": False, "error": f"fitness {row.fitness_score} below threshold {PROMOTE_THRESHOLD}"}
     if (row.trade_count or 0) < MIN_TRADES:
         return {"success": False, "error": f"insufficient trades ({row.trade_count})"}
-    if (row.win_rate or 0) < MIN_WIN_RATE:
+    # Win-rate floor — OR the expectancy gate for designated low-WR/
+    # high-payoff families (promotion_config.EXPECTANCY_GATED_FAMILIES,
+    # user decision 2026-07-14). The alternate standard requires ALL of
+    # expectancy/profit-factor/tighter-drawdown; it never applies to any
+    # other family, and every other gate below is unchanged either way.
+    if is_expectancy_gated(row.family):
+        if (row.expectancy or 0) < MIN_EXPECTANCY_PCT:
+            return {"success": False, "error": f"expectancy {row.expectancy or 0:.2f}%/trade below "
+                                               f"{MIN_EXPECTANCY_PCT}% (expectancy-gated family)"}
+        if (row.profit_factor or 0) < MIN_PROFIT_FACTOR_EXPECTANCY:
+            return {"success": False, "error": f"profit_factor {row.profit_factor or 0:.2f} below "
+                                               f"{MIN_PROFIT_FACTOR_EXPECTANCY} (expectancy-gated family)"}
+        if (row.max_drawdown or 0) < MAX_DRAWDOWN_EXPECTANCY:
+            return {"success": False, "error": f"max_drawdown {row.max_drawdown or 0:.1f}% exceeds "
+                                               f"{MAX_DRAWDOWN_EXPECTANCY}% cap (expectancy-gated family)"}
+    elif (row.win_rate or 0) < MIN_WIN_RATE:
         return {"success": False, "error": f"win_rate {row.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"}
     if (row.sharpe or 0) < MIN_SHARPE:
         return {"success": False, "error": f"sharpe {row.sharpe:.2f} below {MIN_SHARPE} threshold"}
     # Out-of-sample HARD gate: strategy must have proven itself on the
     # held-out walk-forward window. None = never OOS-tested → not promotable.
+    # For expectancy-gated families the oos_passed flag itself already
+    # encodes the family-appropriate OOS standard (expectancy/PF instead of
+    # the WR floor — see strategy_backtester._walk_forward_oos_check), so
+    # the explicit MIN_OOS_WIN_RATE re-check below is skipped for them.
     if REQUIRE_OOS_PASS and not row.oos_passed:
         return {"success": False, "error": f"OOS gate failed (oos_passed={row.oos_passed}, oos_wr={row.oos_win_rate})"}
     if REQUIRE_OOS_PASS and (row.oos_sharpe or 0) < MIN_OOS_SHARPE:
         return {"success": False, "error": f"oos_sharpe {row.oos_sharpe or 0:.2f} below {MIN_OOS_SHARPE}"}
-    if REQUIRE_OOS_PASS and (row.oos_win_rate or 0) < MIN_OOS_WIN_RATE:
+    if REQUIRE_OOS_PASS and not is_expectancy_gated(row.family) \
+            and (row.oos_win_rate or 0) < MIN_OOS_WIN_RATE:
         return {"success": False, "error": f"oos_win_rate {row.oos_win_rate or 0:.1f}% below {MIN_OOS_WIN_RATE}% threshold"}
 
     # Benchmark gate: must reach BENCHMARK_SHARPE_FACTOR × buy-and-hold
@@ -341,10 +363,19 @@ def run_lifecycle_sweep(db: Session) -> dict:
         .all()
     )
     for s in candidates:
+        # Pre-filter mirrors promote_strategy's gates: WR floor for standard
+        # families, the expectancy standard for expectancy-gated ones (the
+        # full authoritative check still runs inside promote_strategy).
+        wr_or_expectancy_ok = (
+            ((s.expectancy or 0) >= MIN_EXPECTANCY_PCT
+             and (s.profit_factor or 0) >= MIN_PROFIT_FACTOR_EXPECTANCY)
+            if is_expectancy_gated(s.family)
+            else (s.win_rate or 0) >= MIN_WIN_RATE
+        )
         if (
             (s.fitness_score or 0) >= PROMOTE_THRESHOLD
             and (s.trade_count or 0) >= MIN_TRADES
-            and (s.win_rate or 0) >= MIN_WIN_RATE
+            and wr_or_expectancy_ok
             and (s.sharpe or 0) >= MIN_SHARPE
             and (not REQUIRE_OOS_PASS or (s.oos_passed and (s.oos_sharpe or 0) >= MIN_OOS_SHARPE))
         ):
@@ -404,7 +435,15 @@ def run_lifecycle_sweep(db: Session) -> dict:
         if (s.fitness_score or 100) < RETIRE_THRESHOLD:
             reason = "low_fitness"
             detail = f"fitness={s.fitness_score:.1f} below {RETIRE_THRESHOLD}"
-        elif s.status == "promoted" and (s.win_rate or 0) < MIN_WIN_RATE:
+        elif s.status == "promoted" and is_expectancy_gated(s.family) \
+                and (s.expectancy or 0) < MIN_EXPECTANCY_PCT:
+            # Expectancy-gated families are held to the standard they were
+            # promoted under — expectancy decay, not win-rate decay.
+            reason = "low_expectancy"
+            detail = (f"expectancy={s.expectancy or 0:.2f}%/trade below "
+                      f"{MIN_EXPECTANCY_PCT}% (expectancy-gated family)")
+        elif s.status == "promoted" and not is_expectancy_gated(s.family) \
+                and (s.win_rate or 0) < MIN_WIN_RATE:
             reason = "low_win_rate"
             detail = f"win_rate={s.win_rate:.1f}% below {MIN_WIN_RATE}% threshold"
         elif (s.max_drawdown or 0) < MAX_DRAWDOWN_LIMIT:
