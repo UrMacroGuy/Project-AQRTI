@@ -126,6 +126,11 @@ class NewsEvent(Base):
     impact_score     = Column(Float,      nullable=True)   # 0-100
     importance_score = Column(Float,      nullable=True)   # 0-100
     url              = Column(Text,       nullable=True)
+    # LLM-analysis provenance (migration 0006): when llm_analyzed is True the
+    # sentiment/event_type fields were refined by the NIM batch analyzer
+    # (news/llm_analyzer.py) rather than keyword scoring alone.
+    llm_analyzed     = Column(Boolean,    nullable=False, default=False)
+    llm_relevance    = Column(Float,      nullable=True)   # 0..1 relevance to tagged symbol
 
 
 # ══════════════════════════════════════════════════════════════

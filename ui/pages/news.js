@@ -55,6 +55,7 @@ async function hydrateNews() {
 
   const mapped = data.map(n => ({
     headline:  n.headline,
+    url:       n.url || '',
     source:    n.source || '—',
     company:   n.company || '—',
     sector:    n.sector  || '—',
@@ -62,6 +63,8 @@ async function hydrateNews() {
     impact:    Math.round(n.impact_score ?? n.impactScore ?? 0),
     severity:  impactSeverity(n.impact_score ?? n.impactScore ?? 0),
     sentiment: sentTag(n.sentiment),
+    llm:       !!n.llm_analyzed,
+    relevance: n.llm_relevance,
     time:      n.timestamp ? new Date(n.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—',
   }));
 
@@ -69,11 +72,20 @@ async function hydrateNews() {
   const sevMap     = { critical: 'critical', high: 'high', medium: 'medium', low: 'low' };
 
   function newsItemHTML(item) {
+    // Headline is a real source link when a URL exists; AI badge marks rows
+    // whose sentiment/event_type came from the NIM analyzer (provenance —
+    // unmarked rows are keyword-scored).
+    const headlineHtml = item.url
+      ? `<a href="${item.url}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">${item.headline}</a>`
+      : item.headline;
+    const aiBadge = item.llm
+      ? `<span title="Sentiment/event type refined by LLM analysis${item.relevance != null ? ` — relevance ${Math.round(item.relevance * 100)}%` : ''}" style="font-size:0.62rem;padding:1px 5px;border:1px solid var(--accent);border-radius:3px;color:var(--accent)">AI${item.relevance != null ? ` ${Math.round(item.relevance * 100)}%` : ''}</span>`
+      : '';
     return `
-      <div class="news-item">
+      <div class="news-item" data-symbol="${item.company}">
         <div class="news-impact-badge ${sevMap[item.severity]}">${item.impact}</div>
         <div class="news-content">
-          <div class="news-headline">${item.headline}</div>
+          <div class="news-headline">${headlineHtml}</div>
           <div class="news-meta">
             <span>${item.source}</span>
             <span>${item.company}</span>
@@ -81,6 +93,7 @@ async function hydrateNews() {
             <span>${item.eventType}</span>
             <span>${item.time} IST</span>
             <span class="news-sentiment-tag ${item.sentiment}">${sentLabels[item.sentiment]}</span>
+            ${aiBadge}
           </div>
         </div>
       </div>`;
@@ -94,7 +107,30 @@ async function hydrateNews() {
 
   const feed = el('news-feed');
   if (feed && mapped.length) {
-    feed.innerHTML = mapped.map(newsItemHTML).join('');
+    // Symbol filter chips — one per company present in the feed, "All" first.
+    const symbols = [...new Set(mapped.map(n => n.company).filter(c => c && c !== '—'))].sort();
+    const chips = ['All', ...symbols].map(s =>
+      `<button class="news-sym-chip" data-sym="${s}" style="font-size:0.68rem;padding:3px 9px;border:1px solid var(--border-strong,#444);border-radius:12px;background:transparent;color:var(--text-muted);cursor:pointer">${s}</button>`
+    ).join('');
+    feed.innerHTML =
+      `<div id="news-sym-filter" style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 0 10px">${chips}</div>` +
+      `<div id="news-feed-items">${mapped.map(newsItemHTML).join('')}</div>`;
+
+    const filterBar = el('news-sym-filter');
+    if (filterBar) {
+      filterBar.addEventListener('click', ev => {
+        const btn = ev.target.closest('.news-sym-chip');
+        if (!btn) return;
+        const sym = btn.dataset.sym;
+        filterBar.querySelectorAll('.news-sym-chip').forEach(b => {
+          b.style.borderColor = 'var(--border-strong,#444)'; b.style.color = 'var(--text-muted)';
+        });
+        btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)';
+        document.querySelectorAll('#news-feed-items .news-item').forEach(item => {
+          item.style.display = (sym === 'All' || item.dataset.symbol === sym) ? '' : 'none';
+        });
+      });
+    }
   }
 
   // Rebuild sentiment trend chart from live timestamps

@@ -928,3 +928,92 @@ class TestMathGroundedTemplates:
         exit_ = {c.feature: c.threshold for c in s.exit_conditions.conditions}
         assert "trend_tstat_63d" in exit_ and exit_["trend_tstat_63d"] <= 0.5
         assert s.family == "tstat_trend"
+
+
+# ══════════════════════════════════════════════════════════════
+# NIM news analyzer + live news gate (2026-07-14d news machine)
+# ══════════════════════════════════════════════════════════════
+class TestNewsLLMAnalyzer:
+    def test_extract_json_array_tolerates_fences(self):
+        from news.llm_analyzer import _extract_json_array
+        assert _extract_json_array('[{"id": 1}]') == [{"id": 1}]
+        assert _extract_json_array('```json\n[{"id": 2}]\n```') == [{"id": 2}]
+        assert _extract_json_array('no json here') is None
+        assert _extract_json_array('{"id": 3}') is None  # object, not array
+
+    def test_batch_verdicts_reject_foreign_and_invalid_ids(self, monkeypatch):
+        """Anti-fabrication gate: ids not sent to the LLM are discarded;
+        invalid sentiment labels are discarded; valid rows are kept clamped."""
+        import json as _json
+        from news import llm_analyzer
+
+        class FakeNews:
+            def __init__(self, nid):
+                self.id = nid
+                self.company = "BEL"
+                self.headline = "h" * 20
+                self.summary = None
+
+        batch = [FakeNews(10), FakeNews(11)]
+        reply = _json.dumps([
+            {"id": 10, "sentiment": "positive", "sentiment_score": 5.0,
+             "event_type": "order_win", "relevance": 0.9},          # score clamped to 1.0
+            {"id": 99, "sentiment": "negative", "sentiment_score": -1,
+             "event_type": "other", "relevance": 1},                # foreign id -> dropped
+            {"id": 11, "sentiment": "amazing", "sentiment_score": 0,
+             "event_type": "other", "relevance": 0.5},              # bad label -> dropped
+        ])
+        monkeypatch.setattr(
+            "aqrti.llm.provider.ask", lambda *a, **k: reply
+        )
+        verdicts = llm_analyzer._analyze_batch(batch)
+        assert set(verdicts) == {10}
+        assert verdicts[10]["sentiment_score"] == 1.0      # clamped
+        assert verdicts[10]["event_type"] == "order_win"
+
+
+class TestLiveNewsGate:
+    def _make_db(self):
+        """In-memory session with the real models — same pattern as the
+        promotion-gate tests above."""
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        return _sessionmaker(bind=engine)()
+
+    def _mk_news(self, db, **kw):
+        from aqrti.database.models import NewsEvent
+        from datetime import datetime
+        row = NewsEvent(
+            timestamp=kw.get("timestamp", datetime.utcnow()),
+            headline=kw.get("headline", "Test negative headline for gate"),
+            company=kw.get("company", "BEL"),
+            sentiment=kw.get("sentiment", "negative"),
+            sentiment_score=kw.get("sentiment_score", -0.8),
+            llm_analyzed=kw.get("llm_analyzed", True),
+            llm_relevance=kw.get("llm_relevance", 0.9),
+        )
+        db.add(row); db.commit()
+        return row
+
+    def test_blocks_on_fresh_llm_verified_negative(self):
+        from news.live_news_gate import news_blocks_entry
+        db = self._make_db()
+        self._mk_news(db)
+        blocked, reason = news_blocks_entry(db, "BEL")
+        assert blocked and "negative news" in reason
+
+    def test_ignores_keyword_only_and_low_relevance(self):
+        from news.live_news_gate import news_blocks_entry
+        db = self._make_db()
+        self._mk_news(db, company="NTPC", llm_analyzed=False)          # keyword-only
+        self._mk_news(db, company="INFY", llm_relevance=0.2)           # low relevance
+        assert news_blocks_entry(db, "NTPC") == (False, "")
+        assert news_blocks_entry(db, "INFY") == (False, "")
+
+    def test_ignores_stale_news(self):
+        from news.live_news_gate import news_blocks_entry
+        from datetime import datetime, timedelta
+        db = self._make_db()
+        self._mk_news(db, company="HAL",
+                      timestamp=datetime.utcnow() - timedelta(hours=48))
+        assert news_blocks_entry(db, "HAL") == (False, "")

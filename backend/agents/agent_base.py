@@ -100,6 +100,7 @@ class AgentBase(ABC):
         try:
             self.log.info("[%s] Starting execution", self.agent_id)
             findings = self.run(db)
+            self._attach_llm_brief(findings)
             summary  = self._build_summary(findings)
             self._persist_report(db, findings, task_id)
             self._persist_findings(db, findings)
@@ -132,6 +133,44 @@ class AgentBase(ABC):
     def _build_summary(self, findings: dict) -> str:
         f_list = findings.get("findings", [])
         return findings.get("summary", f"{len(f_list)} findings generated.")
+
+    def _attach_llm_brief(self, findings: dict) -> None:
+        """
+        Refine the rule-based summary into a sharper plain-language brief via
+        the active LLM provider (NVIDIA NIM). One request per agent per cycle
+        (14 agents => ~14 requests/hourly cycle, well inside the 40 RPM
+        budget). Fail-open: any problem leaves the rule-based summary as-is.
+        The brief is explicitly labeled "(AI brief)" per the honesty rule —
+        LLM-derived text must be distinguishable wherever it is displayed.
+        Only fires when there are >=2 findings worth synthesizing.
+        """
+        f_list = findings.get("findings", [])
+        if len(f_list) < 2:
+            return
+        try:
+            from aqrti.llm import provider as llm_provider
+            if not llm_provider.is_configured():
+                return
+            digest = "\n".join(
+                f"- [{f.get('urgency','normal')}] {f.get('title','')}: "
+                f"{(f.get('implication') or f.get('description') or '')[:200]}"
+                for f in f_list[:10]
+            )
+            brief = llm_provider.ask(
+                f"Findings from the '{self.name}' module of an Indian-equities "
+                f"research system:\n{digest}\n\n"
+                "Write a 2-3 sentence executive brief: what matters most, and "
+                "what a careful manual trader should watch or do. Plain "
+                "language, no hedging boilerplate, no invented facts — only "
+                "restate what the findings above support.",
+                temperature=0.3,
+                max_tokens=200,
+            ).strip()
+            if brief:
+                findings["summary_raw"] = findings.get("summary", "")
+                findings["summary"] = f"{brief} (AI brief)"
+        except Exception as exc:
+            self.log.debug("[%s] LLM brief unavailable (fail-open): %s", self.agent_id, exc)
 
     def _persist_report(self, db: Session, findings: dict, task_id: Optional[str]) -> AgentReport:
         report = AgentReport(

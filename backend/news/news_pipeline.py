@@ -76,6 +76,17 @@ def _process_and_store(db: Session, parsed_items) -> tuple[int, int]:
 
         try:
             entities    = extract_entities(item.headline, item.summary)
+            # Symbol-targeted collectors (google_news) searched FOR a specific
+            # company — if the extractor found no symbol in the text (name
+            # variant it doesn't know), the search attribution itself is the
+            # evidence. Only fill the gap; never override an extracted match.
+            hint = getattr(item, "symbol_hint", None)
+            if hint and not entities.get("primary_symbol"):
+                from news.entity_extractor import ENTITY_MAP
+                if hint in ENTITY_MAP:
+                    entities["primary_symbol"] = hint
+                    entities.setdefault("mention_types", {})[hint] = "search_target"
+                    entities["sector"] = entities.get("sector") or ENTITY_MAP[hint][0]
             event_type  = classify_event_str(item.headline, item.summary)
             scores      = compute_impact_scores(
                 headline       = item.headline,
@@ -164,6 +175,8 @@ def get_recent_news(
             "importance_score": r.importance_score,
             "timestamp":        r.timestamp.isoformat() if r.timestamp else None,
             "url":              r.url,
+            "llm_analyzed":     bool(getattr(r, "llm_analyzed", False)),
+            "llm_relevance":    getattr(r, "llm_relevance", None),
         }
         for r in rows
     ]

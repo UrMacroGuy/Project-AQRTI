@@ -238,6 +238,18 @@ def open_position(
         log.warning("Invalid entry price %.4f for %s", entry_price, symbol)
         return None
 
+    # Live news gate — skip NEW entries on symbols with fresh high-conviction
+    # negative news (LLM-verified). Live path only; the backtester has no
+    # such gate by design (see news/live_news_gate.py docstring).
+    try:
+        from news.live_news_gate import news_blocks_entry
+        blocked, reason = news_blocks_entry(db, symbol)
+        if blocked:
+            log.info("News gate blocked entry on %s — %s", symbol, reason)
+            return None
+    except Exception as exc:
+        log.debug("News gate unavailable (fail-open): %s", exc)
+
     # Cost-loaded fill — matches strategy_backtester.py's entry cost model
     filled_price = entry_price * (1 + NSE_BUY_COST_PCT)
     shares    = capital / filled_price

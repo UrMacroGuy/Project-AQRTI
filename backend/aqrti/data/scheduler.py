@@ -71,6 +71,22 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 3 — News failed: %s", exc)
 
+    # Step 3B: NIM batch news analysis — refines keyword sentiment/event_type
+    # on recent curated-symbol articles with LLM judgment (<=6 requests/run,
+    # well inside the shared 40 RPM budget). Runs right after collection so
+    # the sentiment engine and research synthesis downstream see refined
+    # values. LIVE PATH ONLY — never backfills historical rows (see
+    # news/llm_analyzer.py docstring).
+    try:
+        from news.llm_analyzer import analyze_pending_news
+        from aqrti.database.engine import get_db as _get_db_llm
+        with _get_db_llm() as _llm_db:
+            lreport = analyze_pending_news(_llm_db)
+        scheduler_logger.info("Step 3B — NIM news analysis: analyzed=%d requests=%d",
+                              lreport.get("analyzed", 0), lreport.get("requests", 0))
+    except Exception as exc:
+        scheduler_logger.error("Step 3B — NIM news analysis failed: %s", exc)
+
     # Step 4: Sentiment
     try:
         from sentiment.sentiment_engine import run_sentiment_pipeline

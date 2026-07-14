@@ -23,6 +23,7 @@ class ParsedNewsItem:
     url:            str
     published_at:   datetime
     content_hash:   str
+    symbol_hint:    Optional[str] = None   # from symbol-targeted collectors
 
 
 # ══════════════════════════════════════════════════════════════
@@ -57,6 +58,7 @@ def parse_news_item(raw: RawNewsItem) -> Optional[ParsedNewsItem]:
         url          = raw.url.strip()[:1000],
         published_at = pub_at,
         content_hash = raw.content_hash,
+        symbol_hint  = getattr(raw, "symbol_hint", None),
     )
 
 

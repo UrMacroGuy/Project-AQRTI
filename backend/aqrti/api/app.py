@@ -134,7 +134,18 @@ def _boot_features():
 
 def _boot_news():
     from news.news_pipeline import run_news_pipeline
-    return run_news_pipeline()
+    report = run_news_pipeline()
+    # NIM batch analysis of the freshly-collected articles (<=6 requests,
+    # see news/llm_analyzer.py) so boot leaves refined sentiment behind.
+    try:
+        from news.llm_analyzer import analyze_pending_news
+        from aqrti.database.engine import get_db as _get_db
+        with _get_db() as _db:
+            lreport = analyze_pending_news(_db)
+        report["llm_analyzed"] = lreport.get("analyzed", 0)
+    except Exception as exc:
+        api_logger.warning("Boot NIM news analysis failed (non-fatal): %s", exc)
+    return report
 
 
 def _boot_sentiment():

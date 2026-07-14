@@ -40,6 +40,11 @@ class RawNewsItem:
     published_at: datetime
     summary: Optional[str] = None
     content_hash: str = ""     # dedup key: sha256(source+headline)
+    # Set by symbol-targeted collectors (google_news): the curated symbol the
+    # query was FOR. Used only as a fallback when the entity extractor finds
+    # no symbol in the text itself — the article was retrieved by searching
+    # this company's name, so the association is real, not guessed.
+    symbol_hint: Optional[str] = None
 
     def __post_init__(self):
         if not self.content_hash:
@@ -81,6 +86,7 @@ RSS_SOURCES = [
 # Source weight lookup (used by impact_scoring)
 SOURCE_WEIGHTS: dict[str, float] = {s["name"]: s["weight"] for s in RSS_SOURCES}
 SOURCE_WEIGHTS["nse_announcement"] = 1.0   # highest trust
+SOURCE_WEIGHTS["google_news"] = 0.7        # aggregator — underlying outlet varies
 
 
 # ══════════════════════════════════════════════════════════════
@@ -156,6 +162,93 @@ def collect_all_rss() -> List[RawNewsItem]:
 
 
 # ══════════════════════════════════════════════════════════════
+# GOOGLE NEWS — SYMBOL-TARGETED SCRAPER
+# ══════════════════════════════════════════════════════════════
+# The 5 generic market feeds above skew heavily toward banks/IT megacaps;
+# BEL/NTPC/CDSL/DRREDDY/LT/HAL got near-zero coverage from them (confirmed
+# 2026-07-12: entity_mentions had 0 rows for all six). Google News RSS
+# search is free, keyless, and returns per-company articles from hundreds
+# of Indian outlets — this is the coverage fix for the research funnel.
+_GOOGLE_NEWS_URL = (
+    "https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+)
+_MAX_ITEMS_PER_SYMBOL = 15   # per-symbol cap — recency matters more than depth
+
+
+def _symbol_queries() -> dict[str, str]:
+    """
+    Build one Google News query per curated NSE symbol from the entity map's
+    primary (longest, most specific) alias, quoted for exact-phrase matching,
+    with 'NSE OR stock' to bias toward market coverage. Sector pseudo-symbols
+    (__IT__ etc.) are excluded.
+    """
+    from news.entity_extractor import ENTITY_MAP
+    queries: dict[str, str] = {}
+    for sym, (_sector, aliases) in ENTITY_MAP.items():
+        if sym.startswith("__"):
+            continue
+        primary = max(aliases, key=len)   # most specific alias
+        queries[sym] = f'"{primary}" (NSE OR stock OR shares)'
+    return queries
+
+
+def collect_google_news_for_symbols() -> List[RawNewsItem]:
+    """
+    Fetch Google News RSS per curated symbol. Each item carries symbol_hint
+    so the pipeline can attribute it even when the headline uses a name
+    variant the entity extractor doesn't know.
+    """
+    import urllib.parse
+
+    items: List[RawNewsItem] = []
+    for sym, query in _symbol_queries().items():
+        url = _GOOGLE_NEWS_URL.format(query=urllib.parse.quote(query))
+        try:
+            response = httpx.get(url, timeout=_TIMEOUT, follow_redirects=True,
+                                 headers={"User-Agent": "AQRTI/1.0 (financial research bot)"})
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+        except Exception as exc:
+            log.warning("Google News fetch failed [%s]: %s", sym, exc)
+            continue
+
+        count = 0
+        for elem in root.findall(".//item"):
+            if count >= _MAX_ITEMS_PER_SYMBOL:
+                break
+            try:
+                headline = _text(elem, "title")
+                if not headline:
+                    continue
+                link    = _text(elem, "link") or ""
+                pub_dt  = _parse_date(_text(elem, "pubDate"))
+                if pub_dt is None:
+                    pub_dt = datetime.now(tz=timezone.utc)
+                # Google News wraps the description in tracking HTML — the
+                # parser strips tags later; the <source> tag names the outlet.
+                outlet  = _text(elem, "source")
+                summary = _text(elem, "description")
+
+                items.append(RawNewsItem(
+                    source       = "google_news",
+                    headline     = headline.strip(),
+                    url          = link.strip(),
+                    published_at = pub_dt,
+                    summary      = f"[{outlet}] {summary}" if outlet and summary else summary,
+                    symbol_hint  = sym,
+                ))
+                count += 1
+            except Exception as exc:
+                log.debug("Google News item parse error [%s]: %s", sym, exc)
+                continue
+
+        log.info("[google_news:%s] collected %d items.", sym, count)
+        time.sleep(0.5)   # polite delay between symbol queries
+
+    return items
+
+
+# ══════════════════════════════════════════════════════════════
 # NSE ANNOUNCEMENT SCRAPER
 # ══════════════════════════════════════════════════════════════
 _NSE_CORP_URL = "https://www.nseindia.com/api/corporate-announcements?index=equities"
@@ -227,13 +320,17 @@ def collect_nse_announcements() -> List[RawNewsItem]:
 # FULL COLLECTION RUN
 # ══════════════════════════════════════════════════════════════
 def collect_all_news() -> List[RawNewsItem]:
-    """Collect from all sources — RSS + NSE announcements. Deduplicates."""
-    rss_items = collect_all_rss()
-    nse_items = collect_nse_announcements()
+    """Collect from all sources — RSS + Google News per symbol + NSE announcements."""
+    rss_items    = collect_all_rss()
+    google_items = collect_google_news_for_symbols()
+    nse_items    = collect_nse_announcements()
 
     seen: set[str] = set()
     combined: List[RawNewsItem] = []
-    for item in rss_items + nse_items:
+    # Google/NSE first in the dedup order: when a story appears both in a
+    # generic feed and a symbol-targeted feed, keep the one carrying the
+    # symbol_hint / official-source attribution.
+    for item in google_items + nse_items + rss_items:
         if item.content_hash not in seen:
             seen.add(item.content_hash)
             combined.append(item)
