@@ -37,6 +37,7 @@ from strategies.promotion_config import (
     PAPER_WIN_RATE_GATE, BENCHMARK_SHARPE_FACTOR, MAX_TRADE_OVERLAP,
     QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
     MAX_DRAWDOWN_LIMIT,
+    MC_MAX_BANKRUPTCY_PCT, MIN_DEFLATED_SHARPE_PROB,
 )
 
 DRAWDOWN_LIMIT = MAX_DRAWDOWN_LIMIT     # backwards-compat alias for external importers
@@ -171,13 +172,17 @@ def _trade_overlap_with_promoted(db: Session, strategy_id: str) -> tuple[float, 
                 StrategyV2.asset_class == (this_strat or "stock"))
         .all()
     ]
+    if not peers:
+        return 0.0, None
+    # One query for all peers' trades instead of one query per peer.
+    peer_trades: dict[str, set] = {pid: set() for pid in peers}
+    for pid, sym, entry_date in (
+        db.query(StrategyBacktestTrade.strategy_id, StrategyBacktestTrade.symbol, StrategyBacktestTrade.entry_date)
+        .filter(StrategyBacktestTrade.strategy_id.in_(peers)).all()
+    ):
+        peer_trades[pid].add((sym, entry_date))
     worst, worst_id = 0.0, None
-    for pid in peers:
-        theirs = {
-            (r[0], r[1]) for r in
-            db.query(StrategyBacktestTrade.symbol, StrategyBacktestTrade.entry_date)
-            .filter(StrategyBacktestTrade.strategy_id == pid).all()
-        }
+    for pid, theirs in peer_trades.items():
         if not theirs:
             continue
         jac = len(mine & theirs) / len(mine | theirs)
@@ -236,6 +241,29 @@ def promote_strategy(
     if REQUIRE_OOS_PASS and not is_expectancy_gated(row.family) \
             and (row.oos_win_rate or 0) < MIN_OOS_WIN_RATE:
         return {"success": False, "error": f"oos_win_rate {row.oos_win_rate or 0:.1f}% below {MIN_OOS_WIN_RATE}% threshold"}
+
+    # Overfitting / multiple-testing gate (added 2026-07-14): honest gates
+    # above can still pass on a lucky draw from the strategy-generation
+    # process. Monte Carlo permutation test — if a large share of shuffled
+    # trade-return orderings would have gone bankrupt, the edge depends on a
+    # favorable sequence, not a genuine order-independent effect. Deflated
+    # Sharpe Ratio — the probability the true Sharpe exceeds zero after
+    # correcting for multiple testing and non-normality must clear a high
+    # bar. Both stats are computed in strategy_backtester.compute_metrics()
+    # and persisted on every backtest; None means never computed (e.g. a
+    # pre-migration row) and is treated as not-yet-provable, not as a pass.
+    if row.mc_bankruptcy_pct is None or row.deflated_sharpe is None:
+        return {"success": False, "error": "overfitting diagnostics (mc_bankruptcy_pct/deflated_sharpe) "
+                                           "not computed — re-run backtest before promotion"}
+    if row.mc_bankruptcy_pct > MC_MAX_BANKRUPTCY_PCT:
+        return {"success": False,
+                "error": f"Monte Carlo bankruptcy rate {row.mc_bankruptcy_pct:.1f}% exceeds "
+                         f"{MC_MAX_BANKRUPTCY_PCT}% cap (edge depends on lucky trade ordering)"}
+    if row.deflated_sharpe < MIN_DEFLATED_SHARPE_PROB:
+        return {"success": False,
+                "error": f"deflated Sharpe probability {row.deflated_sharpe:.2f} below "
+                         f"{MIN_DEFLATED_SHARPE_PROB} (P(true Sharpe > 0) too low after "
+                         f"multiple-testing correction)"}
 
     # Benchmark gate: must reach BENCHMARK_SHARPE_FACTOR × buy-and-hold
     # Sharpe over the same backtest window. Worse than doing nothing = not
@@ -346,6 +374,69 @@ def retire_strategy(
         db.rollback()
         log.error("retire_strategy %s failed: %s", strategy_id, exc)
         return {"success": False, "error": str(exc)}
+
+
+def check_quarantine_gate(db: Session, row: StrategyV2) -> list[str]:
+    """
+    Evaluate the paper-trading quarantine gate for a 'promoted' strategy.
+    Returns a list of human-readable failure reasons (empty = gate cleared).
+    Shared by the manual /activate endpoint and the automatic quarantine-sweep
+    scheduler job so both apply the identical real-data standard.
+    """
+    from aqrti.database.models import PaperTrade
+
+    days_promoted = (datetime.utcnow() - row.promoted_at).days if row.promoted_at else 0
+    # Count ONLY genuine shadow trades (the strategy's own DSL exercised
+    # forward, portfolio "strat_<id>") — NOT default-portfolio ML trades
+    # that merely borrowed this strategy's ID for SL/TP params.
+    closed = (
+        db.query(PaperTrade)
+        .filter(PaperTrade.portfolio_name == f"strat_{row.strategy_id}",
+                PaperTrade.is_open == False)
+        .all()
+    )
+    n = len(closed)
+    wins = sum(1 for t in closed if (t.gross_pnl_pct or 0) > 0)
+    wr = wins / n * 100 if n else 0.0
+    net_pnl = sum(t.gross_pnl or 0 for t in closed)
+
+    failures = []
+    if days_promoted < QUARANTINE_MIN_DAYS:
+        failures.append(f"only {days_promoted}/{QUARANTINE_MIN_DAYS} days in quarantine")
+    if n < QUARANTINE_MIN_TRADES:
+        failures.append(f"only {n}/{QUARANTINE_MIN_TRADES} closed paper trades")
+    if n and wr < QUARANTINE_MIN_WIN_RATE and not is_expectancy_gated(row.family):
+        failures.append(f"paper win rate {wr:.1f}% < {QUARANTINE_MIN_WIN_RATE}%")
+    if n and net_pnl <= 0:
+        failures.append(f"paper net P&L {net_pnl:.0f} not positive")
+    return failures
+
+
+def run_quarantine_sweep(db: Session) -> dict:
+    """
+    Automatically activates every 'promoted' strategy that has genuinely
+    cleared the paper-trading quarantine gate (check_quarantine_gate) —
+    the same real-data standard the manual /activate endpoint enforces, just
+    applied on a schedule instead of requiring a UI click. Never forces past
+    the gate and never activates on anything but real closed shadow-paper
+    trades already produced by strategy_shadow_runner.
+    """
+    activated = []
+    candidates = db.query(StrategyV2).filter(StrategyV2.status == "promoted").all()
+    for row in candidates:
+        failures = check_quarantine_gate(db, row)
+        if failures:
+            continue
+        row.status        = "active"
+        row.status_reason = "auto_activated_after_quarantine"
+        row.updated_at    = datetime.utcnow()
+        _log_event(db, row.strategy_id, "strategy_auto_activated",
+                   "Quarantine gate cleared on real paper-trading data — auto-activated.")
+        activated.append(row.strategy_id)
+    if activated:
+        db.commit()
+        log.info("Quarantine sweep: auto-activated %d strategies: %s", len(activated), activated)
+    return {"activated": activated}
 
 
 def run_lifecycle_sweep(db: Session) -> dict:

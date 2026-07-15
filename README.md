@@ -12,7 +12,7 @@ Scrapes real filings, earnings, and news → synthesizes cited research with an 
 ![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)
 ![Frontend](https://img.shields.io/badge/UI-Vanilla%20JS%20%2B%20Chart.js-F7DF1E?logo=javascript&logoColor=black)
 ![LLM](https://img.shields.io/badge/LLM-NVIDIA%20NIM%20%2F%20OpenRouter-76B900?logo=nvidia&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-52%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-121%20passing-brightgreen)
 ![License](https://img.shields.io/badge/use-personal%20research-lightgrey)
 
 </div>
@@ -53,8 +53,8 @@ A fixed, curated 12-instrument portfolio — not a market-wide screen:
 
 1. **Collect** — free official/public sources only: NSE corporate filings, quarterly results, FII/DII flows, financial news RSS (MoneyControl, ET, LiveMint, Business Standard).
 2. **Synthesize** — a free-tier hosted LLM turns each day's events into a structured research note (sentiment, catalysts, risk flags). Every conclusion must cite real source event IDs; fabricated citations are rejected before they touch the database.
-3. **Generate** — algos come from **seven named templates** backed by published research (post-earnings drift, momentum, quality mean-reversion, event catalysts, regime-timed DCA, cross-sectional rotation, regime pullback) — never from random mutation. Evolution tunes parameters *within* templates.
-4. **Validate** — out-of-sample holdout, a hard ≥50% win-rate floor net of 0.28% NSE round-trip costs, a 0.8× NIFTY buy-and-hold Sharpe gate, duplicate detection, 12-fold walk-forward, then ≥60 days of forward-paper quarantine with ≥20 closed trades. Current honest status: **0/7 templates promoted** — and that's the system working, not failing.
+3. **Generate** — algos come from **22 named templates** backed by published research (post-earnings drift, momentum, quality mean-reversion, event catalysts, regime-timed DCA, cross-sectional rotation, 52-week-high breakout, dual momentum, FII flow, ADX trend, delivery accumulation, and more) — never from random mutation. Thresholds are sampled from real measured feature distributions, not guessed ranges. An optional LLM touchpoint proposes parameterizations and reviews graveyard failures, but every proposal is validated against the live feature registry and real data before it can influence generation — a hint that fails validation is silently discarded, never coerced. Evolution tunes parameters *within* templates.
+4. **Validate** — out-of-sample holdout, a hard ≥50% win-rate floor net of 0.28% NSE round-trip costs, a 0.8× NIFTY buy-and-hold Sharpe gate, duplicate detection, 12-fold walk-forward, then ≥60 days of forward-paper quarantine with ≥20 closed trades. Current honest status: the delivery-accumulation template (`accumulation_momentum`) is the first to clear the walk-forward bar (Sharpe 1.05); nothing has cleared full quarantine to `active` yet — most templates are still zero-trade or below the WFO bar, reported honestly rather than massaged.
 5. **Monitor** — promoted algos are audited daily; win-rate decay, drawdown breach, or an unvalidated regime shift auto-demotes them. A monthly allocator ranks live signals for the SIP budget; paper-vs-real reconciliation flags any gap between simulated and actual fills.
 
 ## The dashboard

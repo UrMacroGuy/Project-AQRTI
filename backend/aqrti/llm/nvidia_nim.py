@@ -1,6 +1,6 @@
 """
 NVIDIA NIM LLM client — thin httpx wrapper, OpenAI-compatible API.
-Default model: z-ai/glm-5.2.
+Default model: meta/llama-3.1-8b-instruct.
 
 Usage:
     from aqrti.llm.nvidia_nim import ask, chat
@@ -11,6 +11,13 @@ Usage:
     # Multi-turn
     msgs = [{"role": "user", "content": "What is NIFTY?"}]
     reply = chat(msgs)
+
+Multi-key support (2026-07-15c): NVIDIA_NIM_API_KEY plus optional
+NVIDIA_NIM_API_KEY_2..5 are pooled behind _KeyPool. Each key gets its own
+40 RPM _RateLimiter (unchanged class/semantics) so N keys give N*40 RPM
+headroom. A single-key deployment behaves identically to before this
+change — the pool degenerates to one key, one limiter, no cooldown ever
+triggered by anything but that one key's own 401/429s.
 """
 
 from __future__ import annotations
@@ -28,10 +35,22 @@ from aqrti.utils.logger import get_logger
 log = get_logger("nvidia_nim")
 
 _BASE_URL   = os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
-_API_KEY    = os.getenv("NVIDIA_NIM_API_KEY", "")
-_MODEL      = os.getenv("NVIDIA_NIM_MODEL", "z-ai/glm-5.2")
+_MODEL      = os.getenv("NVIDIA_NIM_MODEL", "meta/llama-3.1-8b-instruct")
 _TIMEOUT    = 60.0  # seconds
 _RATE_LIMIT_RPM = int(os.getenv("NVIDIA_NIM_RATE_LIMIT_RPM", "40"))
+_COOLDOWN_SECONDS = 60.0
+
+# Collect NVIDIA_NIM_API_KEY + NVIDIA_NIM_API_KEY_2..5 (env-driven, no code
+# change needed to add/remove a key — just set/unset the env var).
+_API_KEYS: list[str] = [
+    k for k in (
+        os.getenv("NVIDIA_NIM_API_KEY", ""),
+        os.getenv("NVIDIA_NIM_API_KEY_2", ""),
+        os.getenv("NVIDIA_NIM_API_KEY_3", ""),
+        os.getenv("NVIDIA_NIM_API_KEY_4", ""),
+        os.getenv("NVIDIA_NIM_API_KEY_5", ""),
+    ) if k
+]
 
 
 class _RateLimiter:
@@ -57,19 +76,72 @@ class _RateLimiter:
                     self._calls.popleft()
             self._calls.append(time.monotonic())
 
+    def load(self) -> int:
+        """Current calls in the trailing 60s window — used to pick the least-loaded key."""
+        with self._lock:
+            now = time.monotonic()
+            while self._calls and now - self._calls[0] >= 60.0:
+                self._calls.popleft()
+            return len(self._calls)
 
-_limiter = _RateLimiter(_RATE_LIMIT_RPM)
+
+class _KeyPool:
+    """
+    Round-robins across configured API keys, picking the least-loaded one
+    per call. A key that 401s/429s is marked cooling-down for
+    _COOLDOWN_SECONDS and skipped by acquire() until it expires — with a
+    single key, cooldown just means "wait like before" (no other key to
+    fall back to), identical to pre-multi-key behavior.
+    """
+
+    def __init__(self, keys: list[str], rpm: int):
+        self._keys = keys
+        self._limiters = {k: _RateLimiter(rpm) for k in keys}
+        self._cooldown_until: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _available_keys(self) -> list[str]:
+        now = time.monotonic()
+        with self._lock:
+            return [k for k in self._keys if self._cooldown_until.get(k, 0) <= now]
+
+    def acquire(self) -> str:
+        """Block (via the chosen key's limiter) and return the key to use."""
+        if not self._keys:
+            raise RuntimeError(
+                "NVIDIA_NIM_API_KEY is not set. Add it to backend/.env"
+            )
+        available = self._available_keys() or self._keys   # all cooling down → use least-bad anyway
+        key = min(available, key=lambda k: self._limiters[k].load())
+        self._limiters[key].acquire()
+        return key
+
+    def mark_cooldown(self, key: str) -> None:
+        with self._lock:
+            self._cooldown_until[key] = time.monotonic() + _COOLDOWN_SECONDS
+        log.warning("NVIDIA NIM key ...%s cooling down %ds after 401/429", key[-4:], _COOLDOWN_SECONDS)
+
+    def key_count(self) -> int:
+        return len(self._keys)
 
 
-def _headers() -> dict:
-    if not _API_KEY:
-        raise RuntimeError(
-            "NVIDIA_NIM_API_KEY is not set. Add it to backend/.env"
-        )
+_pool = _KeyPool(_API_KEYS, _RATE_LIMIT_RPM)
+
+
+def _headers(key: str) -> dict:
     return {
-        "Authorization": f"Bearer {_API_KEY}",
+        "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
+
+
+def _post(payload: dict, key: str) -> httpx.Response:
+    with httpx.Client(timeout=_TIMEOUT) as client:
+        return client.post(
+            f"{_BASE_URL}/chat/completions",
+            headers=_headers(key),
+            json=payload,
+        )
 
 
 def chat(
@@ -81,6 +153,11 @@ def chat(
     """
     Send a messages array and return the assistant reply as a string.
     Raises on HTTP error or missing API key.
+
+    On a 401/429 from the chosen key, marks it cooling-down and retries
+    once on a different key (no-op if there's only one key configured —
+    matches old single-key behavior exactly: the retry just fails the
+    same way the original single call would have).
     """
     payload = {
         "model":       model or _MODEL,
@@ -88,13 +165,13 @@ def chat(
         "temperature": temperature,
         "max_tokens":  max_tokens,
     }
-    _limiter.acquire()
-    with httpx.Client(timeout=_TIMEOUT) as client:
-        resp = client.post(
-            f"{_BASE_URL}/chat/completions",
-            headers=_headers(),
-            json=payload,
-        )
+    key = _pool.acquire()
+    resp = _post(payload, key)
+    if resp.status_code in (401, 429) and _pool.key_count() > 1:
+        _pool.mark_cooldown(key)
+        retry_key = _pool.acquire()
+        if retry_key != key:
+            resp = _post(payload, retry_key)
     resp.raise_for_status()
     data = resp.json()
     try:
@@ -122,5 +199,10 @@ def ask(
 
 
 def is_configured() -> bool:
-    """True if the API key env var is set (does not validate the key)."""
-    return bool(_API_KEY)
+    """True if at least one API key env var is set (does not validate the key)."""
+    return bool(_API_KEYS)
+
+
+def key_count() -> int:
+    """Number of configured NVIDIA NIM API keys (for diagnostics/logging)."""
+    return _pool.key_count()

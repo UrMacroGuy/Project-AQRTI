@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -33,8 +34,10 @@ from sqlalchemy.orm import Session
 from aqrti.database.engine import get_session_factory
 from aqrti.database.models import (
     NewsEvent, SentimentRecord, NSECorporateFiling, EarningsEvent, ResearchSynthesis, Stock,
+    NSEInsiderTrading,
 )
 from aqrti.llm import provider as llm_provider
+from aqrti.llm.json_utils import strip_code_fences
 from aqrti.utils.logger import get_logger
 
 log = get_logger("research_synthesizer")
@@ -55,6 +58,10 @@ NEWS_LOOKBACK_DAYS = 30
 SENTIMENT_LOOKBACK_DAYS = 30
 FILING_LOOKBACK_DAYS = 90
 EARNINGS_LOOKBACK_DAYS = 185
+# Insider (PIT) disclosures are sparse and low-frequency (promoter/KMP trades
+# happen irregularly) — 90 days matches FILING_LOOKBACK_DAYS so a thesis can
+# reference the most recent quarter or so of insider activity.
+INSIDER_LOOKBACK_DAYS = 90
 
 VALID_DIRECTIONS = {"bullish", "bearish", "neutral"}
 
@@ -116,11 +123,21 @@ def _collect_sources(db: Session, symbol: str, as_of_date: date) -> dict[str, li
         .all()
     )
 
+    insider_since = as_of_date - timedelta(days=INSIDER_LOOKBACK_DAYS)
+    insider_rows = (
+        db.query(NSEInsiderTrading)
+        .filter(NSEInsiderTrading.symbol == symbol)
+        .filter(NSEInsiderTrading.disclosure_date >= insider_since, NSEInsiderTrading.disclosure_date <= as_of_date)
+        .order_by(NSEInsiderTrading.disclosure_date.desc())
+        .all()
+    )
+
     return {
         "NewsEvent": news_rows,
         "SentimentRecord": sentiment_rows,
         "NSECorporateFiling": filing_rows,
         "EarningsEvent": earnings_rows,
+        "NSEInsiderTrading": insider_rows,
     }
 
 
@@ -135,7 +152,8 @@ def _has_any_sources(sources: dict[str, list]) -> bool:
 def _format_source_line(table: str, row: Any) -> str:
     tag = f"[{table}:{row.id}]"
     if table == "NewsEvent":
-        return f"{tag} {row.timestamp.date()} — {row.headline} (sentiment={row.sentiment}, impact={row.impact_score})"
+        summary = f" — {row.summary}" if row.summary else ""
+        return f"{tag} {row.timestamp.date()} — {row.headline}{summary} (sentiment={row.sentiment}, impact={row.impact_score})"
     if table == "SentimentRecord":
         return f"{tag} {row.timestamp.date()} — score={row.score}, positive={row.positive}, negative={row.negative}, source={row.source}"
     if table == "NSECorporateFiling":
@@ -144,6 +162,13 @@ def _format_source_line(table: str, row: Any) -> str:
         return (
             f"{tag} {row.earnings_date} ({row.quarter or row.period}) — "
             f"revenue_yoy={row.revenue_yoy_pct}%, pat_yoy={row.pat_yoy_pct}%, eps_yoy={row.eps_yoy_pct}%"
+        )
+    if table == "NSEInsiderTrading":
+        return (
+            f"{tag} {row.disclosure_date} — {row.person_name} ({row.person_category or 'unspecified'}) "
+            f"{row.transaction_type or 'other'} {row.quantity or 0} shares "
+            f"(value=INR {row.value_inr or 0}, mode={row.mode_of_acquisition or 'unspecified'}, "
+            f"holding_after={row.shares_after_pct}%)"
         )
     return f"{tag} <unrecognized source row>"
 
@@ -191,22 +216,9 @@ used to form your thesis. Do not invent, guess, or cite any ID that is not shown
 # Response parsing
 # ══════════════════════════════════════════════════════════════
 
-def _strip_code_fences(text: str) -> str:
-    t = text.strip()
-    if t.startswith("```"):
-        # Drop the opening fence line (``` or ```json) and the closing fence.
-        lines = t.split("\n")
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        t = "\n".join(lines).strip()
-    return t
-
-
 def _parse_llm_response(raw_text: str) -> Optional[dict]:
     """Parse the LLM's raw text into a dict. Returns None on any parse failure."""
-    cleaned = _strip_code_fences(raw_text)
+    cleaned = strip_code_fences(raw_text)
     try:
         parsed = json.loads(cleaned)
     except (json.JSONDecodeError, TypeError) as exc:
@@ -245,6 +257,7 @@ def _validate_citations(
         "SentimentRecord": "timestamp",
         "NSECorporateFiling": "filing_date",
         "EarningsEvent": "earnings_date",
+        "NSEInsiderTrading": "disclosure_date",
     }
 
     if not isinstance(cited_ids, list) or len(cited_ids) == 0:
@@ -286,6 +299,90 @@ def _validate_citations(
             continue
 
     return (len(bad_entries) == 0), bad_entries
+
+
+# Matches a number immediately followed by a percent sign: "20%", "-7.6%",
+# "23.5%". Deliberately does NOT match bare numbers ("965 crore", "4,624")
+# since those are far too common (prices, volumes, rupee amounts) to check
+# affordably — percentages are the class of claim most likely to be quietly
+# invented by an LLM compressing several headlines into one bullet, and the
+# cheapest to verify by substring match against the cited source text.
+_PCT_CLAIM_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*%")
+
+
+def _extract_pct_claims(strings: list[str]) -> list[float]:
+    claims: list[float] = []
+    for s in strings:
+        if not isinstance(s, str):
+            continue
+        for m in _PCT_CLAIM_RE.finditer(s):
+            try:
+                claims.append(float(m.group(1)))
+            except ValueError:
+                continue
+    return claims
+
+
+def _cited_source_text(cited_ids: list[dict], shown_sources: dict[str, list]) -> str:
+    """Concatenate the headline/summary/subject text of exactly the rows the
+    LLM cited (not the full shown set) — the text a numeric claim must trace
+    back to in order to count as grounded."""
+    shown_by_key: dict[tuple[str, int], Any] = {}
+    for table, rows in shown_sources.items():
+        for row in rows:
+            shown_by_key[(table, row.id)] = row
+
+    parts: list[str] = []
+    for entry in cited_ids:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            key = (entry.get("table"), int(entry.get("id")))
+        except (TypeError, ValueError):
+            continue
+        row = shown_by_key.get(key)
+        if row is None:
+            continue
+        parts.append(str(getattr(row, "headline", "") or ""))
+        parts.append(str(getattr(row, "summary", "") or ""))
+        parts.append(str(getattr(row, "subject", "") or ""))
+    return " ".join(parts)
+
+
+def _validate_pct_claims_grounded(
+    parsed: dict,
+    cited_ids: list[dict],
+    shown_sources: dict[str, list],
+) -> Optional[str]:
+    """
+    Anti-fabrication check #2: the citation-existence gate (_validate_citations)
+    only proves the LLM cited real, shown, in-window rows — it says nothing
+    about whether the LLM's own prose is faithful to what those rows say. A
+    2026-07-15 finding: an HDFCBANK synthesis's risk_flags claimed "HDFC Bank
+    shares down 20% in 2026 so far", cited 24 real NewsEvent rows, and passed
+    the existence gate cleanly — but no cited row mentions a 20% figure for
+    HDFCBANK at all (real YTD move was ~-16%). Percentages are the cheapest,
+    highest-value class of claim to spot-check: extract every N% mentioned in
+    key_catalysts/risk_flags and require each one to appear verbatim (as a
+    number) somewhere in the concatenated text of the rows actually cited.
+    Not a full fact-checker — just closes the "real citations, invented
+    number" gap this incident exposed.
+    """
+    claim_strings = list(parsed.get("key_catalysts") or []) + list(parsed.get("risk_flags") or [])
+    claimed_pcts = _extract_pct_claims(claim_strings)
+    if not claimed_pcts:
+        return None
+
+    source_text = _cited_source_text(cited_ids, shown_sources)
+    source_pcts = set(_extract_pct_claims([source_text]))
+
+    ungrounded = [p for p in claimed_pcts if p not in source_pcts]
+    if ungrounded:
+        return (
+            f"key_catalysts/risk_flags cite percentage figure(s) {ungrounded} not found in the "
+            f"text of any cited source (cited sources contain: {sorted(source_pcts)})"
+        )
+    return None
 
 
 def _validate_synthesis_fields(parsed: dict) -> Optional[str]:
@@ -347,6 +444,14 @@ def synthesize_symbol(db: Session, symbol: str, as_of_date: date) -> Optional[Re
         )
         return None
 
+    pct_error = _validate_pct_claims_grounded(parsed, cited_ids, sources)
+    if pct_error:
+        log.warning(
+            "research_synthesizer: REJECTED synthesis for %s (%s) — %s",
+            symbol, as_of_date, pct_error,
+        )
+        return None
+
     model_used = f"{llm_provider.active_provider()}:{_active_model_name()}"
 
     existing = (
@@ -402,7 +507,7 @@ def _active_model_name() -> str:
     if active == "openrouter":
         return os.getenv("OPENROUTER_MODEL", "tencent/hy3:free")
     if active == "nvidia_nim":
-        return os.getenv("NVIDIA_NIM_MODEL", "z-ai/glm-5.2")
+        return os.getenv("NVIDIA_NIM_MODEL", "meta/llama-3.1-8b-instruct")
     return "unknown"
 
 

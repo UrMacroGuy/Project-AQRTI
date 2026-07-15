@@ -962,6 +962,13 @@ class StrategyV2(Base):
     oos_win_rate     = Column(Float,      nullable=True)
     oos_trades       = Column(Integer,    nullable=True)
     oos_passed       = Column(Boolean,    nullable=True)
+    # Overfitting / multiple-testing diagnostics (added 2026-07-14) — see
+    # strategies/strategy_metrics.py monte_carlo_permutation_test() and
+    # compute_deflated_sharpe_ratio(). Enforced at promotion by
+    # promotion_config.MC_MAX_BANKRUPTCY_PCT / MIN_DEFLATED_SHARPE_PROB.
+    mc_bankruptcy_pct   = Column(Float,   nullable=True)   # % of shuffled trade orderings that go bust
+    mc_worse_sharpe_pct = Column(Float,   nullable=True)   # % of shuffles with worse Sharpe than actual order
+    deflated_sharpe     = Column(Float,   nullable=True)   # P(true Sharpe > 0), 0..1 — Lopez de Prado DSR
     # Meta
     backtest_start   = Column(Date,       nullable=True)
     backtest_end     = Column(Date,       nullable=True)
@@ -1638,6 +1645,45 @@ class NSECorporateFiling(Base):
     sentiment_score = Column(Float,      nullable=True)   # -1 to 1
     scraped_at      = Column(DateTime,   default=datetime.utcnow)
     created_at      = Column(DateTime,   default=datetime.utcnow)
+
+
+class NSEInsiderTrading(Base):
+    """NSE PIT (Prohibition of Insider Trading, SEBI reg 7(2)) disclosures —
+    real regulatory filings from https://www.nseindia.com/api/corporates-pit,
+    verified live 2026-07-14 (see plans/CHANGELOG.md). Promoter/insider/KMP
+    trades in listed securities, self-reported by the company within the
+    disclosure window mandated by SEBI PIT regulations."""
+    __tablename__ = "nse_insider_trading"
+    __table_args__ = (
+        UniqueConstraint("symbol", "disclosure_date", "person_name", "source_id",
+                          name="uq_nse_insider"),
+        Index("ix_nit_symbol",  "symbol"),
+        Index("ix_nit_date",    "disclosure_date"),
+        Index("ix_nit_person",  "person_name"),
+    )
+
+    id                  = Column(Integer,    primary_key=True, autoincrement=True)
+    symbol              = Column(String(20), nullable=False)
+    company_name        = Column(String(120), nullable=True)
+    disclosure_date     = Column(Date,       nullable=False)  # NSE "date" (intimation-to-exchange date)
+    acq_from_date        = Column(Date,       nullable=True)   # NSE "acqfromDt" — transaction window start
+    acq_to_date          = Column(Date,       nullable=True)   # NSE "acqtoDt" — transaction window end
+    person_name         = Column(String(150), nullable=False)  # NSE "acqName"
+    person_category     = Column(String(40),  nullable=True)   # NSE "personCategory" — Promoter|Promoter Group|Director|KMP|Designated Person|Other|-
+    transaction_type    = Column(String(20),  nullable=True)   # derived from tdpTransactionType/buy-sell values: buy|sell|other
+    mode_of_acquisition = Column(String(40),  nullable=True)   # NSE "acqMode" — Market Purchase|Off Market|ESOP|Gift|etc.
+    security_type       = Column(String(60),  nullable=True)   # NSE "secType"/"securitiesTypePost"
+    quantity             = Column(Float,       nullable=True)   # NSE "secAcq" (shares transacted)
+    value_inr            = Column(Float,       nullable=True)   # NSE "secVal" (transaction value, INR)
+    shares_before_no     = Column(Float,       nullable=True)   # NSE "befAcqSharesNo"
+    shares_before_pct    = Column(Float,       nullable=True)   # NSE "befAcqSharesPer"
+    shares_after_no      = Column(Float,       nullable=True)   # NSE "afterAcqSharesNo"
+    shares_after_pct     = Column(Float,       nullable=True)   # NSE "afterAcqSharesPer"
+    regulation           = Column(String(20),  nullable=True)   # NSE "anex" — e.g. "7(2)"
+    attachment_url       = Column(Text,        nullable=True)   # NSE "xbrl" filing URL
+    source_id            = Column(String(80),  nullable=True)   # NSE "did"+"pid" combo, for dedup
+    scraped_at           = Column(DateTime,    default=datetime.utcnow)
+    created_at           = Column(DateTime,    default=datetime.utcnow)
 
 
 class FIIDIIFlow(Base):
@@ -2506,6 +2552,38 @@ class PortfolioTransaction(Base):
     broker           = Column(String(10), nullable=False)   # zerodha|indmoney|manual
     note             = Column(Text,       nullable=True)
     created_at       = Column(DateTime,   default=datetime.utcnow)
+
+
+class TradeReconciliation(Base):
+    """
+    Read-only bridge/reporting table. Links a live algo suggestion
+    (PaperPosition) to the real transaction that acted on it (PortfolioTransaction),
+    purely for slippage/hesitation reporting — it must never be used to merge
+    or join the two source tables' semantics (CLAUDE.md: real-money tables
+    never mix with paper trading). Rows are written only by the matching
+    function in portfolio/trade_reconciliation.py, never hand-edited.
+    """
+    __tablename__ = "trade_reconciliations"
+    __table_args__ = (
+        Index("ix_tr_symbol", "symbol"),
+        Index("ix_tr_status", "status"),
+    )
+
+    id                    = Column(Integer,    primary_key=True, autoincrement=True)
+    symbol                = Column(String(20), nullable=False)
+    algo_suggestion_id    = Column(Integer,    ForeignKey("paper_positions.id"), nullable=True)
+    algo_suggested_price  = Column(Float,      nullable=False)
+    algo_suggested_date   = Column(Date,       nullable=False)
+    strategy_id           = Column(String(80), nullable=True)
+    strategy_name         = Column(String(120), nullable=True)
+    human_transaction_id  = Column(Integer,    ForeignKey("portfolio_transactions.id"), nullable=True)
+    human_fill_price      = Column(Float,      nullable=True)
+    human_fill_date       = Column(Date,       nullable=True)
+    slippage_pct          = Column(Float,      nullable=True)
+    days_to_fill          = Column(Integer,    nullable=True)
+    outcome_if_taken      = Column(Float,      nullable=True)   # % return had the user entered at the algo's price/date
+    status                = Column(String(20), nullable=False, default="suggested_only")  # suggested_only|matched|skipped
+    created_at            = Column(DateTime,   default=datetime.utcnow)
 
 
 class PortfolioHolding(Base):

@@ -27,6 +27,15 @@ PORTFOLIO_NAME  = "default"
 RISK_FREE_RATE  = 0.067    # ~6.7% annual (Indian T-bill proxy)
 TRADING_DAYS    = 252
 
+# Mirrors paper_portfolio._MAX_PLAUSIBLE_VALUE_RATIO — the peak used for
+# drawdown here is MAX(total_value) over ALL historical EquityCurvePoint
+# rows with no outlier filtering, so one corrupted row (a bad mark-to-market
+# tick that slipped through) permanently sets a false all-time-high and
+# every future day computes an inflated drawdown against it (2026-07-14:
+# a fabricated ~9x total_value produced a -89% "critical drawdown" alert
+# for a portfolio that was actually down <1%).
+_MAX_PLAUSIBLE_VALUE_RATIO = 3.0
+
 
 def _get_nifty_close(db: Session) -> Optional[float]:
     """Fetch today's Nifty50 close from IndexData, falling back to yfinance."""
@@ -78,6 +87,22 @@ def record_equity_point(
     daily_ret   = 0.0
     cum_ret     = 0.0
     drawdown    = 0.0
+
+    # Reject an implausible jump vs the last recorded point outright — a bad
+    # mark-to-market tick must never become part of the permanent equity
+    # curve history, since the drawdown calc below treats every historical
+    # total_value as a candidate all-time-high peak with no outlier check.
+    if prev and prev.total_value:
+        ratio = max(total_value, prev.total_value) / max(min(total_value, prev.total_value), 1e-9)
+        if ratio > _MAX_PLAUSIBLE_VALUE_RATIO:
+            log.warning(
+                "Rejected implausible equity curve point for %s: prev=%.2f new=%.2f "
+                "(ratio=%.1fx > %.1fx) — not persisting, falling back to last known-good value",
+                today, prev.total_value, total_value, ratio, _MAX_PLAUSIBLE_VALUE_RATIO,
+            )
+            total_value = prev.total_value
+            cash        = prev.cash
+            invested    = prev.invested
 
     if prev and prev.date < today:
         daily_ret = (total_value - prev.total_value) / prev.total_value * 100 if prev.total_value else 0.0

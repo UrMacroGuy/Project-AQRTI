@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from aqrti.database.engine import get_db_dependency
 from portfolio.paper_real_reconciliation import reconcile
+from portfolio.trade_reconciliation import get_reconciliation_report
 
 router = APIRouter()
 
@@ -36,3 +37,15 @@ def get_reconciliation(
     their first real transaction — never fabricates a comparison.
     """
     return reconcile(db, lookback_days=lookback_days)
+
+
+@router.get("/trades")
+def get_trade_reconciliation(db: Session = Depends(get_db_dependency)):
+    """
+    Algo-suggested vs human-executed reconciliation: per-suggestion market
+    slippage (algo entry price vs the user's actual recorded fill) and
+    human-override drag (suggestions skipped, or entered late). Returns an
+    honest empty summary until the user records real transactions —
+    suggestions, not advice; the user decides what to trade.
+    """
+    return get_reconciliation_report(db)

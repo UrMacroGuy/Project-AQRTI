@@ -44,7 +44,8 @@ def _kill_listeners_on_port(port: int) -> list[int]:
     killed = []
     try:
         out = subprocess.check_output(
-            ["netstat", "-ano", "-p", "TCP"], text=True, errors="ignore"
+            ["netstat", "-ano", "-p", "TCP"], text=True, errors="ignore",
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
     except Exception:
         return killed
@@ -58,6 +59,7 @@ def _kill_listeners_on_port(port: int) -> list[int]:
             subprocess.run(
                 ["taskkill", "/F", "/PID", str(pid)],
                 capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
             killed.append(pid)
         except Exception:

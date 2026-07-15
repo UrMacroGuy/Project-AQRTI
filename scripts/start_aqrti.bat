@@ -29,4 +29,8 @@ echo before the dashboard shows full data.
 echo.
 echo To stop AQRTI, use the "Stop AQRTI" shortcut on your Desktop.
 echo.
-pause
+:: No `pause` here — this window is launched hidden (see the "Start AQRTI"
+:: shortcut, WindowStyle=7/Minimized via start_aqrti_launch.vbs) and a
+:: pause on a window nobody can see just leaves an orphaned cmd.exe process
+:: sitting forever waiting for a keypress that will never come.
+timeout /t 2 /nobreak >nul

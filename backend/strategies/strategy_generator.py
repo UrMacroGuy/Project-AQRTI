@@ -56,6 +56,23 @@ REGIME_MARKOV_SIDEWAYS = REGIME_MARKOV_CODES["SIDEWAYS"]
 
 # ── Feature pools by category ─────────────────────────────────
 
+# Phase A fix (2026-07-15c): every name below is registered in
+# feature_registry.FEATURE_CATALOG. The previous pools referenced ~20 names
+# that were never computed (delivery_pct, price_above_ema50, sentiment_score,
+# stoch_k, bb_width_20, vwap_distance, hv_percentile_252d, pattern_confidence,
+# similarity_score, regime_confidence, vol_ratio_short_long, etc.) —
+# Condition.evaluate (strategy_dsl.py) returns False on a missing feature, so
+# any condition built from those names silently never fires. Mapping used:
+# delivery_pct -> delivery_ratio (rescaled 0-100 -> 0-1, see volume_features.py),
+# price_above_ema50 -> price_vs_ema50_pct > 0, ema20_above_ema50 -> ma_spread > 0,
+# volume_surge_flag -> volume_spike, institutional_flow_proxy ->
+# institutional_flow_signal, bb_width_20 -> vol_expansion/vol_compression,
+# realized_vol_20d -> rolling_vol_21d, stoch_k -> rsi_14, sentiment_* ->
+# research_sentiment/research_confidence, breadth_pct ->
+# breadth_pct_above_ema50, nifty_trend_score -> nifty_return_21d. Dropped
+# entirely (no honest replacement): vwap_distance, hv_percentile_252d,
+# pattern_confidence, similarity_score, regime_confidence,
+# vol_ratio_short_long.
 PRICE_FEATURES = [
     "return_1d", "return_5d", "return_21d", "return_126d",
     "momentum_10d", "momentum_20d",
@@ -63,31 +80,25 @@ PRICE_FEATURES = [
     "support_distance_20d", "resistance_distance_20d",
 ]
 VOLUME_FEATURES = [
-    "volume_ratio_20d", "delivery_pct", "volume_surge_flag",
-    "vwap_distance", "institutional_flow_proxy",
+    "volume_ratio_20d", "volume_ratio_5d", "relative_volume",
+    "delivery_ratio", "volume_spike",
+    "obv_slope_10d", "accumulation_score_5d",
 ]
 VOLATILITY_FEATURES = [
-    "atr_14", "bb_width_20", "realized_vol_20d", "vol_ratio_short_long",
-    "hv_percentile_252d", "historical_vol_63d",
+    "atr_14", "atr_pct_14", "rolling_vol_21d", "vol_expansion", "vol_compression",
+    "historical_vol_63d",
 ]
 TREND_FEATURES = [
-    "ema_20", "ema_50", "macd_signal", "adx_14", "rsi_14", "stoch_k",
-    "price_above_ema50", "ema20_above_ema50",
-    "price_vs_ema21_pct", "price_vs_ema50_pct", "price_vs_ema200_pct",
-    "ma_20_slope", "ma_spread", "close_ma20_diff", "trend_tstat_63d",
-]
-SENTIMENT_FEATURES = [
-    "sentiment_score", "sentiment_velocity", "news_impact_score",
-    "sector_sentiment_score",
-]
-PATTERN_FEATURES = [
-    "pattern_confidence", "similarity_score",
+    "ema_21", "ema_50", "macd_signal", "adx_14", "rsi_14",
+    "price_vs_ema50_pct", "ma_spread",
+    "price_vs_ema21_pct", "price_vs_ema200_pct",
+    "ma_20_slope", "close_ma20_diff", "trend_tstat_63d",
 ]
 REGIME_FEATURES = [
-    "regime_confidence", "breadth_pct", "nifty_trend_score",
+    "breadth_pct_above_ema50", "nifty_return_21d",
     # GO-5b cross-sectional / breadth features
     "nifty_rs_21d", "sector_rs_21d", "relative_strength_nifty_21d",
-    "breadth_pct_above_ema50", "breadth_pct_above_ema200",
+    "breadth_pct_above_ema200",
     # Markov observable-chain regime label (backend/markov module)
     "regime_markov",
     # Calendar/seasonality flag (turn-of-month) — grouped here alongside the
@@ -123,6 +134,58 @@ REGIME_SETS = {
 
 def _make_condition(feature: str, op: str, threshold: float, weight: float = 1.0) -> Condition:
     return Condition(feature=feature, operator=op, threshold=threshold, weight=weight)
+
+
+# ── Distribution-based threshold sampling (Phase E, 2026-07-15c) ───────
+# Module-level context set by generate_candidates() before each gen_fn(rng)
+# call, so individual templates can opt into real-quantile sampling without
+# changing their call signature (every caller — tests, walk_forward_templates.py,
+# generate_candidates itself — invokes gen_fn(rng) with no extra args).
+# Always None outside generate_candidates(), so every generator stays
+# unit-testable with rng only (plan requirement).
+_CURRENT_FEATURE_STATS: dict | None = None
+
+# Features whose thresholds are quantile-sampled somewhere in the templates
+# below — generate_candidates() only queries these (not the whole registry)
+# to keep the per-cycle DB cost bounded.
+_QUANTILE_SAMPLED_FEATURES = [
+    "delivery_ratio", "volume_ratio_20d", "nifty_rs_21d", "sector_rs_21d",
+    "return_21d", "return_126d", "momentum_20d", "rolling_vol_21d",
+    "adx_14", "atr_pct_14", "accumulation_score_5d",
+]
+
+
+def _sample_threshold(
+    rng:  random.Random,
+    feature: str,
+    side: str,        # "high" (sample from upper quantiles, e.g. entry > x) or "low"
+    lo:   float,
+    hi:   float,
+    ndigits: int = 2,
+) -> float:
+    """
+    Sample a threshold from the feature's measured quantile distribution
+    when available (module-level _CURRENT_FEATURE_STATS, set by
+    generate_candidates), falling back to a uniform draw in [lo, hi]
+    otherwise — identical to every template's pre-Phase-E behavior. Never
+    fabricates a distribution: falls back whenever stats are missing for
+    this exact feature.
+    """
+    stats = (_CURRENT_FEATURE_STATS or {}).get(feature) if _CURRENT_FEATURE_STATS else None
+    if not stats:
+        return round(rng.uniform(lo, hi), ndigits)
+
+    if side == "high":
+        # Entry condition on the strong/upper side of the distribution — draw
+        # between the median and the 90th percentile (measured, not guessed).
+        band_lo, band_hi = stats.get("q50"), stats.get("q90")
+    else:
+        band_lo, band_hi = stats.get("q10"), stats.get("q50")
+
+    if band_lo is None or band_hi is None or band_lo >= band_hi:
+        return round(rng.uniform(lo, hi), ndigits)
+
+    return round(rng.uniform(band_lo, band_hi), ndigits)
 
 
 def _rand_confidence(rng: random.Random, lo: float = 52.0, hi: float = 68.0) -> float:
@@ -601,17 +664,23 @@ def _generate_rl_momentum(rng: random.Random) -> StrategyDSL:
 
 def _generate_institutional_flow(rng: random.Random) -> StrategyDSL:
     """
-    Ride institutional accumulation: high delivery %, volume surge,
+    Ride institutional accumulation: high delivery ratio, volume surge,
     price above EMA50. When big money is buying, follow.
+
+    Phase A fix (2026-07-15c): delivery_pct (0-100 scale, never computed)
+    -> delivery_ratio (0-1 scale, feature_registry.py — dv/tv of raw
+    volumes, see volume_features.py) with thresholds rescaled /100;
+    price_above_ema50 == 1.0 (no such boolean feature) -> price_vs_ema50_pct
+    > 0 (the actual computed % deviation from EMA50).
     """
-    del_th  = round(rng.uniform(60, 78), 1)    # >60% delivery = genuine buying
-    vol_th  = round(rng.uniform(1.4, 2.5), 2)  # volume surge
+    del_th  = _sample_threshold(rng, "delivery_ratio", "high", 0.60, 0.78, ndigits=3)  # >60-78% delivery = genuine buying
+    vol_th  = _sample_threshold(rng, "volume_ratio_20d", "high", 1.4, 2.5)             # volume surge
     n_conds = rng.randint(3, 4)
 
     conds = [
-        _make_condition("delivery_pct", ">", del_th),
+        _make_condition("delivery_ratio", ">", del_th),
         _make_condition("volume_ratio_20d", ">", vol_th),
-        _make_condition("price_above_ema50", "==", 1.0),
+        _make_condition("price_vs_ema50_pct", ">", 0.0),
     ]
     if n_conds >= 4:
         conds.append(_make_condition("rsi_14", ">", round(rng.uniform(48, 60), 1)))
@@ -638,8 +707,8 @@ def _generate_relative_strength(rng: random.Random) -> StrategyDSL:
     Hold 20-40 days to amortize NSE's 0.28% round-trip cost (cost drag / hold_days
     falls with longer hold; at 30d hold it's ~0.009%/day vs edge of ~0.05%+/day).
     """
-    rs_nifty_th  = round(rng.uniform(1.5, 5.0), 2)   # stock outperforms NIFTY by X% over 21d
-    rs_sector_th = round(rng.uniform(0.5, 3.0), 2)   # stock outperforms sector by Y% over 21d
+    rs_nifty_th  = _sample_threshold(rng, "nifty_rs_21d", "high", 1.5, 5.0)   # stock outperforms NIFTY by X% over 21d
+    rs_sector_th = _sample_threshold(rng, "sector_rs_21d", "high", 0.5, 3.0) # stock outperforms sector by Y% over 21d
     n_conds      = rng.randint(2, 4)
 
     conds = [
@@ -648,7 +717,8 @@ def _generate_relative_strength(rng: random.Random) -> StrategyDSL:
     ]
     if n_conds >= 3:
         # Confirm trend is intact — not entering on a dead-cat bounce
-        conds.append(_make_condition("price_above_ema50", "==", 1.0))
+        # (Phase A fix 2026-07-15c: price_above_ema50 == 1.0 -> price_vs_ema50_pct > 0)
+        conds.append(_make_condition("price_vs_ema50_pct", ">", 0.0))
     if n_conds >= 4:
         # Volume confirms accumulation, not rotation out of sector
         conds.append(_make_condition("volume_ratio_20d", ">", round(rng.uniform(1.1, 1.6), 2)))
@@ -728,7 +798,7 @@ def _generate_long_hold_momentum(rng: random.Random) -> StrategyDSL:
 
     # 3-month momentum as primary; fall back to 21d if 63d not in feature set
     mom_feat   = rng.choice(["return_21d", "momentum_20d", "relative_strength_nifty_21d"])
-    mom_th2    = round(rng.uniform(3.0, 8.0), 2)
+    mom_th2    = _sample_threshold(rng, mom_feat, "high", 3.0, 8.0)
 
     conds = [
         _make_condition(mom_feat, ">", mom_th2, weight=1.2),
@@ -737,9 +807,11 @@ def _generate_long_hold_momentum(rng: random.Random) -> StrategyDSL:
         conds.append(_make_condition("rsi_14", ">", round(rng.uniform(50, 62), 1)))
     if n_conds >= 3:
         # High delivery = genuine buying, not speculation
-        conds.append(_make_condition("delivery_pct", ">", round(rng.uniform(55, 72), 1)))
+        # (Phase A fix 2026-07-15c: delivery_pct 0-100 -> delivery_ratio 0-1)
+        conds.append(_make_condition("delivery_ratio", ">", round(rng.uniform(55, 72) / 100.0, 3)))
     if n_conds >= 4:
-        conds.append(_make_condition("price_above_ema50", "==", 1.0))
+        # price_above_ema50 == 1.0 -> price_vs_ema50_pct > 0
+        conds.append(_make_condition("price_vs_ema50_pct", ">", 0.0))
 
     exit_ = ConditionGroup(conditions=[
         _make_condition(mom_feat, "<", round(-rng.uniform(1.0, 3.0), 2)),   # momentum reversal
@@ -931,6 +1003,221 @@ def _generate_tstat_trend(rng: random.Random) -> StrategyDSL:
     )
 
 
+def _generate_breakout_volume_confirmed(rng: random.Random) -> StrategyDSL:
+    """
+    52-week-high breakout with volume confirmation — the 52wk-high effect
+    (George & Hwang 2004) is separately robust on NSE (SSRN, 2004-2023 NSE
+    data, per CLAUDE.md). Unlike week52_high_momentum (which enters near the
+    high with a 6-month return confirmation), this template requires the
+    stock to be making a genuine NEW breakout (small positive
+    breakout_distance_52w) on above-average volume — the volume filter is
+    the classic technical confirmation that separates a real breakout from a
+    low-conviction drift into the high. Trend entry -> hard stop is
+    doctrine-appropriate (lab: hard stops degrade mean-reversion, not trend).
+    """
+    brk_th  = round(rng.uniform(-1.0, 1.5), 2)   # near/at/just past the 52w high (signed — not quantile-sampled)
+    vol_th  = _sample_threshold(rng, "volume_ratio_20d", "high", 1.3, 2.2)   # above-average volume confirms breakout
+    n_conds = rng.randint(2, 3)
+
+    conds = [
+        _make_condition("breakout_distance_52w", ">", brk_th),
+        _make_condition("volume_ratio_20d", ">", vol_th, weight=1.1),
+    ]
+    if n_conds >= 3:
+        conds.append(_make_condition("adx_14", ">", round(rng.uniform(20, 28), 1)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("breakout_distance_52w", "<", round(-rng.uniform(3.0, 6.0), 2)),
+    ])
+
+    sl = round(-rng.uniform(7, 11), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "breakout_volume_confirmed",
+        name             = f"BrkVol_{brk_th}_{vol_th}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = rng.randint(15, 40),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_dual_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    Antonacci dual momentum (absolute + relative) — "Dual Momentum Investing"
+    (2014). Combines absolute momentum (the stock's own trailing 6-month
+    return must be positive — a trend filter) with relative momentum (the
+    stock must also be outperforming NIFTY over the shorter 21d window,
+    confirming current-leg strength) and a volatility cap so the combination
+    isn't chasing a name whose recent trend was a single violent spike.
+    6-12mo momentum replicates on NSE (Sehgal & Balakrishnan; ~8%/yr alpha
+    on Nifty 500, 2005-2022, per CLAUDE.md). Exit when EITHER leg of the
+    dual-momentum thesis fails.
+    """
+    abs_th = _sample_threshold(rng, "return_126d", "high", 3.0, 10.0)    # absolute 6m momentum floor
+    rel_th = _sample_threshold(rng, "nifty_rs_21d", "high", 1.0, 4.0)    # relative (vs NIFTY) 21d confirmation
+    vol_cap = _sample_threshold(rng, "rolling_vol_21d", "low", 28.0, 38.0, ndigits=1)  # calm-to-moderate vol regime only
+    n_conds = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("return_126d", ">", abs_th, weight=1.2),
+        _make_condition("nifty_rs_21d", ">", rel_th),
+        _make_condition("rolling_vol_21d", "<", vol_cap),
+    ]
+    if n_conds >= 4:
+        conds.append(_make_condition("rsi_14", ">", round(rng.uniform(48, 60), 1)))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("return_126d", "<", 0.0),          # absolute momentum failed
+        _make_condition("nifty_rs_21d", "<", round(-rng.uniform(0.5, 2.0), 2)),  # relative momentum failed
+    ], logic="OR")
+
+    sl = round(-rng.uniform(8, 12), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "dual_momentum",
+        name             = f"DualMom_A{abs_th}_R{rel_th}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = rng.randint(20, 45),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_fii_flow_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    FII net-flow following with technical confirmation. Documented
+    flow-follows-return causality on NSE large-caps — but per CLAUDE.md,
+    "event drift... always paired with a technical confirmation, never news
+    alone", so this template NEVER fires on flow data by itself: it requires
+    both the 5d and 20d FII flow windows positive (persistent buying, not a
+    single noisy day) AND the majority institutional signal bullish AND a
+    price/momentum technical confirmation (price above EMA50 + positive 20d
+    momentum).
+    """
+    fii5_th  = round(rng.uniform(0.0, 500.0), 1)    # positive 5d FII net flow (crores) — signed floor, not quantile-sampled
+    fii20_th = round(rng.uniform(0.0, 1500.0), 1)   # positive 20d FII net flow (crores)
+    mom_th   = _sample_threshold(rng, "momentum_20d", "high", 1.0, 4.0)
+    n_conds  = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("fii_net_5d", ">", fii5_th),
+        _make_condition("fii_net_20d", ">", fii20_th),
+        _make_condition("institutional_flow_signal", "==", 1),
+    ]
+    if n_conds >= 4:
+        conds.append(_make_condition("price_vs_ema50_pct", ">", 0.0))
+    conds.append(_make_condition("momentum_20d", ">", mom_th))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("institutional_flow_signal", "==", -1),   # flow turns bearish
+        _make_condition("momentum_20d", "<", round(-rng.uniform(2.0, 5.0), 2)),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(7, 11), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "fii_flow_momentum",
+        name             = f"FIIFlow_{fii5_th}_{fii20_th}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = rng.randint(15, 35),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_adx_trend_vol_filtered(rng: random.Random) -> StrategyDSL:
+    """
+    Wilder ADX/DI trend-following system with a volatility filter — classic
+    trend-following on liquid equities (Wilder 1978), which matches this
+    universe's documented short-term-momentum lean (CLAUDE.md: short-term
+    reversal in India concentrates in ILLIQUID stocks; our liquid large-caps
+    lean toward momentum). Entry requires ADX above the trending threshold
+    (directional strength, not chop) AND DI+ dominant (uptrend direction)
+    AND positive MACD histogram (momentum confirmation) AND an ATR% cap so
+    the trend isn't a single volatile spike. Hard stops are appropriate —
+    trend/momentum entry per lab doctrine.
+    """
+    adx_th  = _sample_threshold(rng, "adx_14", "high", 20, 30, ndigits=1)
+    atr_cap = _sample_threshold(rng, "atr_pct_14", "low", 3.5, 6.0)
+    n_conds = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("adx_14", ">", adx_th, weight=1.2),
+        _make_condition("di_plus_minus", ">", 0.0),
+        _make_condition("macd_histogram", ">", 0.0),
+    ]
+    if n_conds >= 4:
+        conds.append(_make_condition("atr_pct_14", "<", atr_cap))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("di_plus_minus", "<", 0.0),           # trend direction reversed
+        _make_condition("macd_histogram", "<", 0.0),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(8, 12), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways", "all_weather"])],
+        family           = "adx_trend_vol_filtered",
+        name             = f"ADXTrend_{adx_th}_{atr_cap}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = rng.randint(15, 40),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
+def _generate_accumulation_momentum(rng: random.Random) -> StrategyDSL:
+    """
+    OBV/delivery accumulation confirming momentum — India's mandatory
+    delivery-percentage reporting is a data advantage most markets don't
+    have (genuine committed-capital buying vs speculative volume). Entry
+    requires a rising On-Balance-Volume trend (obv_slope_10d > 0, smart-money
+    accumulation), a high accumulation score (more volume on up-days than
+    down-days over 5d), elevated delivery ratio (real buying, not
+    intraday churn), and positive medium-term momentum as the technical
+    confirmation this isn't accumulation into a still-falling stock.
+    """
+    accum_th = _sample_threshold(rng, "accumulation_score_5d", "high", 0.55, 0.70, ndigits=3)  # >55-70% volume on up-days
+    del_th   = _sample_threshold(rng, "delivery_ratio", "high", 0.55, 0.70, ndigits=3)         # elevated delivery ratio
+    ret_th   = _sample_threshold(rng, "return_21d", "high", 1.0, 4.0)
+    n_conds  = rng.randint(3, 4)
+
+    conds = [
+        _make_condition("obv_slope_10d", ">", 0.0, weight=1.1),
+        _make_condition("accumulation_score_5d", ">", accum_th),
+        _make_condition("return_21d", ">", ret_th),
+    ]
+    if n_conds >= 4:
+        conds.append(_make_condition("delivery_ratio", ">", del_th))
+
+    exit_ = ConditionGroup(conditions=[
+        _make_condition("obv_slope_10d", "<", 0.0),
+        _make_condition("return_21d", "<", round(-rng.uniform(2.0, 5.0), 2)),
+    ], logic="OR")
+
+    sl = round(-rng.uniform(8, 12), 1)
+    return StrategyDSL(
+        entry_conditions = ConditionGroup(conditions=conds),
+        exit_conditions  = exit_,
+        allowed_regimes  = REGIME_SETS[rng.choice(["bull_only", "bull_sideways"])],
+        family           = "accumulation_momentum",
+        name             = f"AccumMom_{accum_th}_{del_th}",
+        min_confidence   = _rand_confidence(rng, 54.0, 68.0),
+        max_holding_days = rng.randint(15, 35),
+        stop_loss_pct    = sl,
+        take_profit_pct  = _rr_take_profit(rng, sl, 2.0),
+    )
+
+
 _GENERATORS = {
     # Named, research-backed templates (replace the old 8 generic random families)
     "post_earnings_drift":     _generate_post_earnings_drift,
@@ -956,6 +1243,12 @@ _GENERATORS = {
     # significance filter on 63d drift, Moskowitz-Ooi-Pedersen lineage)
     "vol_managed_momentum": _generate_vol_managed_momentum,
     "tstat_trend":          _generate_tstat_trend,
+    # Evidence-based additions (2026-07-15c) — see each docstring for citations
+    "breakout_volume_confirmed": _generate_breakout_volume_confirmed,
+    "dual_momentum":             _generate_dual_momentum,
+    "fii_flow_momentum":         _generate_fii_flow_momentum,
+    "adx_trend_vol_filtered":    _generate_adx_trend_vol_filtered,
+    "accumulation_momentum":     _generate_accumulation_momentum,
 }
 
 # Family weights for generation — bias toward EVIDENCE, per lab doctrine
@@ -993,6 +1286,13 @@ _FAMILY_WEIGHTS = {
     # Math-grounded additions (2026-07-14c)
     "vol_managed_momentum":    0.06,   # Barroso-Santa-Clara / Moreira-Muir vol gate on 6m momentum
     "tstat_trend":             0.05,   # statistical-significance trend filter (t >= ~1.5-2.2)
+    # Evidence-based additions (2026-07-15c) — modest initial share, unproven
+    # on this population yet; meta-learner adapts as real results accumulate.
+    "breakout_volume_confirmed": 0.05,
+    "dual_momentum":             0.05,
+    "fii_flow_momentum":         0.04,
+    "adx_trend_vol_filtered":    0.05,
+    "accumulation_momentum":     0.04,
 }
 
 
@@ -1107,10 +1407,12 @@ def _in_dead_zone(strategy: StrategyDSL, graveyard_zones: list[dict]) -> bool:
 
 
 def generate_candidates(
-    n:            int = 30,
-    seed:         int | None = None,
-    families:     list[str] | None = None,
-    meta_state:   dict | None = None,
+    n:             int = 30,
+    seed:          int | None = None,
+    families:      list[str] | None = None,
+    meta_state:    dict | None = None,
+    db:            "Session | None" = None,
+    use_llm_hints: bool = False,
 ) -> list[StrategyDSL]:
     """
     Generate N candidate strategies, with pre-screening to ensure structural quality.
@@ -1118,11 +1420,63 @@ def generate_candidates(
     Default reduced from 100 → 30: we want 30 viable candidates over 100 random ones.
     Pre-screening rejects R:R < 1.5, < 2 entry conditions, min_confidence < 52,
     bad-feature-only strategies, and strategies in known dead parameter zones.
+
+    db (Phase E, 2026-07-15c): when supplied, generators that call
+    _sample_threshold() draw their thresholds from real measured feature
+    quantiles (feature_stats.get_feature_quantiles) instead of hardcoded
+    uniform ranges. Optional — omitted callers (tests, walk_forward_templates.py)
+    get the exact pre-Phase-E hardcoded-range behavior.
+
+    use_llm_hints (Phase C, 2026-07-15c): when True AND db is supplied,
+    ~20% of candidates are instantiated from validated LLM parameterization
+    hints (llm_strategy_advisor.get_generation_hints) via the family's own
+    generator scaffold — every hint is still validated against the registry
+    and prescreened identically to a sampled candidate. Fails silently to
+    the pure sampler on any LLM/validation failure (never blocks). Off by
+    default — callers opt in explicitly.
     """
     rng      = random.Random(seed)
     pool     = families or list(_GENERATORS.keys())
     seen_ids = set()
     result   = []
+
+    if use_llm_hints and db is not None:
+        try:
+            from strategies.llm_strategy_advisor import get_generation_hints, hint_to_strategy
+            n_hints = max(0, round(n * 0.20))
+            hints = get_generation_hints(db, families=pool, n_hints=n_hints, meta_state=meta_state)
+            for hint in hints:
+                strategy = hint_to_strategy(hint, rng)
+                if strategy is None:
+                    continue
+                strategy.generation_source = "llm_hint"
+                ok, reason = _passes_prescreen(strategy, set(), set())
+                if not ok:
+                    log.debug("LLM-hinted candidate rejected at prescreen: %s", reason)
+                    continue
+                sid = strategy.strategy_id()
+                if sid not in seen_ids:
+                    seen_ids.add(sid)
+                    result.append(strategy)
+            if hints:
+                log.info("LLM hints: %d proposed, %d passed validation+prescreen", n_hints, len(result))
+        except Exception as exc:
+            log.warning("LLM hint generation failed, continuing with pure sampler: %s", exc)
+
+    global _CURRENT_FEATURE_STATS
+    _CURRENT_FEATURE_STATS = None
+    if db is not None:
+        try:
+            from strategies.feature_stats import get_feature_quantiles
+            stats: dict[str, dict] = {}
+            for feat in _QUANTILE_SAMPLED_FEATURES:
+                q = get_feature_quantiles(db, feat)
+                if q:
+                    stats[feat] = q
+            _CURRENT_FEATURE_STATS = stats or None
+        except Exception as exc:
+            log.warning("feature_stats unavailable, generators use hardcoded ranges: %s", exc)
+            _CURRENT_FEATURE_STATS = None
 
     # Use meta-learned weights if available, else defaults
     if meta_state and meta_state.get("family_weights"):
@@ -1215,6 +1569,7 @@ def generate_candidates(
         "yes" if meta_state else "no",
         len(bad_features), conf_floor,
     )
+    _CURRENT_FEATURE_STATS = None   # never leak stats context past this call
     return result
 
 
@@ -1239,8 +1594,6 @@ def persist_candidates(
                          ["volume"] if f in VOLUME_FEATURES else
                          ["volatility"] if f in VOLATILITY_FEATURES else
                          ["trend"] if f in TREND_FEATURES else
-                         ["sentiment"] if f in SENTIMENT_FEATURES else
-                         ["pattern"] if f in PATTERN_FEATURES else
                          ["regime"] if f in REGIME_FEATURES else
                          ["research"] if f in RESEARCH_FEATURES else
                          ["events"] if f in EVENT_FEATURES else [])
@@ -1264,12 +1617,13 @@ def persist_candidates(
 
 
 def run_generation_cycle(
-    db:         Session,
-    n:          int = 200,
-    seed:       int | None = None,
-    families:   list[str] | None = None,
-    generation: int = 0,
-    use_meta:   bool = True,
+    db:            Session,
+    n:             int = 200,
+    seed:          int | None = None,
+    families:      list[str] | None = None,
+    generation:    int = 0,
+    use_meta:      bool = True,
+    use_llm_hints: bool = True,
 ) -> dict:
     meta_state = None
     if use_meta:
@@ -1282,7 +1636,10 @@ def run_generation_cycle(
         except Exception as exc:
             log.warning("Meta-learner unavailable, using defaults: %s", exc)
 
-    candidates = generate_candidates(n=n, seed=seed, families=families, meta_state=meta_state)
+    candidates = generate_candidates(
+        n=n, seed=seed, families=families, meta_state=meta_state, db=db,
+        use_llm_hints=use_llm_hints,
+    )
     written    = persist_candidates(db, candidates, generation=generation)
     return {
         "generated":   len(candidates),

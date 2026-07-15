@@ -29,7 +29,7 @@ if backend_dir not in sys.path:
 from aqrti.database.session import get_db_session
 from aqrti.utils.logger import get_logger
 from strategies.strategy_generator import run_generation_cycle
-from strategies.strategy_backtester import backtest_and_update
+from strategies.strategy_backtester import backtest_and_update, _preload_prices, get_backtest_universe
 from strategies.fitness_engine import score_all_strategies
 from strategies.strategy_lifecycle import run_lifecycle_sweep
 from strategies.evolution_engine import evolve_population
@@ -99,6 +99,29 @@ def _backtest_unscored(db, max_stocks: int = 300) -> dict:
     # scored on the same data (mixed windows corrupt fitness comparison).
     start_date = end_date - timedelta(days=1825)
 
+    # Pre-load prices + feature vectors ONCE for the whole batch instead of once
+    # per strategy (up to 100/cycle) — backtest_strategy() already supports
+    # these shared caches, this loop just wasn't threading them through.
+    universe = get_backtest_universe(db)
+    shared_price_data = _preload_prices(db, universe, start_date, end_date)
+
+    from aqrti.database.models import FeatureValue
+    shared_feature_cache: dict = {}
+    feat_rows = (
+        db.query(FeatureValue.symbol, FeatureValue.date, FeatureValue.feature_name, FeatureValue.value)
+        .filter(
+            FeatureValue.symbol.in_(universe),
+            FeatureValue.date >= start_date,
+            FeatureValue.date <= end_date,
+            FeatureValue.version == 1,
+        )
+        .all()
+    )
+    for sym, dt, fname, fval in feat_rows:
+        shared_feature_cache.setdefault((sym, dt), {})[fname] = fval
+
+    shared_signal_cache: dict = {}
+
     for row in rows:
         try:
             from strategies.strategy_dsl import StrategyDSL
@@ -120,7 +143,11 @@ def _backtest_unscored(db, max_stocks: int = 300) -> dict:
             # rebuilt from dsl_json, and recomputing strategy_id() (now a
             # full-genome hash) would mint a different ID -> duplicate row.
             backtest_and_update(db, dsl, start_date=start_date, end_date=end_date,
-                                strategy_id_override=row.strategy_id)
+                                universe=universe,
+                                strategy_id_override=row.strategy_id,
+                                shared_price_data=shared_price_data,
+                                shared_feature_cache=shared_feature_cache,
+                                shared_signal_cache=shared_signal_cache)
             tested += 1
         except Exception as exc:
             log.warning("Backtest failed for %s: %s", row.strategy_id, exc)
@@ -267,7 +294,7 @@ def run_daily_strategy_research(
     if not skip_generate:
         try:
             with get_db_session() as db:
-                gen_result = run_generation_cycle(db, n=generate_n, generation=0)
+                gen_result = run_generation_cycle(db, n=generate_n, generation=0, use_llm_hints=True)
             report["steps"]["generate"] = gen_result
             log.info("Step 1 — Generated: %d new candidates", gen_result.get("persisted", 0))
         except Exception as exc:

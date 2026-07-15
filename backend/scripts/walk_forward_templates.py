@@ -80,6 +80,17 @@ TEMPLATE_FAMILIES = [
     # t-stat significance filter per Moskowitz-Ooi-Pedersen lineage)
     "vol_managed_momentum",
     "tstat_trend",
+    # Evidence-based additions 2026-07-15c — see strategy_generator.py docstrings
+    "breakout_volume_confirmed",
+    "dual_momentum",
+    "fii_flow_momentum",
+    "adx_trend_vol_filtered",
+    "accumulation_momentum",
+    # Phase A phantom-feature repairs 2026-07-15c — these 3 were partially
+    # dead pre-fix (conditions on delivery_pct/price_above_ema50 never fired)
+    "institutional_flow",
+    "relative_strength",
+    "long_hold_momentum",
 ]
 
 
@@ -195,6 +206,7 @@ def run_walk_forward(n_folds: int = 12, n_candidates: int = 2) -> dict:
                         entry_conditions = strat.entry_conditions,
                         exit_conditions  = strat.exit_conditions,
                         use_ml_predictions = False,   # avoid look-ahead, per backtester's own convention
+                        n_trials         = len(TEMPLATE_FAMILIES),  # Deflated Sharpe multiple-testing correction
                     )
                     fold_trade_counts.append(result.trade_count)
                     if result.trade_count > 0:

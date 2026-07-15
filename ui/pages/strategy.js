@@ -687,6 +687,9 @@ function renderMetaLearningPanel(ms, rt) {
       relative_strength: 0.08, breadth_momentum: 0.06, long_hold_momentum: 0.09,
       week52_high_momentum: 0.10, turn_of_month: 0.04,
       vol_managed_momentum: 0.06, tstat_trend: 0.05,
+      // 2026-07-15c: 5 evidence-based additions
+      breakout_volume_confirmed: 0.05, dual_momentum: 0.05, fii_flow_momentum: 0.04,
+      adx_trend_vol_filtered: 0.05, accumulation_momentum: 0.04,
     };
     html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
     html += '<tr><th style="text-align:left;color:var(--muted);padding:2px 4px">Family</th><th style="color:var(--muted);padding:2px 4px">Default</th><th style="color:var(--muted);padding:2px 4px">Current</th><th style="color:var(--muted);padding:2px 4px">Δ</th></tr>';

@@ -113,3 +113,30 @@ QUARANTINE_MIN_WIN_RATE  = 50.0   # % on those live trades
 # Paper / live validation
 PAPER_WIN_RATE_GATE      = 52.0   # % live paper win rate to stay promoted
 RETRAIN_WIN_RATE_TARGET  = 52.0   # % — ML retrain trigger threshold
+
+# ── Overfitting / multiple-testing gates (added 2026-07-14) ────────────
+# "Prosecute your own results" (CLAUDE.md): a good in-sample/OOS backtest
+# can still be a lucky draw from a template-generation process that tries
+# many variants. These two gates attack that risk directly, independent of
+# the WR/Sharpe/expectancy gates above.
+#
+# MC_MAX_BANKRUPTCY_PCT — Monte Carlo permutation test
+# (strategy_metrics.monte_carlo_permutation_test): shuffle the realized
+# trade-return SEQUENCE n_simulations times and rebuild the compounding
+# equity curve for each shuffle. If more than this % of shuffled orderings
+# wipe out capital (cumulative equity <= 0), the strategy's apparent edge
+# depends on a favorable path (e.g. early wins funding later losses) rather
+# than a genuine order-independent edge — reject regardless of how good the
+# unshuffled summary stats look.
+MC_MAX_BANKRUPTCY_PCT    = 15.0
+
+# MIN_DEFLATED_SHARPE_PROB — Deflated Sharpe Ratio (Bailey & Lopez de Prado
+# 2014, strategy_metrics.compute_deflated_sharpe_ratio): the probability
+# that the TRUE Sharpe ratio exceeds zero after correcting for (a) trying
+# n_trials independent template/strategy variants and keeping only the best,
+# and (b) non-normality (skew/kurtosis) of the trade-return distribution.
+# 0.95 means the observed Sharpe must clear the expected-maximum-Sharpe-
+# under-the-null benchmark by a wide enough margin that there's only a 5%
+# chance the true edge is zero or negative once multiple-testing bias is
+# priced in.
+MIN_DEFLATED_SHARPE_PROB = 0.95

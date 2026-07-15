@@ -423,16 +423,14 @@ let _ppPollInterval = null;
 
 function startPaperPolling() {
   if (_ppPollInterval) return;
-  // Poll every 60s — refresh positions with live prices and check SL/TP/expiry
+  // Poll every 60s — refresh positions with live prices from current backend
+  // state. SL/TP/expiry checks already run server-side every 5 min via the
+  // scheduler's continuous_monitor — no need to also trigger a full MTM
+  // cycle from every open browser tab on every poll.
   _ppPollInterval = setInterval(async () => {
     const page = document.querySelector('.page.active');
     if (!page || page.id !== 'page-paper') return;
-    // Lightweight: just refresh the UI from current backend state (no full cycle)
     await hydratePaperPortfolio();
-    // Also run intraday MTM silently to close any triggered SL/TP
-    try {
-      await fetch(`${API_CONFIG.BASE}/admin/paper-mtm`, { method: 'POST' });
-    } catch(_) {}
   }, 60000);
 }
 

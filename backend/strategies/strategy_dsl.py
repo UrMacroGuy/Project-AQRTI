@@ -119,6 +119,11 @@ class StrategyDSL:
     name             : human-readable name
     signal_type      : BUY | SELL | BOTH (default BUY)
     min_confidence   : minimum AQRTI confidence required to act on the signal
+    generation_source: "sampler" (pure random/quantile sampling) or
+                       "llm_hint" (parameterization proposed by
+                       llm_strategy_advisor, then scaffolded onto the same
+                       family template — honest attribution only, does not
+                       affect strategy_id() or gate behavior)
     """
     entry_conditions: ConditionGroup
     exit_conditions:  Optional[ConditionGroup] = None
@@ -130,6 +135,7 @@ class StrategyDSL:
     max_holding_days: int = 15
     stop_loss_pct:    float = -8.0    # percentage loss that triggers exit
     take_profit_pct:  float = 15.0   # percentage gain that triggers exit
+    generation_source: str = "sampler"
 
     # ── Evaluation ──────────────────────────────────────────
 
@@ -170,6 +176,7 @@ class StrategyDSL:
             "allowed_regimes": self.allowed_regimes,
             "entry_conditions": self.entry_conditions.to_dict(),
             "exit_conditions":  self.exit_conditions.to_dict() if self.exit_conditions else None,
+            "generation_source": self.generation_source,
         }
 
     def to_json(self) -> str:
@@ -190,6 +197,7 @@ class StrategyDSL:
             max_holding_days  = d.get("max_holding_days", 15),
             stop_loss_pct     = d.get("stop_loss_pct", -8.0),
             take_profit_pct   = d.get("take_profit_pct", 15.0),
+            generation_source = d.get("generation_source", "sampler"),
         )
 
     @classmethod

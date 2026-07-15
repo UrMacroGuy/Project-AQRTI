@@ -154,12 +154,29 @@ def trigger_auto_promote(db: Session = Depends(get_db_dependency)):
 
 @router.get("/needs-review")
 def get_needs_review(db: Session = Depends(get_db_dependency)):
-    """Strategies that failed to converge after MAX_ROUNDS."""
+    """
+    Strategies that failed to converge after MAX_ROUNDS — one row per
+    strategy (its latest round), not one row per round. A strategy that
+    exhausts all 10 rounds gets a needs_review=True ArenaRun row written for
+    EVERY round (see arena_engine.run_arena_for_strategy's bulk .update()),
+    so filtering on needs_review=True alone returned up to 10 duplicate rows
+    per strategy — pick the highest round_number per strategy_id instead.
+    """
     runs = (
         db.query(ArenaRun)
         .filter_by(needs_review=True)
-        .order_by(ArenaRun.total_return_pct.desc())
+        .order_by(ArenaRun.strategy_id, ArenaRun.round_number.desc())
         .all()
+    )
+    latest_by_strategy: dict[str, ArenaRun] = {}
+    for r in runs:
+        if r.strategy_id not in latest_by_strategy:
+            latest_by_strategy[r.strategy_id] = r
+
+    results = sorted(
+        latest_by_strategy.values(),
+        key=lambda r: r.total_return_pct or 0,
+        reverse=True,
     )
     return {
         "strategies": [
@@ -171,7 +188,28 @@ def get_needs_review(db: Session = Depends(get_db_dependency)):
                 "losing_days":      r.losing_days_count,
                 "rounds_completed": r.round_number,
             }
-            for r in runs
+            for r in results
         ],
-        "count": len(runs),
+        "count": len(results),
     }
+
+
+@router.post("/needs-review/{strategy_id}/retry")
+def retry_needs_review(strategy_id: str, db: Session = Depends(get_db_dependency)):
+    """
+    Give a needs_review strategy a fresh set of arena rounds. arena_engine's
+    round counter (run_arena_for_strategy) counts ArenaRun rows with
+    status IN (champion, refining, needs_review) for this strategy_id — just
+    clearing the needs_review flag would leave those 10 exhausted rows in
+    place and re-trip the MAX_ROUNDS check on the very next cycle. Delete
+    the exhausted round history instead so it starts a clean round 1.
+    """
+    strategy = db.query(StrategyV2).filter_by(strategy_id=strategy_id).first()
+    if not strategy:
+        return {"error": f"strategy not found: {strategy_id}"}
+
+    deleted = db.query(ArenaRun).filter_by(strategy_id=strategy_id).delete()
+    strategy.arena_status = None
+    strategy.arena_rounds = 0
+    db.commit()
+    return {"strategy_id": strategy_id, "status": "requeued", "cleared_rounds": deleted}

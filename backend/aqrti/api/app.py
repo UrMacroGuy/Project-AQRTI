@@ -789,6 +789,7 @@ def create_app() -> FastAPI:
                 cwd=backend_dir,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
         api_logger.info("Manual model training launched as separate process (pid=%d), log=%s", proc.pid, log_path)
         return {"status": "started", "pid": proc.pid, "log_file": log_path}

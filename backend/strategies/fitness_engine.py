@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import sys, os
 from datetime import date
+from typing import Optional
 
 backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
@@ -58,6 +59,36 @@ MIN_TRADES           = 10      # hard floor — backtester needs ≥10 trades to
 # ── Cost model constants (match backtester) ───────────────────
 ROUND_TRIP_COST_PCT  = 0.28    # % — realistic NSE delivery round-trip
 MIN_EXPECTANCY_NET   = 0.10    # % per trade — must net > 0.10% after costs
+
+
+OOS_FAIL_MULTIPLIER = 0.3   # oos_passed=False: the in-sample composite is provably
+                             # not achieved out of sample, so cap what it can show
+OOS_SHARPE_FLOOR     = -2.0  # oos_sharpe at/below this contributes the full extra cut
+OOS_SHARPE_CEILING   = 1.2   # oos_sharpe at/above TARGET_SHARPE contributes no extra cut
+
+
+def oos_penalty_multiplier(oos_passed, oos_sharpe) -> float:
+    """
+    Scales the in-sample composite fitness by how badly the strategy failed
+    out-of-sample, once OOS has actually been computed (oos_passed is not None).
+    Before OOS exists (oos_passed is None, e.g. a fresh candidate), returns 1.0 —
+    the in-sample score alone still drives early evolution/selection.
+
+    A 91-in-sample-fitness / -1.2-oos-sharpe strategy nets out around 20-27, so
+    a high fitness_score can no longer coexist with a proven OOS failure.
+    """
+    if oos_passed is None:
+        return 1.0
+    if not oos_passed:
+        base = OOS_FAIL_MULTIPLIER
+    else:
+        base = 1.0
+    oos_sharpe = oos_sharpe if oos_sharpe is not None else 0.0
+    span = OOS_SHARPE_CEILING - OOS_SHARPE_FLOOR
+    sharpe_factor = min(max((oos_sharpe - OOS_SHARPE_FLOOR) / span, 0.0), 1.0)
+    # Blend: failing strategies get further scaled down for how negative oos_sharpe is;
+    # passing strategies are left alone unless oos_sharpe is itself weak.
+    return round(base * (0.5 + 0.5 * sharpe_factor), 4) if not oos_passed else round(base, 4)
 
 
 SHARPE_HARD_FAIL = -1.0  # below this, the strategy is losing badly and consistently,
@@ -201,11 +232,16 @@ def compute_fitness(
     volatile_sharpe:  float = 0.0,
     current_regime:   str   = "BULL",
     avg_holding_days: float = 0.0,
+    oos_passed:       bool  = None,
+    oos_sharpe:       float = None,
 ) -> dict:
     """
     Compute full fitness breakdown and composite score.
     All input sharpe values may be None — treated as 0.
     Sharpes capped at 3.0, profit_factor capped at 5.0.
+
+    oos_passed/oos_sharpe (both None until walk-forward OOS runs) apply a
+    post-hoc penalty to the in-sample composite — see oos_penalty_multiplier().
     """
     SHARPE_CAP = 3.0
     sharpe          = min(sharpe or 0.0, SHARPE_CAP)
@@ -239,8 +275,13 @@ def compute_fitness(
     )
     composite = round(min(100.0, max(0.0, composite)), 2)
 
+    oos_mult = oos_penalty_multiplier(oos_passed, oos_sharpe)
+    composite_oos_adjusted = round(composite * oos_mult, 2)
+
     return {
-        "fitness_score":       composite,
+        "fitness_score":            composite_oos_adjusted,
+        "fitness_score_in_sample":  composite,   # pre-OOS-penalty, for evolution/debug
+        "oos_penalty_multiplier":   oos_mult,
         "profitability":       s_prof,
         "consistency":         s_cons,
         "robustness":          s_rob,
@@ -252,17 +293,22 @@ def compute_fitness(
     }
 
 
-def score_strategy(db: Session, strategy: StrategyV2) -> float:
+def score_strategy(db: Session, strategy: StrategyV2, current_regime: Optional[str] = None) -> float:
     """
     Compute fitness score for an existing StrategyV2 row.
     Updates fitness_score in DB. Returns the score.
+
+    current_regime: pass the pre-fetched latest regime when scoring a batch
+    (score_all_strategies/rescore_all) to avoid one MarketRegime query per
+    strategy — it's identical for the whole batch. Looked up here if omitted.
     """
-    regime_row = (
-        db.query(MarketRegime.regime)
-        .order_by(MarketRegime.date.desc())
-        .first()
-    )
-    current_regime = regime_row[0] if regime_row else "BULL"
+    if current_regime is None:
+        regime_row = (
+            db.query(MarketRegime.regime)
+            .order_by(MarketRegime.date.desc())
+            .first()
+        )
+        current_regime = regime_row[0] if regime_row else "BULL"
 
     result = compute_fitness(
         sharpe           = strategy.sharpe or 0.0,
@@ -279,18 +325,34 @@ def score_strategy(db: Session, strategy: StrategyV2) -> float:
         volatile_sharpe  = strategy.volatile_sharpe or 0.0,
         current_regime   = current_regime,
         avg_holding_days = strategy.avg_holding_days or 0.0,
+        oos_passed       = strategy.oos_passed,
+        oos_sharpe       = strategy.oos_sharpe,
     )
     strategy.fitness_score = result["fitness_score"]
-    log.debug("Fitness %s -> %.1f", strategy.strategy_id, result["fitness_score"])
+    log.debug(
+        "Fitness %s -> %.1f (in_sample=%.1f, oos_mult=%.2f)",
+        strategy.strategy_id, result["fitness_score"],
+        result["fitness_score_in_sample"], result["oos_penalty_multiplier"],
+    )
     return result["fitness_score"]
+
+
+def _latest_regime(db: Session) -> str:
+    regime_row = (
+        db.query(MarketRegime.regime)
+        .order_by(MarketRegime.date.desc())
+        .first()
+    )
+    return regime_row[0] if regime_row else "BULL"
 
 
 def score_all_strategies(db: Session) -> dict:
     """Score every strategy that has backtest results. Commits to DB."""
     rows = db.query(StrategyV2).filter(StrategyV2.trade_count > 0).all()
+    current_regime = _latest_regime(db)
     scored = 0
     for r in rows:
-        score_strategy(db, r)
+        score_strategy(db, r, current_regime=current_regime)
         scored += 1
     db.commit()
     log.info("Scored %d strategies", scored)
@@ -300,10 +362,11 @@ def score_all_strategies(db: Session) -> dict:
 def rescore_all(db: Session) -> dict:
     """Force-rescore ALL strategies that have trade data."""
     rows = db.query(StrategyV2).filter(StrategyV2.trade_count > 0).all()
+    current_regime = _latest_regime(db)
     updated = 0
     for r in rows:
         old = r.fitness_score
-        score_strategy(db, r)
+        score_strategy(db, r, current_regime=current_regime)
         if r.fitness_score != old:
             updated += 1
     db.commit()

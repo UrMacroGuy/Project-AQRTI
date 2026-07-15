@@ -28,6 +28,7 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from aqrti.database.models import (
     DailyPrice, StrategyV2, PaperPortfolio, PaperTrade,
@@ -569,7 +570,22 @@ def _simulate_day(
                 portfolio_name=portfolio_name).count(),
         ))
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two concurrent arena cycles replaying the same portfolio_name/date
+        # (overlapping hourly job + boot kick, or a rapid restart racing an
+        # in-flight run) can both pass the "not existing_ec" check above
+        # before either commits — the second commit then hits the
+        # (portfolio_name, date) UNIQUE constraint. That's a duplicate write
+        # attempt, not a real failure: another writer already recorded this
+        # exact point, so roll back and continue rather than aborting the
+        # whole arena run for this strategy.
+        db.rollback()
+        log.warning(
+            "Equity curve point for %s/%s already recorded by a concurrent run — skipping duplicate write",
+            portfolio_name, sim_date,
+        )
     return {
         "date":            str(sim_date),
         "opened":          opened,

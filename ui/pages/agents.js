@@ -26,6 +26,19 @@ async function hydrateResearchOps() {
   setDataPoint('roc-kpi-brief-date', briefData?.brief_date || '—', 'agents');
   setDataPoint('roc-kpi-messages', (msgData?.messages || []).length, 'agents');
 
+  // Tasks Completed / Last Run — previously dead placeholders stuck at "—"
+  // forever (roc-kpi-tasks / roc-kpi-last-run were never assigned anywhere
+  // in this file even though every agent row in the API response already
+  // carries last_run_at/last_run_status). Derive both from that same data.
+  const today = new Date().toISOString().slice(0, 10);
+  const ranToday = agents.filter(a => (a.last_run_at || '').slice(0, 10) === today);
+  const completedToday = ranToday.filter(a => a.last_run_status === 'success').length;
+  setDataPoint('roc-kpi-tasks', ranToday.length ? completedToday : '—', 'agents');
+
+  const lastRunTimes = agents.map(a => a.last_run_at).filter(Boolean).sort();
+  const lastRun = lastRunTimes[lastRunTimes.length - 1];
+  setDataPoint('roc-kpi-last-run', lastRun ? new Date(lastRun).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—', 'agents');
+
   // ── Daily Brief ───────────────────────────────────────────────
   const briefBody = el('roc-brief-body');
   if (briefBody && briefData) {

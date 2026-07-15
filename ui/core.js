@@ -845,8 +845,8 @@ async function hydrateMorningDecision() {
         <td style="color:${dirCls}">${s.direction || '—'}</td>
         <td style="text-align:right;color:${pnlCls}">${(s.current_pnl_pct || 0) >= 0 ? '+' : ''}${s.current_pnl_pct}%</td>
         <td style="text-align:right;color:var(--text-muted)">₹${(s.position_size_inr || 0).toLocaleString('en-IN')}</td>
-        <td style="color:var(--text-muted)">${s.stop_loss_pct != null ? (s.stop_loss_pct * 100).toFixed(1) + '%' : '—'}</td>
-        <td style="color:var(--text-muted)">${s.take_profit_pct != null ? (s.take_profit_pct * 100).toFixed(1) + '%' : '—'}</td>
+        <td style="color:var(--text-muted)">${s.stop_loss_pct != null ? s.stop_loss_pct.toFixed(1) + '%' : '—'}</td>
+        <td style="color:var(--text-muted)">${s.take_profit_pct != null ? s.take_profit_pct.toFixed(1) + '%' : '—'}</td>
         <td style="color:var(--text-muted)">${s.confidence != null ? s.confidence + '%' : '—'}</td>
         <td style="text-align:right">${s.quarantine_days}d</td>
         <td style="text-align:right">${s.shadow_trades}</td>

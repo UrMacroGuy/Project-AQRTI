@@ -14,8 +14,10 @@ so all of them are invalid. This script:
      OOS hard gates.
   5. Dumps metrics_after.csv next to this script for before/after analysis.
 
-Resume-safe: strategies whose oos_passed is already non-NULL AND whose
-backtest_end >= today are skipped on re-run.
+Resume-safe: strategies whose oos_passed is already non-NULL, whose
+backtest_end >= today, AND whose mc_bankruptcy_pct/deflated_sharpe are
+already populated (2026-07-14 overfitting gate, promotion_config.py) are
+skipped on re-run.
 """
 
 import sys, os, csv, time, socket
@@ -80,7 +82,8 @@ def main():
     with get_db() as db:
         rows = (
             db.query(StrategyV2.strategy_id, StrategyV2.status, StrategyV2.dsl_json,
-                     StrategyV2.oos_passed, StrategyV2.backtest_end)
+                     StrategyV2.oos_passed, StrategyV2.backtest_end,
+                     StrategyV2.mc_bankruptcy_pct, StrategyV2.deflated_sharpe)
             .filter(StrategyV2.status.in_(["active", "promoted", "shadow", "candidate"]),
                     StrategyV2.dsl_json.isnot(None))
             .all()
@@ -90,7 +93,11 @@ def main():
     # cap changes are applied to every strategy consistently.
     force_all = "--force-all" in sys.argv
     today = date.today()
-    todo = rows if force_all else [r for r in rows if not (r[3] is not None and r[4] and r[4] >= today)]
+    todo = rows if force_all else [
+        r for r in rows
+        if not (r[3] is not None and r[4] and r[4] >= today and r[5] is not None and r[6] is not None)
+    ]
+    todo = [r[:5] for r in todo]
     print(f"{len(rows)} strategies total, {len(todo)} to re-backtest "
           f"({len(rows)-len(todo)} skipped){' [FORCE-ALL]' if force_all else ''}", flush=True)
 

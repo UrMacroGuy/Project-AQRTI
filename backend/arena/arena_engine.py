@@ -711,11 +711,36 @@ def _run_arena_cycle_sync():
 
 
 def get_arena_status(db) -> dict:
-    """Summary of arena state — used by the API route."""
-    total      = db.query(ArenaRun).count()
-    champions  = db.query(ArenaRun).filter_by(is_champion=True).count()
-    refining   = db.query(ArenaRun).filter_by(status="refining").count()
-    review     = db.query(ArenaRun).filter_by(needs_review=True).count()
+    """
+    Summary of arena state — used by the API route.
+
+    Counts are per DISTINCT LIVE strategy, not raw ArenaRun rows. A strategy
+    plays multiple rounds (each a separate ArenaRun row), and prune scripts
+    (e.g. prune_to_curated_universe.py) delete StrategyV2 rows without
+    cascading to ArenaRun, leaving orphaned round-history behind. Counting
+    raw rows (old bug) let 15 strategies that played 68 rounds — several
+    since deleted from strategies_v2 entirely — inflate the dashboard to
+    "68 strategies in arena, 58 refining" when reality was 1 live strategy.
+    """
+    live_ids = {sid for (sid,) in db.query(StrategyV2.strategy_id).all()}
+
+    total_runs = db.query(ArenaRun).count()
+    total = db.query(ArenaRun.strategy_id).distinct().count()
+    champions = (
+        db.query(ArenaRun.strategy_id)
+        .filter(ArenaRun.is_champion.is_(True), ArenaRun.strategy_id.in_(live_ids))
+        .distinct().count()
+    )
+    refining = (
+        db.query(ArenaRun.strategy_id)
+        .filter(ArenaRun.status == "refining", ArenaRun.strategy_id.in_(live_ids))
+        .distinct().count()
+    )
+    review = (
+        db.query(ArenaRun.strategy_id)
+        .filter(ArenaRun.needs_review.is_(True), ArenaRun.strategy_id.in_(live_ids))
+        .distinct().count()
+    )
     running    = _running
 
     recent = (
@@ -727,6 +752,7 @@ def get_arena_status(db) -> dict:
 
     return {
         "total_runs":        total,
+        "total_run_rows":    total_runs,
         "champions":         champions,
         "refining":          refining,
         "needs_review":      review,

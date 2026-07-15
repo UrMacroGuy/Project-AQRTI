@@ -33,16 +33,22 @@ MAX_HOLD_DAYS     = 20
 CAPITAL_PER_TRADE = 0.07   # 7% of portfolio per new position
 MIN_TRADE_CAPITAL = 500.0
 
+# A single trade's exit/entry price ratio implausible beyond this multiple is
+# treated as corrupted data (bad tick), not a real market move -- guards
+# against a fabricated few-thousand-percent gain/loss reaching current_cash
+# even if it slipped past the live-quote deviation check (2026-07-13 HAL
+# incident: fake ~35 quote produced a fabricated +823,302 "gain").
+MAX_PLAUSIBLE_PRICE_RATIO = 4.0
+
 
 # ── Price helpers ──────────────────────────────────────────────────────────────
 
-def _get_live_price(symbol: str, entry_price: float) -> float:
-    """Live yfinance price with fallback to DB EOD close."""
+def _get_live_price(db, symbol: str, entry_price: float) -> float:
+    """Live yfinance price with fallback to DB EOD close. Reuses the
+    caller's session instead of opening a new one per position/call."""
     try:
         from paper_trading.paper_trade import _current_price
-        from aqrti.database.engine import get_db as _gdb
-        with _gdb() as db:
-            return _current_price(db, symbol, entry_price)
+        return _current_price(db, symbol, entry_price)
     except Exception:
         return entry_price
 
@@ -65,18 +71,21 @@ def _get_portfolio(db) -> Optional[PaperPortfolio]:
     return db.query(PaperPortfolio).filter_by(portfolio_name=PORTFOLIO_NAME).first()
 
 
-def _portfolio_value(db, portfolio: PaperPortfolio) -> float:
-    """Current portfolio value = cash + sum of live position values."""
+def _portfolio_value(db, portfolio: PaperPortfolio, positions: Optional[list] = None) -> float:
+    """Current portfolio value = cash + sum of live position values.
+    Pass pre-loaded `positions` to avoid re-querying when the caller already has them."""
     invested = 0.0
-    for pos in db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).all():
-        price = _get_live_price(pos.symbol, pos.entry_price)
+    if positions is None:
+        positions = db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).all()
+    for pos in positions:
+        price = _get_live_price(db, pos.symbol, pos.entry_price)
         invested += pos.shares * price
     return (portfolio.current_cash or 0.0) + invested
 
 
 # ── Exit monitor ───────────────────────────────────────────────────────────────
 
-def _check_exits(db) -> list[dict]:
+def _check_exits(db) -> tuple[list[dict], set[str]]:
     """
     Check every open position for:
     - Stop-loss hit (price <= stop_loss_price)
@@ -86,14 +95,15 @@ def _check_exits(db) -> list[dict]:
     """
     portfolio = _get_portfolio(db)
     if not portfolio:
-        return []
+        return [], set()
 
     closed = []
     today  = date.today()
+    closed_symbols_this_cycle: set[str] = set()
 
     positions = db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).all()
     for pos in positions:
-        price      = _get_live_price(pos.symbol, pos.entry_price)
+        price      = _get_live_price(db, pos.symbol, pos.entry_price)
         hold_days  = (today - pos.entry_date).days if pos.entry_date else 0
         exit_reason = None
 
@@ -105,6 +115,18 @@ def _check_exits(db) -> list[dict]:
             exit_reason = "max_hold"
 
         if not exit_reason:
+            continue
+
+        # Reject implausible price swings outright rather than trusting them as a
+        # real stop-loss/take-profit trigger — a bad tick that slips past the
+        # live-quote deviation guard should never close a position on a fabricated
+        # multi-hundred-percent move.
+        ratio = max(price, pos.entry_price) / max(min(price, pos.entry_price), 1e-9)
+        if ratio > MAX_PLAUSIBLE_PRICE_RATIO:
+            log.warning(
+                "Skipping implausible exit for %s: entry=%.2f live=%.2f (ratio=%.1fx > %.1fx) — treating as bad tick, not a real move",
+                pos.symbol, pos.entry_price, price, ratio, MAX_PLAUSIBLE_PRICE_RATIO,
+            )
             continue
 
         # Execute close — apply sell cost to exit price (matches paper_trade.py)
@@ -130,6 +152,7 @@ def _check_exits(db) -> list[dict]:
 
         portfolio.current_cash = (portfolio.current_cash or 0.0) + pos.capital_deployed + pnl
         db.delete(pos)
+        closed_symbols_this_cycle.add(pos.symbol)
 
         log.info(
             "CLOSE %s @ %.2f  reason=%s  pnl=%.2f (%.1f%%)",
@@ -154,7 +177,7 @@ def _check_exits(db) -> list[dict]:
     if closed:
         db.commit()
 
-    return closed
+    return closed, closed_symbols_this_cycle
 
 
 # ── Entry monitor ──────────────────────────────────────────────────────────────
@@ -197,17 +220,21 @@ def _get_sector(db, symbol: str) -> str:
     return row[0] if row and row[0] else "Unknown"
 
 
-def _check_entries(db) -> list[dict]:
+def _check_entries(db, skip_symbols: Optional[set[str]] = None) -> list[dict]:
     """
     Open new positions when portfolio has free slots and bullish signals exist.
     Uses latest predictions (most recent date available).
+
+    `skip_symbols` excludes symbols closed earlier in the same cycle by
+    _check_exits — re-entering immediately risks compounding a bad tick that
+    just fabricated the exit (see MAX_PLAUSIBLE_PRICE_RATIO note above).
     """
     portfolio = _get_portfolio(db)
     if not portfolio:
         return []
 
-    open_count = db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).count()
-    slots      = MAX_POSITIONS - open_count
+    open_positions = db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).all()
+    slots          = MAX_POSITIONS - len(open_positions)
     if slots <= 0:
         return []
 
@@ -229,16 +256,17 @@ def _check_entries(db) -> list[dict]:
         .all()
     )
 
-    # Filter out already-open symbols
-    held = {p.symbol for p in db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).all()}
+    # Filter out already-open symbols and symbols just closed this cycle
+    held = {p.symbol for p in open_positions}
+    skip = held | (skip_symbols or set())
     candidates = [
         p for p in preds
-        if p.symbol not in held
+        if p.symbol not in skip
         and (p.direction or "").lower() not in ("bearish", "sell", "short")
     ]
 
     opened = []
-    pv     = _portfolio_value(db, portfolio)
+    pv     = _portfolio_value(db, portfolio, positions=open_positions)
 
     for pred in candidates[:slots]:
         fill = _get_fill_price(db, pred.symbol)
@@ -325,7 +353,7 @@ def _mark_to_market(db) -> float:
     invested = 0.0
     positions = db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).all()
     for pos in positions:
-        price = _get_live_price(pos.symbol, pos.entry_price)
+        price = _get_live_price(db, pos.symbol, pos.entry_price)
         invested += pos.shares * price
 
     total = (portfolio.current_cash or 0.0) + invested
@@ -351,8 +379,8 @@ def run_continuous_monitor() -> dict:
     Returns {closed, opened, portfolio_value, open_positions, timestamp}.
     """
     with get_db() as db:
-        closed  = _check_exits(db)
-        opened  = _check_entries(db)
+        closed, closed_symbols = _check_exits(db)
+        opened  = _check_entries(db, skip_symbols=closed_symbols)
         pv      = _mark_to_market(db)
         n_open  = db.query(PaperPosition).filter_by(portfolio_name=PORTFOLIO_NAME).count()
 

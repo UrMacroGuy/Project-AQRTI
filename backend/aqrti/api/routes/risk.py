@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from aqrti.database.engine import get_db_dependency
-from aqrti.database.models import DailyPrice, PortfolioSnapshot, Trade, PaperPosition, PaperPortfolio
+from aqrti.database.models import DailyPrice, EquityCurvePoint, Trade, PaperPosition, PaperPortfolio
 from aqrti.data.market_data import STOCK_META
 from aqrti.config.settings import get_settings
 
@@ -43,9 +43,20 @@ def get_risk(db: Session = Depends(get_db_dependency)):
     settings = get_settings()
     capital  = settings.paper_capital
 
-    # Latest portfolio snapshot
-    snap = db.query(PortfolioSnapshot).order_by(PortfolioSnapshot.date.desc()).first()
-    drawdown = snap.drawdown if snap else 0.0
+    # Latest equity curve point — PortfolioSnapshot (portfolio_snapshots) is
+    # dead: record_snapshot() that would populate it is defined but never
+    # called anywhere in the pipeline, so the table has 0 rows and every
+    # metric sourced from it (VaR, Sharpe, 30d drawdown, drawdown history)
+    # silently rendered as 0.00/empty as if that were a real "no risk"
+    # reading. EquityCurvePoint is the table the paper-trading pipeline
+    # actually writes to every cycle (see performance_tracker.py).
+    snap = (
+        db.query(EquityCurvePoint)
+        .filter_by(portfolio_name="default")
+        .order_by(EquityCurvePoint.date.desc())
+        .first()
+    )
+    drawdown = snap.drawdown_pct if snap else 0.0
 
     # Use paper portfolio for positions and value
     paper_port = db.query(PaperPortfolio).filter_by(portfolio_name="default").first()
@@ -77,19 +88,19 @@ def get_risk(db: Session = Depends(get_db_dependency)):
     # Portfolio returns for VaR + Sharpe
     cutoff = date.today() - timedelta(days=30)
     snaps_30 = (
-        db.query(PortfolioSnapshot)
-        .filter(PortfolioSnapshot.date >= cutoff)
-        .order_by(PortfolioSnapshot.date.asc())
+        db.query(EquityCurvePoint)
+        .filter(EquityCurvePoint.portfolio_name == "default", EquityCurvePoint.date >= cutoff)
+        .order_by(EquityCurvePoint.date.asc())
         .all()
     )
-    portfolio_returns = [s.daily_pnl_pct for s in snaps_30 if s.daily_pnl_pct is not None]
+    portfolio_returns = [s.daily_return_pct for s in snaps_30 if s.daily_return_pct is not None]
 
     var_daily = _compute_var(portfolio_returns, total_value) if portfolio_returns else 0.0
     sharpe    = _compute_sharpe(portfolio_returns)
 
     # Max drawdown history
     dd_history = [
-        {"date": str(s.date), "drawdown": s.drawdown or 0.0}
+        {"date": str(s.date), "drawdown": s.drawdown_pct or 0.0}
         for s in snaps_30
     ]
 

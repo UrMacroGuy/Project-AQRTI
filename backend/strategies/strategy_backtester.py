@@ -30,9 +30,12 @@ if backend_dir not in sys.path:
 from sqlalchemy.orm import Session
 from aqrti.database.models import DailyPrice, MarketRegime, Prediction, IndexData
 from aqrti.utils.logger import get_logger
+from scipy import stats as _stats
+
 from strategies.strategy_metrics import (
     compute_sharpe, compute_sortino, compute_max_drawdown,
     compute_profit_factor, compute_expectancy, RISK_FREE,
+    monte_carlo_permutation_test, compute_deflated_sharpe_ratio,
 )
 
 log = get_logger("strategy_backtester")
@@ -315,8 +318,19 @@ class BacktestResult:
     sideways_sharpe:  float = 0.0
     volatile_sharpe:  float = 0.0
     regime_trades:    dict  = field(default_factory=dict)
+    # Overfitting / multiple-testing diagnostics (added 2026-07-14) — see
+    # strategy_metrics.monte_carlo_permutation_test and
+    # compute_deflated_sharpe_ratio. Enforced at promotion by
+    # promotion_config.MC_MAX_BANKRUPTCY_PCT / MIN_DEFLATED_SHARPE_PROB.
+    mc_bankruptcy_pct:   float = 0.0
+    mc_worse_sharpe_pct: float = 0.0
+    deflated_sharpe:     float = 0.0
 
-    def compute_metrics(self, daily_returns: Optional[list[float]] = None) -> None:
+    def compute_metrics(
+        self,
+        daily_returns: Optional[list[float]] = None,
+        n_trials: int = 1,
+    ) -> None:
         """
         Compute trade-level stats and portfolio-level risk metrics.
 
@@ -325,6 +339,13 @@ class BacktestResult:
         approach of repeating each trade's per-day average `holding_days`
         times collapsed intra-trade variance and inflated Sharpe — never
         reintroduce it.
+
+        `n_trials` — number of independent strategy/template variants this
+        backtest run is one of, for the Deflated Sharpe Ratio's multiple-
+        testing correction. Defaults to 1 (no correction) because a single
+        ad-hoc backtest call has no way to know the population size it was
+        drawn from; callers sweeping across template families (e.g.
+        scripts/walk_forward_templates.py) should pass len(TEMPLATE_FAMILIES).
         """
         closed = [t for t in self.trades if t.pnl_pct is not None]
         if not closed:
@@ -364,6 +385,26 @@ class BacktestResult:
             self.total_return = round(equity - 100.0, 4)
             self.sharpe  = 0.0
             self.sortino = 0.0
+
+        # Overfitting / multiple-testing diagnostics — computed on the
+        # TRADE-level return sequence (not daily mark-to-market), since the
+        # question here is whether the order trades actually occurred in
+        # (and the trial count they were drawn from) matters, independent of
+        # the daily Sharpe computed above.
+        mc = monte_carlo_permutation_test(returns)
+        self.mc_bankruptcy_pct   = mc["bankruptcy_pct"]
+        self.mc_worse_sharpe_pct = mc["worse_sharpe_pct"]
+
+        trade_sharpe = compute_sharpe(returns)
+        skew = float(_stats.skew(returns)) if len(returns) >= 3 else 0.0
+        kurt = float(_stats.kurtosis(returns, fisher=False)) if len(returns) >= 4 else 3.0
+        self.deflated_sharpe = compute_deflated_sharpe_ratio(
+            sharpe=trade_sharpe,
+            n_trials=n_trials,
+            n_returns=len(returns),
+            skew=skew,
+            kurtosis=kurt,
+        )
 
 
 def build_daily_portfolio_returns(
@@ -704,6 +745,8 @@ def backtest_strategy(
     shared_feature_cache: Optional[dict] = None,  # pre-built {(sym,date): {fname: val}} for batch runs
     shared_price_data: Optional[tuple] = None,    # pre-built (closes_by_sym, sorted_dates_by_sym, hilo_by_sym)
     shared_signal_cache: Optional[dict] = None,   # memoized {(sym,date): technical signal} across strategies
+    n_trials:         int = 1,   # independent strategy/template variants evaluated, for Deflated Sharpe Ratio's
+                                  # multiple-testing correction (e.g. len(TEMPLATE_FAMILIES) in walk_forward_templates.py)
 ) -> BacktestResult:
     """
     Signal-driven backtest using ML predictions + price technicals.
@@ -1064,7 +1107,7 @@ def backtest_strategy(
         result.trades, closes_by_sym, sorted_dates_by_sym,
         window_start=start_date, window_end=end_date,
     )
-    result.compute_metrics(daily_returns=daily_series)
+    result.compute_metrics(daily_returns=daily_series, n_trials=n_trials)
     result.exposure_pct = exposure
 
     # Regime-stratified Sharpe
@@ -1327,6 +1370,9 @@ def backtest_and_update(
             "oos_win_rate":      oos_win_rate,
             "oos_trades":        oos.get("oos_trades", 0),
             "oos_passed":        oos_passed,
+            "mc_bankruptcy_pct":   result.mc_bankruptcy_pct,
+            "mc_worse_sharpe_pct": result.mc_worse_sharpe_pct,
+            "deflated_sharpe":     result.deflated_sharpe,
             "backtest_start":    start,
             "backtest_end":      end,
             "backtest_universe": result.universe_size,
@@ -1335,19 +1381,23 @@ def backtest_and_update(
             "name":              name,
         })
 
-        # Persist individual trades — delete stale, insert fresh
+        # Persist individual trades — delete stale, bulk-insert fresh (avoids
+        # one INSERT per trade; this path runs per strategy, ~100/cycle).
         write_db.query(StrategyBacktestTrade).filter_by(strategy_id=result.strategy_id).delete()
-        for t in result.trades:
-            write_db.add(StrategyBacktestTrade(
-                strategy_id  = result.strategy_id,
-                symbol       = t.symbol,
-                entry_date   = t.entry_date,
-                exit_date    = t.exit_date,
-                entry_price  = t.entry_price,
-                exit_price   = t.exit_price,
-                pnl_pct      = t.pnl_pct,
-                exit_reason  = t.exit_reason,
-                holding_days = t.holding_days,
-            ))
+        if result.trades:
+            write_db.bulk_insert_mappings(StrategyBacktestTrade, [
+                {
+                    "strategy_id":  result.strategy_id,
+                    "symbol":       t.symbol,
+                    "entry_date":   t.entry_date,
+                    "exit_date":    t.exit_date,
+                    "entry_price":  t.entry_price,
+                    "exit_price":   t.exit_price,
+                    "pnl_pct":      t.pnl_pct,
+                    "exit_reason":  t.exit_reason,
+                    "holding_days": t.holding_days,
+                }
+                for t in result.trades
+            ])
 
     return result

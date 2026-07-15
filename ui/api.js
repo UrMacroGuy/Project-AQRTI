@@ -175,6 +175,7 @@ const Api = {
   async strategyStats()                 { return apiFetch('/strategies/stats'); },
   async learning(p = {})               { return apiFetch('/learning', p); },
   async risk()                          { return apiFetch('/risk'); },
+  async tradeReconciliation()           { return apiFetch('/reconciliation/trades'); },
   async portfolio()                     { return apiFetch('/portfolio'); },
   async marketRegime()                  { return apiFetch('/market-regime'); },
   async symbolPrediction(sym)          { return apiFetch(`/predictions/symbol/${sym}`); },
@@ -320,6 +321,7 @@ const Api = {
   async triggerArena()         { return apiPost('/arena/run'); },
   async arenaPromote()         { return apiPost('/arena/promote'); },
   async arenaNeedsReview()     { return apiFetch('/arena/needs-review'); },
+  async arenaRetryReview(strategyId) { return apiPost(`/arena/needs-review/${strategyId}/retry`); },
 
   async checkBackend() {
     try {

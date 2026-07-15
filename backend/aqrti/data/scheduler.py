@@ -164,6 +164,25 @@ def _daily_job():
     except Exception as exc:
         scheduler_logger.error("Step 7 — Learning loop failed: %s", exc)
 
+    # Step 6C: Quarantine sweep — auto-activates 'promoted' strategies that
+    # have genuinely cleared the paper-trading quarantine gate (60 real days,
+    # 20 real closed shadow-paper trades, WR + P&L thresholds — see
+    # strategy_lifecycle.check_quarantine_gate). Replaces the old
+    # human-must-click-Activate-in-UI requirement now that the gate itself is
+    # the human-designed approval criteria; never activates on anything but
+    # real forward paper-trading results already produced by Step 6B.
+    try:
+        from aqrti.database.engine import get_db as _get_db
+        from strategies.strategy_lifecycle import run_quarantine_sweep
+        with _get_db() as _qdb:
+            qreport = run_quarantine_sweep(_qdb)
+        scheduler_logger.info(
+            "Step 6C — Quarantine Sweep: activated=%d %s",
+            len(qreport.get("activated", [])), qreport.get("activated", []),
+        )
+    except Exception as exc:
+        scheduler_logger.error("Step 6C — Quarantine sweep failed: %s", exc)
+
     # Step 7A: Live strategy validation sweep — demotes strategies underperforming vs backtest
     try:
         from aqrti.database.engine import get_db as _get_db
@@ -480,6 +499,7 @@ def _strategy_loop_subprocess_job():
             cwd=backend_dir,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         scheduler_logger.info("Strategy loop: launched cycle subprocess (pid=%d)", _strategy_loop_proc.pid)
     except Exception as exc:
@@ -749,13 +769,16 @@ def start_scheduler() -> BackgroundScheduler:
         misfire_grace_time=3600,
     )
 
-    # Hourly agent pipeline
+    # Agent research pipeline — every 15 min while the backend is online
+    # (tightened from 1hr 2026-07-15 per user request to keep everything
+    # that has no market-close/date dependency running continuously as
+    # long as the process is up, matching the arena_cycle tightening below).
     _scheduler.add_job(
         _hourly_agent_job,
         trigger="interval",
-        hours=1,
+        minutes=15,
         id="hourly_agents",
-        name="Hourly Agent Pipeline",
+        name="Agent Research Pipeline",
         replace_existing=True,
         misfire_grace_time=600,
         max_instances=1,
@@ -770,7 +793,7 @@ def start_scheduler() -> BackgroundScheduler:
     _scheduler.add_job(
         _strategy_loop_subprocess_job,
         trigger="interval",
-        minutes=5,
+        minutes=2,
         id="strategy_loop",
         name="Strategy Research Loop",
         replace_existing=True,
@@ -778,12 +801,13 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
-    # Lightweight population snapshot — every hour. Only records the snapshot,
-    # no generation/backtest/evolution, so it won't cause GIL contention.
+    # Lightweight population snapshot — every 15 min while online. Only
+    # records the snapshot, no generation/backtest/evolution, so it won't
+    # cause GIL contention (tightened from 1hr, 2026-07-15).
     _scheduler.add_job(
         _snapshot_only_job,
         trigger="interval",
-        hours=1,
+        minutes=15,
         id="snapshot_only",
         name="Population Snapshot",
         replace_existing=True,
@@ -791,11 +815,13 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
-    # Fast alert check — every 5 minutes, very lightweight
+    # Fast alert check — every 2 minutes, very lightweight (tightened from 5,
+    # 2026-07-15, since it's a stateless read + conditional alert with no
+    # date-rollover semantics).
     _scheduler.add_job(
         _alert_check_job,
         trigger="interval",
-        minutes=5,
+        minutes=2,
         id="alert_check",
         name="5-Min Alert Check",
         replace_existing=True,
@@ -803,15 +829,19 @@ def start_scheduler() -> BackgroundScheduler:
         max_instances=1,
     )
 
-    # Arena self-learning — runs every hour, non-blocking (spawns daemon thread)
+    # Arena self-learning — runs every 15 min, non-blocking (spawns daemon
+    # thread). Tightened from 1hr (2026-07-15, user request) so refinement
+    # rounds accumulate while the backend is online instead of waiting on
+    # the clock; max_instances=1 + the arena's own _arena_lock still ensure
+    # a still-running cycle is skipped rather than overlapped.
     _scheduler.add_job(
         _arena_job,
         trigger="interval",
-        hours=1,
+        minutes=15,
         id="arena_cycle",
         name="Strategy Arena Self-Learning",
         replace_existing=True,
-        misfire_grace_time=1800,
+        misfire_grace_time=600,
         max_instances=1,
     )
 
@@ -896,11 +926,30 @@ def start_scheduler() -> BackgroundScheduler:
     except Exception as exc:
         scheduler_logger.warning("Agent pipeline boot kick failed (non-fatal): %s", exc)
 
+    # Kick off the population snapshot immediately on boot too — same reason
+    # as the other boot-kicks: an interval trigger otherwise leaves the
+    # health endpoint showing a stale snapshot for up to 15 min after every
+    # restart (2026-07-15).
+    try:
+        _snapshot_only_job()
+        scheduler_logger.info("Population snapshot kicked off on boot")
+    except Exception as exc:
+        scheduler_logger.warning("Snapshot boot kick failed (non-fatal): %s", exc)
+
+    # Kick off the strategy research loop immediately on boot too, for the
+    # same reason — otherwise the population sits idle for up to 2 min after
+    # every restart with no cycle in flight (2026-07-15).
+    try:
+        _strategy_loop_subprocess_job()
+        scheduler_logger.info("Strategy loop kicked off on boot")
+    except Exception as exc:
+        scheduler_logger.warning("Strategy loop boot kick failed (non-fatal): %s", exc)
+
     # Global universe seeding on boot — DISABLED. See the matching note on
     # Step 1A above: AQRTI runs a fixed 12-symbol curated universe now.
     scheduler_logger.info("Global universe seed on boot: skipped (curated 12-symbol universe mode)")
     scheduler_logger.info(
-        "Scheduler started. Daily cron: %s IST | Agents: every 1 hr | Strategy loop: every 5 min",
+        "Scheduler started. Daily cron: %s IST | Agents: every 15 min | Strategy loop: every 2 min",
         settings.ingest_cron,
     )
     return _scheduler

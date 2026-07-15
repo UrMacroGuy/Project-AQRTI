@@ -131,6 +131,60 @@ async function hydrateRisk() {
     }
   }
   initStressTest();
+  hydrateTradeReconciliation();
+}
+
+// TRADE RECONCILIATION — algo suggested vs human executed
+// ══════════════════════════════════════════════════════════════
+async function hydrateTradeReconciliation() {
+  const data = await Api.tradeReconciliation();
+  const rowsBody = el('tr-rows-body');
+  const noteEl = el('tr-note');
+
+  if (!data) {
+    if (rowsBody) rowsBody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.78rem">Backend offline — start the backend server to load data.</td></tr>';
+    if (noteEl) noteEl.textContent = '';
+    ['tr-avg-slippage', 'tr-avg-days', 'tr-skipped-count'].forEach(id => { const e = el(id); if (e) e.textContent = '—'; });
+    return;
+  }
+
+  const summary = data.summary || {};
+  const items = data.items || [];
+
+  const slipEl = el('tr-avg-slippage');
+  if (slipEl) slipEl.textContent = summary.avgSlippagePct != null ? `${summary.avgSlippagePct > 0 ? '+' : ''}${summary.avgSlippagePct.toFixed(2)}%` : '—';
+
+  const daysEl = el('tr-avg-days');
+  if (daysEl) daysEl.textContent = summary.avgDaysToFill != null ? summary.avgDaysToFill.toFixed(1) : '—';
+
+  const skipEl = el('tr-skipped-count');
+  if (skipEl) skipEl.textContent = summary.skippedCount != null ? summary.skippedCount : '—';
+  const skipOutcomeEl = el('tr-skipped-outcome');
+  if (skipOutcomeEl) {
+    skipOutcomeEl.textContent = summary.avgSkippedOutcomePct != null
+      ? `avg missed move: ${summary.avgSkippedOutcomePct > 0 ? '+' : ''}${summary.avgSkippedOutcomePct.toFixed(2)}%`
+      : 'no skipped suggestions yet';
+  }
+
+  if (noteEl) noteEl.textContent = summary.note || '';
+
+  if (rowsBody) {
+    if (!items.length) {
+      rowsBody.innerHTML = '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.78rem">No reconciliation data yet — no real transactions recorded to compare against algo suggestions.</td></tr>';
+    } else {
+      rowsBody.innerHTML = items.slice(0, 25).map(r => {
+        const statusColor = r.status === 'matched' ? 'var(--positive)' : r.status === 'skipped' ? 'var(--negative)' : 'var(--text-muted)';
+        return `<tr>
+          <td>${r.symbol}</td>
+          <td>${r.algoSuggestedPrice != null ? '₹' + r.algoSuggestedPrice.toFixed(2) : '—'} <span style="color:var(--text-muted);font-size:0.68rem">${r.algoSuggestedDate || ''}</span></td>
+          <td>${r.humanFillPrice != null ? '₹' + r.humanFillPrice.toFixed(2) : '—'} <span style="color:var(--text-muted);font-size:0.68rem">${r.humanFillDate || ''}</span></td>
+          <td>${r.slippagePct != null ? (r.slippagePct > 0 ? '+' : '') + r.slippagePct.toFixed(2) + '%' : '—'}</td>
+          <td>${r.daysToFill != null ? r.daysToFill : '—'}</td>
+          <td style="color:${statusColor}">${r.status}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
 }
 
 // SCENARIO STRESS TEST

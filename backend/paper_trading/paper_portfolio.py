@@ -38,9 +38,31 @@ def get_or_create_portfolio(db: Session) -> PaperPortfolio:
     return row
 
 
+# A single mark-to-market jump beyond this multiple of the last recorded
+# value is treated as corrupted input (bad tick fed through mark_to_market),
+# not a real portfolio move. Prevents a fabricated total_value from setting
+# a false peak_value/max_drawdown_pct that then poisons every future
+# drawdown reading, since max_drawdown_pct is a running min that never
+# self-heals once written (2026-07-14 incident: a bad HAL quote inflated
+# total_value 9x for several hours, which briefly became peak_value and
+# left max_drawdown_pct stuck at -82% long after the value corrected back).
+_MAX_PLAUSIBLE_VALUE_RATIO = 3.0
+
+
 def update_portfolio_value(db: Session, total_value: float, cash: float) -> PaperPortfolio:
     """Recalculate total value, returns, and drawdown then persist."""
     row = get_or_create_portfolio(db)
+
+    last_value = row.total_value or row.initial_capital
+    if last_value > 0:
+        ratio = max(total_value, last_value) / max(min(total_value, last_value), 1e-9)
+        if ratio > _MAX_PLAUSIBLE_VALUE_RATIO:
+            log.warning(
+                "Rejected implausible portfolio value: last=%.2f new=%.2f (ratio=%.1fx > %.1fx) — "
+                "keeping last known-good value, not persisting as peak/drawdown input",
+                last_value, total_value, ratio, _MAX_PLAUSIBLE_VALUE_RATIO,
+            )
+            return row
 
     if total_value > (row.peak_value or row.initial_capital):
         row.peak_value = total_value

@@ -26,19 +26,23 @@ from aqrti.utils.logger import get_logger
 from strategies.strategy_dsl import StrategyDSL, Condition, ConditionGroup
 from strategies.strategy_generator import (
     PRICE_FEATURES, VOLUME_FEATURES, VOLATILITY_FEATURES,
-    TREND_FEATURES, SENTIMENT_FEATURES, REGIME_SETS,
+    TREND_FEATURES, RESEARCH_FEATURES, REGIME_SETS,
 )
 
 log = get_logger("mutation_engine")
 
 FLIP_MAP = {">": ">=", ">=": ">", "<": "<=", "<=": "<"}
 ALL_REGIMES = ["BULL", "BEAR", "SIDEWAYS", "VOLATILE"]
+# Registry-backed pools only (Phase A fix, 2026-07-15c) — see
+# strategy_generator.py's pool-definition comment for the phantom-feature
+# mapping this replaced. "sentiment" renamed to "research" to match the
+# actual feature_registry.py category for these names.
 FEATURE_POOL_BY_CATEGORY = {
     "price":      PRICE_FEATURES,
     "trend":      TREND_FEATURES,
     "volume":     VOLUME_FEATURES,
     "volatility": VOLATILITY_FEATURES,
-    "sentiment":  SENTIMENT_FEATURES,
+    "research":   RESEARCH_FEATURES,
 }
 
 

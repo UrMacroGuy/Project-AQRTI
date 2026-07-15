@@ -978,6 +978,28 @@
         </div>
       </div>
 
+      <!-- Trade Reconciliation: algo-suggested vs human-executed -->
+      <div class="panel" id="trade-reconciliation-panel" style="margin-top:8px">
+        <div class="panel-header">
+          <span class="panel-title">TRADE RECONCILIATION</span>
+          <span class="panel-tag">Algo Suggested vs Human Executed &middot; Suggestions, not advice — you decide</span>
+        </div>
+        <div class="panel-body">
+          <div class="kpi-row" style="margin-bottom:10px">
+            <div class="kpi-card"><div class="kpi-label">Avg Slippage</div><div class="kpi-value" id="tr-avg-slippage">—</div><div class="kpi-sub">Fill vs suggested price</div></div>
+            <div class="kpi-card"><div class="kpi-label">Avg Days to Fill</div><div class="kpi-value" id="tr-avg-days">—</div><div class="kpi-sub">Hesitation</div></div>
+            <div class="kpi-card"><div class="kpi-label">Skipped Suggestions</div><div class="kpi-value" id="tr-skipped-count">—</div><div class="kpi-sub" id="tr-skipped-outcome">—</div></div>
+          </div>
+          <div id="tr-note" style="font-size:0.76rem;color:var(--text-muted);margin-bottom:8px"></div>
+          <div style="overflow-x:auto">
+            <table class="data-table compact">
+              <thead><tr><th>Symbol</th><th>Algo Suggested</th><th>Human Fill</th><th>Slippage</th><th>Days to Fill</th><th>Status</th></tr></thead>
+              <tbody id="tr-rows-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
     </section>
 
     <!-- ────────────────────────────────────────────────
@@ -1464,6 +1486,7 @@
                 <th>Win Rate</th>
                 <th>Losing Days Left</th>
                 <th>Rounds Done</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="arena-review-body"></tbody>
@@ -1718,19 +1741,19 @@
 
   </main>
 
-  <script src="api.js?v=20260711e"></script>
-  <script src="core.js?v=20260711f"></script>
+  <script src="api.js?v=20260715a"></script>
+  <script src="core.js?v=20260715a"></script>
   <script src="pages/news.js?v=20260714a"></script>
   <script src="pages/sentiment.js?v=20260709b"></script>
   <script src="pages/market.js?v=20260711e"></script>
   <script src="pages/paper.js?v=20260709b"></script>
   <script src="pages/strategy.js?v=20260709a"></script>
-  <script src="pages/agents.js?v=20260711e"></script>
+  <script src="pages/agents.js?v=20260715a"></script>
   <script src="pages/risk.js?v=20260709b"></script>
   <script src="pages/strategy-trades-modal.js?v=20260709a"></script>
   <script src="pages/analytics.js?v=20260709b"></script>
   <script src="pages/cockpit.js?v=20260711a"></script>
-  <script src="pages/arena.js?v=20260709a"></script>
+  <script src="pages/arena.js?v=20260715a"></script>
   <script src="pages/markov.js?v=20260709a"></script>
 </body>
 </html>

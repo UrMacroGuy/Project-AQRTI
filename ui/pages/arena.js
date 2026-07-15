@@ -83,6 +83,10 @@ async function hydrateArena() {
           <td style="text-align:right">${fmt1(r.win_rate)}%</td>
           <td style="text-align:right">${r.losing_days ?? 0}</td>
           <td style="text-align:center">${r.rounds_completed ?? 0} / 10</td>
+          <td style="text-align:center;white-space:nowrap">
+            <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px" onclick="retryArenaReview('${r.strategy_id}', this)">↻ Retry</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;color:var(--alert)" onclick="retireArenaReview('${r.strategy_id}', this)">✕ Retire</button>
+          </td>
         </tr>
       `).join('');
     } else {
@@ -228,4 +232,27 @@ function fmt1(v) {
 function escHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function retryArenaReview(strategyId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    await Api.arenaRetryReview(strategyId);
+    hydrateArena();
+  } catch (e) {
+    console.error('retryArenaReview:', e);
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Retry'; }
+  }
+}
+
+async function retireArenaReview(strategyId, btn) {
+  if (!confirm('Retire this algo? It will stop competing in the arena and 2 fresh candidates will be bred to replace it.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    await Api.retireStrategy(strategyId, 'arena_needs_review_manual_retire');
+    hydrateArena();
+  } catch (e) {
+    console.error('retireArenaReview:', e);
+    if (btn) { btn.disabled = false; btn.textContent = '✕ Retire'; }
+  }
 }

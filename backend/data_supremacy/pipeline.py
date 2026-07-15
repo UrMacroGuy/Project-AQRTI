@@ -46,6 +46,17 @@ def run_data_supremacy_pipeline() -> dict:
             results["status"] = "partial"
             logger.error("8B FII/DII failed: %s", exc)
 
+        # 8H: Insider trading (PIT disclosures)
+        try:
+            from data_supremacy.insider_trading_scraper import scrape_insider_trading
+            r = scrape_insider_trading(db)
+            results["steps"]["insider_trading"] = r
+            logger.info("8H Insider trading: stored=%d", r.get("stored", 0))
+        except Exception as exc:
+            results["steps"]["insider_trading"] = {"status": "error", "error": str(exc)}
+            results["status"] = "partial"
+            logger.error("8H Insider trading failed: %s", exc)
+
         # 8C: Options chain
         try:
             from data_supremacy.options_scraper import scrape_all_options

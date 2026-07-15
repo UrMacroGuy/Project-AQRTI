@@ -579,12 +579,7 @@ def activate(strategy_id: str, force: bool = False, db: Session = Depends(get_db
     """
     if strategy_id in RESERVED_IDS:
         raise HTTPException(status_code=400, detail="'All' is reserved — provide a concrete strategy ID")
-    from datetime import datetime as _dt
-    from aqrti.database.models import PaperTrade
-    from strategies.promotion_config import (
-        QUARANTINE_MIN_DAYS, QUARANTINE_MIN_TRADES, QUARANTINE_MIN_WIN_RATE,
-        is_expectancy_gated,
-    )
+    from strategies.strategy_lifecycle import check_quarantine_gate
 
     row = get_strategy(db, strategy_id)
     if not row:
@@ -596,32 +591,7 @@ def activate(strategy_id: str, force: bool = False, db: Session = Depends(get_db
         )
 
     if not force:
-        days_promoted = (_dt.utcnow() - row.promoted_at).days if row.promoted_at else 0
-        # Count ONLY genuine shadow trades (the strategy's own DSL exercised
-        # forward, portfolio "strat_<id>") — NOT default-portfolio ML trades
-        # that merely borrowed this strategy's ID for SL/TP params.
-        closed = (
-            db.query(PaperTrade)
-            .filter(PaperTrade.portfolio_name == f"strat_{strategy_id}",
-                    PaperTrade.is_open == False)
-            .all()
-        )
-        n = len(closed)
-        wins = sum(1 for t in closed if (t.gross_pnl_pct or 0) > 0)
-        wr = wins / n * 100 if n else 0.0
-        net_pnl = sum(t.gross_pnl or 0 for t in closed)
-        failures = []
-        if days_promoted < QUARANTINE_MIN_DAYS:
-            failures.append(f"only {days_promoted}/{QUARANTINE_MIN_DAYS} days in quarantine")
-        if n < QUARANTINE_MIN_TRADES:
-            failures.append(f"only {n}/{QUARANTINE_MIN_TRADES} closed paper trades")
-        # Expectancy-gated families are held to live profitability, not the
-        # WR floor (see promotion_config.EXPECTANCY_GATED_FAMILIES) — the
-        # net-P&L-positive check below still applies to them unchanged.
-        if n and wr < QUARANTINE_MIN_WIN_RATE and not is_expectancy_gated(row.family):
-            failures.append(f"paper win rate {wr:.1f}% < {QUARANTINE_MIN_WIN_RATE}%")
-        if n and net_pnl <= 0:
-            failures.append(f"paper net P&L {net_pnl:.0f} not positive")
+        failures = check_quarantine_gate(db, row)
         if failures:
             raise HTTPException(
                 status_code=400,

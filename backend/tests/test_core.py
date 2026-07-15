@@ -367,6 +367,8 @@ def _make_promotable_strategy_row(**overrides) -> dict:
         oos_win_rate     = 55.0,   # overridden per-test
         backtest_start   = None,   # skip benchmark gate (requires both start+end)
         backtest_end     = None,
+        mc_bankruptcy_pct = 0.0,
+        deflated_sharpe   = 1.0,
     )
     base.update(overrides)
     return base
@@ -906,7 +908,10 @@ class TestMathGroundedTemplates:
             assert fam in _RAW_DEFAULT_FAMILY_WEIGHTS
         assert set(_FAMILY_WEIGHTS) == set(_GENERATORS)
         assert set(_RAW_DEFAULT_FAMILY_WEIGHTS) == set(_FAMILY_WEIGHTS)
-        assert abs(sum(_FAMILY_WEIGHTS.values()) - 1.0) < 1e-9
+        # Weights need not sum to exactly 1.0 — generate_candidates() and
+        # meta_learner.compute_meta_state() both renormalize at runtime
+        # (2026-07-15c: sum is 1.23 after the 5 new-family additions).
+        assert sum(_FAMILY_WEIGHTS.values()) > 0
 
     def test_vol_managed_momentum_structure(self):
         import random as _random
@@ -1017,3 +1022,537 @@ class TestLiveNewsGate:
         self._mk_news(db, company="HAL",
                       timestamp=datetime.utcnow() - timedelta(hours=48))
         assert news_blocks_entry(db, "HAL") == (False, "")
+
+
+from aqrti.database.models import PaperPosition, TradeReconciliation
+from portfolio.trade_reconciliation import (
+    ensure_suggestion_rows, match_transaction, mark_stale_as_skipped,
+    backfill_from_existing_transactions, get_reconciliation_report,
+)
+
+
+class TestTradeReconciliation:
+    @pytest.fixture(autouse=True)
+    def setup_db(self):
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        Session = _sessionmaker(bind=engine)
+        self.db = Session()
+        yield
+        self.db.close()
+        engine.dispose()
+
+    def test_no_data_reports_honestly(self):
+        report = get_reconciliation_report(self.db)
+        assert report["items"] == []
+        assert report["summary"]["totalSuggestions"] == 0
+        assert report["summary"]["note"] is not None
+
+    def test_ensure_suggestion_rows_creates_one_per_paper_position(self):
+        self.db.add(PaperPosition(
+            portfolio_name="default", symbol="BEL", entry_date=date(2026, 1, 1),
+            entry_price=100.0, shares=10, capital_deployed=1000,
+            strategy_id="AQRTI_STR_TEST", strategy_name="Test Algo",
+        ))
+        self.db.commit()
+
+        created = ensure_suggestion_rows(self.db)
+        assert created == 1
+        rows = self.db.query(TradeReconciliation).all()
+        assert len(rows) == 1
+        assert rows[0].symbol == "BEL"
+        assert rows[0].status == "suggested_only"
+
+        # Idempotent — a second call creates nothing new
+        assert ensure_suggestion_rows(self.db) == 0
+        assert self.db.query(TradeReconciliation).count() == 1
+
+    def test_match_transaction_computes_slippage_and_days_to_fill(self):
+        pos = PaperPosition(
+            portfolio_name="default", symbol="BEL", entry_date=date(2026, 1, 1),
+            entry_price=100.0, shares=10, capital_deployed=1000,
+            strategy_id="AQRTI_STR_TEST", strategy_name="Test Algo",
+        )
+        self.db.add(pos)
+        self.db.commit()
+        ensure_suggestion_rows(self.db)
+
+        txn = PortfolioTransaction(
+            ticker="BEL", transaction_type="buy", quantity=10, price=105.0,
+            amount=1050.0, transaction_date=date(2026, 1, 4), broker="zerodha",
+        )
+        self.db.add(txn)
+        self.db.commit()
+
+        match = match_transaction(self.db, txn)
+        assert match is not None
+        assert match.status == "matched"
+        assert match.slippage_pct == 5.0
+        assert match.days_to_fill == 3
+        assert match.human_transaction_id == txn.id
+
+    def test_transaction_outside_window_is_not_matched(self):
+        pos = PaperPosition(
+            portfolio_name="default", symbol="BEL", entry_date=date(2026, 1, 1),
+            entry_price=100.0, shares=10, capital_deployed=1000,
+        )
+        self.db.add(pos)
+        self.db.commit()
+        ensure_suggestion_rows(self.db)
+
+        txn = PortfolioTransaction(
+            ticker="BEL", transaction_type="buy", quantity=10, price=105.0,
+            amount=1050.0, transaction_date=date(2026, 2, 15), broker="zerodha",
+        )
+        self.db.add(txn)
+        self.db.commit()
+
+        assert match_transaction(self.db, txn) is None
+
+    def test_stale_suggestion_marked_skipped(self):
+        pos = PaperPosition(
+            portfolio_name="default", symbol="BEL",
+            entry_date=date.today() - timedelta(days=30),
+            entry_price=100.0, shares=10, capital_deployed=1000,
+        )
+        self.db.add(pos)
+        self.db.commit()
+        ensure_suggestion_rows(self.db)
+
+        skipped = mark_stale_as_skipped(self.db)
+        assert skipped == 1
+        row = self.db.query(TradeReconciliation).first()
+        assert row.status == "skipped"
+
+    def test_backfill_only_links_genuine_matches_no_fabrication(self):
+        # A transaction with no plausible suggestion nearby must stay unmatched.
+        txn = PortfolioTransaction(
+            ticker="ZZZZ", transaction_type="buy", quantity=1, price=50.0,
+            amount=50.0, transaction_date=date(2026, 3, 1), broker="manual",
+        )
+        self.db.add(txn)
+        self.db.commit()
+
+        matched_count = backfill_from_existing_transactions(self.db)
+        assert matched_count == 0
+        assert self.db.query(TradeReconciliation).filter_by(human_transaction_id=txn.id).count() == 0
+
+    def test_report_never_mixes_paper_and_real_tables_directly(self):
+        # The report must go through TradeReconciliation only — PaperPosition
+        # and PortfolioTransaction are never joined directly in a query.
+        import inspect
+        from portfolio import trade_reconciliation as tr_mod
+        src = inspect.getsource(tr_mod)
+        assert "join(PortfolioTransaction" not in src
+
+
+# ══════════════════════════════════════════════════════════════
+# Strategy generator upgrade (2026-07-15c): phantom-feature fix +
+# 5 new evidence-based template families
+# ══════════════════════════════════════════════════════════════
+class TestGeneratorFeaturesRegistered:
+    """
+    Regression guard for the phantom-feature bug: strategy_generator.py's
+    feature pools and mutation_engine.py's FEATURE_POOL_BY_CATEGORY
+    previously referenced ~20 names (delivery_pct, price_above_ema50,
+    sentiment_score, stoch_k, bb_width_20, etc.) never computed by
+    feature_registry.py — Condition.evaluate returns False on a missing
+    feature, so those conditions silently never fired. Every generator's
+    DSL tree must reference registry-only feature names.
+    """
+
+    def _all_registry_names(self):
+        from features.feature_registry import FEATURE_CATALOG
+        return {f.name for f in FEATURE_CATALOG}
+
+    def test_all_generators_use_only_registry_features(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        registry_names = self._all_registry_names()
+        for family, gen_fn in _GENERATORS.items():
+            for seed in range(5):
+                s = gen_fn(_random.Random(seed))
+                for feat in s.feature_names():
+                    assert feat in registry_names, (
+                        f"family={family} seed={seed} references unregistered "
+                        f"feature '{feat}'"
+                    )
+
+    def test_generator_feature_pools_use_only_registry_features(self):
+        from strategies.strategy_generator import (
+            PRICE_FEATURES, VOLUME_FEATURES, VOLATILITY_FEATURES,
+            TREND_FEATURES, REGIME_FEATURES, RESEARCH_FEATURES, EVENT_FEATURES,
+        )
+        registry_names = self._all_registry_names()
+        for pool in (PRICE_FEATURES, VOLUME_FEATURES, VOLATILITY_FEATURES,
+                     TREND_FEATURES, REGIME_FEATURES, RESEARCH_FEATURES, EVENT_FEATURES):
+            for feat in pool:
+                assert feat in registry_names, f"pool references unregistered feature '{feat}'"
+
+    def test_mutation_engine_feature_pools_use_only_registry_features(self):
+        from strategies.mutation_engine import FEATURE_POOL_BY_CATEGORY
+        registry_names = self._all_registry_names()
+        for cat, pool in FEATURE_POOL_BY_CATEGORY.items():
+            for feat in pool:
+                assert feat in registry_names, (
+                    f"mutation_engine category '{cat}' references unregistered feature '{feat}'"
+                )
+
+    def test_mutation_feature_swap_never_injects_phantom_feature(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        from strategies.mutation_engine import mutate
+        registry_names = self._all_registry_names()
+        parent = _GENERATORS["momentum_trend"](_random.Random(1))
+        rng = _random.Random(7)
+        for _ in range(20):
+            child, op, desc = mutate(parent, rng=rng, operation="feature_swap")
+            for feat in child.feature_names():
+                assert feat in registry_names, f"feature_swap injected unregistered feature '{feat}'"
+
+    def test_delivery_ratio_thresholds_are_fractional_not_percent(self):
+        # Phase A fix: delivery_pct (0-100) -> delivery_ratio (0-1). Any
+        # threshold compared against delivery_ratio must be <= 1.0, never a
+        # leftover 0-100-scale value from the old delivery_pct assumption.
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        for family in ("institutional_flow", "long_hold_momentum", "accumulation_momentum"):
+            for seed in range(10):
+                s = _GENERATORS[family](_random.Random(seed))
+                for c in s.entry_conditions.conditions:
+                    if getattr(c, "feature", None) == "delivery_ratio":
+                        assert 0.0 < c.threshold <= 1.0, (
+                            f"{family} seed={seed}: delivery_ratio threshold "
+                            f"{c.threshold} looks like a leftover 0-100 scale value"
+                        )
+
+
+class TestNewEvidenceBasedTemplates:
+    """5 templates added 2026-07-15c — see strategy_generator.py docstrings for citations."""
+
+    def test_all_five_registered_and_lockstep(self):
+        from strategies.strategy_generator import _GENERATORS, _FAMILY_WEIGHTS
+        from strategies.meta_learner import _RAW_DEFAULT_FAMILY_WEIGHTS
+        new_families = (
+            "breakout_volume_confirmed", "dual_momentum", "fii_flow_momentum",
+            "adx_trend_vol_filtered", "accumulation_momentum",
+        )
+        for fam in new_families:
+            assert fam in _GENERATORS and fam in _FAMILY_WEIGHTS and fam in _RAW_DEFAULT_FAMILY_WEIGHTS
+        assert set(_FAMILY_WEIGHTS) == set(_GENERATORS)
+        assert set(_RAW_DEFAULT_FAMILY_WEIGHTS) == set(_FAMILY_WEIGHTS)
+
+    def test_breakout_volume_confirmed_structure(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        s = _GENERATORS["breakout_volume_confirmed"](_random.Random(1))
+        feats = {c.feature for c in s.entry_conditions.conditions}
+        assert "breakout_distance_52w" in feats and "volume_ratio_20d" in feats
+        assert s.family == "breakout_volume_confirmed"
+
+    def test_dual_momentum_structure(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        s = _GENERATORS["dual_momentum"](_random.Random(2))
+        feats = {c.feature for c in s.entry_conditions.conditions}
+        assert "return_126d" in feats and "nifty_rs_21d" in feats and "rolling_vol_21d" in feats
+        assert s.family == "dual_momentum"
+
+    def test_fii_flow_momentum_never_fires_on_flow_alone(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        for seed in range(10):
+            s = _GENERATORS["fii_flow_momentum"](_random.Random(seed))
+            feats = {c.feature for c in s.entry_conditions.conditions}
+            assert "fii_net_5d" in feats and "fii_net_20d" in feats
+            technical = {"price_vs_ema50_pct", "momentum_20d"}
+            assert feats & technical, "fii_flow_momentum must pair flow with a technical confirmation"
+
+    def test_adx_trend_vol_filtered_structure(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        s = _GENERATORS["adx_trend_vol_filtered"](_random.Random(3))
+        feats = {c.feature for c in s.entry_conditions.conditions}
+        assert "adx_14" in feats and "di_plus_minus" in feats and "macd_histogram" in feats
+        assert s.stop_loss_pct <= -8.0   # hard stop, trend-entry doctrine
+
+    def test_accumulation_momentum_structure(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS
+        s = _GENERATORS["accumulation_momentum"](_random.Random(4))
+        feats = {c.feature for c in s.entry_conditions.conditions}
+        assert "obv_slope_10d" in feats and "accumulation_score_5d" in feats
+
+    def test_all_new_families_produce_prescreen_passable_dsls(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS, _passes_prescreen
+        new_families = (
+            "breakout_volume_confirmed", "dual_momentum", "fii_flow_momentum",
+            "adx_trend_vol_filtered", "accumulation_momentum",
+        )
+        for family in new_families:
+            passed = 0
+            for seed in range(20):
+                s = _GENERATORS[family](_random.Random(seed))
+                ok, reason = _passes_prescreen(s, bad_features=set(), bad_conditions=set())
+                if ok:
+                    passed += 1
+            assert passed > 0, f"{family}: 0/20 seeded candidates passed prescreen"
+
+
+class TestAllGeneratorsPrescreenPassable:
+    def test_all_22_generators_produce_prescreen_passable_dsls(self):
+        import random as _random
+        from strategies.strategy_generator import _GENERATORS, _passes_prescreen
+        for family, gen_fn in _GENERATORS.items():
+            passed = 0
+            for seed in range(20):
+                s = gen_fn(_random.Random(seed))
+                ok, reason = _passes_prescreen(s, bad_features=set(), bad_conditions=set())
+                if ok:
+                    passed += 1
+            assert passed > 0, f"{family}: 0/20 seeded candidates passed prescreen"
+
+
+class TestFeatureStatsQuantileSampling:
+    @pytest.fixture(autouse=True)
+    def setup_db(self):
+        engine = _create_engine("sqlite:///:memory:", echo=False)
+        _AqrtiBase.metadata.create_all(engine)
+        Session = _sessionmaker(bind=engine)
+        self.db = Session()
+        yield
+        self.db.close()
+        engine.dispose()
+
+    def test_no_data_returns_none(self):
+        from strategies.feature_stats import get_feature_quantiles, clear_cache
+        clear_cache()
+        assert get_feature_quantiles(self.db, "adx_14") is None
+
+    def test_quantiles_computed_from_real_rows(self):
+        from aqrti.database.models import FeatureValue, Stock
+        from strategies.feature_stats import get_feature_quantiles, clear_cache
+        clear_cache()
+        self.db.add(Stock(symbol="BEL", name="BEL"))
+        self.db.commit()
+        for i in range(60):
+            self.db.add(FeatureValue(
+                symbol="BEL", date=date(2026, 1, 1) + timedelta(days=i),
+                feature_name="adx_14", value=float(i), version=1,
+            ))
+        self.db.commit()
+        q = get_feature_quantiles(self.db, "adx_14")
+        assert q is not None
+        assert q["q10"] < q["q50"] < q["q90"]
+        assert 0 <= q["q50"] <= 59
+
+    def test_fallback_when_stats_missing_matches_hardcoded_behavior(self):
+        # _sample_threshold with no module-level stats context set must
+        # behave identically to a plain rng.uniform draw — generators stay
+        # unit-testable with rng only (plan requirement).
+        import random as _random
+        from strategies.strategy_generator import _sample_threshold, _CURRENT_FEATURE_STATS
+        assert _CURRENT_FEATURE_STATS is None
+        val = _sample_threshold(_random.Random(1), "adx_14", "high", 20.0, 30.0)
+        assert 20.0 <= val <= 30.0
+
+    def test_generate_candidates_without_db_uses_hardcoded_fallback(self):
+        from strategies.strategy_generator import generate_candidates
+        # No db= passed — must not raise, must not touch feature_stats at all.
+        candidates = generate_candidates(n=5, seed=1, families=["dual_momentum"])
+        assert len(candidates) > 0
+
+
+class TestNimKeyPool:
+    """Phase D (2026-07-15c): multi-key NVIDIA NIM support."""
+
+    def test_single_key_pool_behaves_like_before(self):
+        from aqrti.llm.nvidia_nim import _KeyPool
+        pool = _KeyPool(["key-a"], rpm=40)
+        assert pool.key_count() == 1
+        for _ in range(5):
+            assert pool.acquire() == "key-a"
+
+    def test_multi_key_pool_picks_least_loaded(self):
+        from aqrti.llm.nvidia_nim import _KeyPool
+        pool = _KeyPool(["key-a", "key-b"], rpm=40)
+        # Load key-a up first — subsequent acquires should prefer key-b
+        for _ in range(3):
+            pool._limiters["key-a"].acquire()
+        chosen = pool.acquire()
+        assert chosen == "key-b"
+
+    def test_interleaving_distributes_across_keys(self):
+        from aqrti.llm.nvidia_nim import _KeyPool
+        pool = _KeyPool(["key-a", "key-b"], rpm=40)
+        chosen = [pool.acquire() for _ in range(10)]
+        assert set(chosen) == {"key-a", "key-b"}
+        # Roughly balanced — no single key should take all 10 calls
+        assert 2 <= chosen.count("key-a") <= 8
+
+    def test_cooldown_excludes_key_until_expiry(self):
+        from aqrti.llm.nvidia_nim import _KeyPool
+        pool = _KeyPool(["key-a", "key-b"], rpm=40)
+        pool.mark_cooldown("key-a")
+        for _ in range(5):
+            assert pool.acquire() == "key-b"
+
+    def test_cooldown_with_single_key_still_returns_that_key(self):
+        # Single-key deployment: cooling down the only key must not raise —
+        # falls back to using it anyway (matches pre-multi-key "just wait").
+        from aqrti.llm.nvidia_nim import _KeyPool
+        pool = _KeyPool(["key-a"], rpm=40)
+        pool.mark_cooldown("key-a")
+        assert pool.acquire() == "key-a"
+
+    def test_no_keys_raises_same_error_as_before(self):
+        from aqrti.llm.nvidia_nim import _KeyPool
+        pool = _KeyPool([], rpm=40)
+        with pytest.raises(RuntimeError, match="NVIDIA_NIM_API_KEY is not set"):
+            pool.acquire()
+
+    def test_is_configured_and_key_count_reflect_env(self):
+        import aqrti.llm.nvidia_nim as nim_mod
+        assert nim_mod.is_configured() == bool(nim_mod._API_KEYS)
+        assert nim_mod.key_count() == len(nim_mod._API_KEYS)
+
+
+class TestLlmStrategyAdvisor:
+    """Phase C (2026-07-15c): LLM generation hints — both touchpoints are
+    fail-closed; every failure mode must degrade silently, never raise."""
+
+    def test_strategy_hint_rejects_unregistered_feature(self):
+        from strategies.llm_strategy_advisor import StrategyHint, HintCondition, _validate_hint
+        hint = StrategyHint(
+            family="dual_momentum",
+            conditions=[HintCondition(feature="fake_feature_xyz", operator=">", threshold=5.0)],
+        )
+        assert _validate_hint(hint, {}) is None
+
+    def test_strategy_hint_rejects_unknown_family(self):
+        from strategies.llm_strategy_advisor import StrategyHint, HintCondition, _validate_hint
+        hint = StrategyHint(
+            family="not_a_real_family",
+            conditions=[HintCondition(feature="return_21d", operator=">", threshold=2.0)],
+        )
+        assert _validate_hint(hint, {}) is None
+
+    def test_strategy_hint_rejects_unknown_operator(self):
+        from strategies.llm_strategy_advisor import StrategyHint, HintCondition, _validate_hint
+        hint = StrategyHint(
+            family="dual_momentum",
+            conditions=[HintCondition(feature="return_21d", operator="~=", threshold=2.0)],
+        )
+        assert _validate_hint(hint, {}) is None
+
+    def test_strategy_hint_rejects_out_of_range_threshold(self):
+        from strategies.llm_strategy_advisor import StrategyHint, HintCondition, _validate_hint
+        hint = StrategyHint(
+            family="dual_momentum",
+            conditions=[HintCondition(feature="return_21d", operator=">", threshold=99999.0)],
+        )
+        stats = {"return_21d": {"q10": -2.0, "q50": 1.0, "q90": 5.0}}
+        assert _validate_hint(hint, stats) is None
+
+    def test_strategy_hint_accepts_in_range_threshold(self):
+        from strategies.llm_strategy_advisor import StrategyHint, HintCondition, _validate_hint
+        hint = StrategyHint(
+            family="dual_momentum",
+            conditions=[HintCondition(feature="return_21d", operator=">", threshold=2.0)],
+        )
+        stats = {"return_21d": {"q10": -2.0, "q50": 1.0, "q90": 5.0}}
+        assert _validate_hint(hint, stats) is not None
+
+    def test_strategy_hint_garbage_json_returns_none_via_ask_structured(self):
+        from unittest.mock import patch
+        from strategies.llm_strategy_advisor import get_generation_hints
+        with patch("strategies.llm_strategy_advisor._kill_switch_enabled", return_value=True), \
+             patch("strategies.llm_strategy_advisor.ask_structured", return_value=None):
+            hints = get_generation_hints(db=None, families=["dual_momentum"], n_hints=3)
+        assert hints == []
+
+    def test_kill_switch_off_returns_no_hints(self):
+        from strategies.llm_strategy_advisor import get_generation_hints
+        import os as _os
+        old = _os.environ.get("AQRTI_LLM_STRATEGY_HINTS")
+        _os.environ["AQRTI_LLM_STRATEGY_HINTS"] = "0"
+        try:
+            hints = get_generation_hints(db=None, families=["dual_momentum"], n_hints=5)
+            assert hints == []
+        finally:
+            if old is None:
+                _os.environ.pop("AQRTI_LLM_STRATEGY_HINTS", None)
+            else:
+                _os.environ["AQRTI_LLM_STRATEGY_HINTS"] = old
+
+    def test_hint_to_strategy_tags_llm_hint_source(self):
+        import random as _random
+        from strategies.llm_strategy_advisor import StrategyHint, HintCondition, hint_to_strategy
+        hint = StrategyHint(
+            family="dual_momentum",
+            conditions=[
+                HintCondition(feature="return_126d", operator=">", threshold=5.0),
+                HintCondition(feature="nifty_rs_21d", operator=">", threshold=2.0),
+            ],
+        )
+        strategy = hint_to_strategy(hint, _random.Random(1))
+        assert strategy is not None
+        assert strategy.family == "dual_momentum"
+        feats = {c.feature for c in strategy.entry_conditions.conditions}
+        assert feats == {"return_126d", "nifty_rs_21d"}
+
+    def test_graveyard_insight_rejects_fabricated_zone(self):
+        from strategies.llm_strategy_advisor import (
+            GraveyardInsight, AvoidZone, run_graveyard_postmortem,
+        )
+        from unittest.mock import patch
+        real_counts = {"momentum_trend|rsi_14|>|50": 7}
+        fabricated = GraveyardInsight(avoid=[
+            AvoidZone(family="momentum_trend", feature="made_up_feature", operator=">", threshold_bucket=50.0)
+        ])
+        with patch("strategies.llm_strategy_advisor._kill_switch_enabled", return_value=True), \
+             patch("strategies.llm_strategy_advisor.ask_structured", return_value=fabricated):
+            bumps = run_graveyard_postmortem(db=None, bad_condition_counts=real_counts)
+        assert bumps == {}
+
+    def test_graveyard_insight_accepts_real_zone_capped(self):
+        from strategies.llm_strategy_advisor import (
+            GraveyardInsight, AvoidZone, run_graveyard_postmortem, _MAX_GRAVEYARD_WEAK_BUMP,
+        )
+        from unittest.mock import patch
+        real_counts = {"momentum_trend|rsi_14|>|50": 7}
+        insight = GraveyardInsight(avoid=[
+            AvoidZone(family="momentum_trend", feature="rsi_14", operator=">", threshold_bucket=50.0)
+        ])
+        with patch("strategies.llm_strategy_advisor._kill_switch_enabled", return_value=True), \
+             patch("strategies.llm_strategy_advisor.ask_structured", return_value=insight):
+            bumps = run_graveyard_postmortem(db=None, bad_condition_counts=real_counts)
+        assert bumps == {"momentum_trend|rsi_14|>|50": _MAX_GRAVEYARD_WEAK_BUMP}
+
+    def test_graveyard_bump_alone_cannot_cross_blacklist_threshold(self):
+        # The whole safety property of touchpoint 2: a condition with ZERO
+        # real graveyard deaths must never get blacklisted purely from an
+        # LLM opinion — bad_condition_counts only contains keys that already
+        # have >=1 real death (see _extract_graveyard_signals), and the cap
+        # is well under the dead_count>=5 threshold.
+        from strategies.llm_strategy_advisor import _MAX_GRAVEYARD_WEAK_BUMP
+        assert _MAX_GRAVEYARD_WEAK_BUMP < 5
+
+    def test_ttl_gate_caches_between_calls_within_the_hour(self):
+        from unittest.mock import patch
+        import strategies.meta_learner as ml
+        ml._postmortem_cache["ts"] = 0.0
+        ml._postmortem_cache["bumps"] = {}
+        call_count = {"n": 0}
+
+        def _fake_postmortem(db, counts):
+            call_count["n"] += 1
+            return {"x": 1}
+
+        with patch("strategies.llm_strategy_advisor.run_graveyard_postmortem", side_effect=_fake_postmortem):
+            first = ml._maybe_run_graveyard_postmortem(None, {})
+            second = ml._maybe_run_graveyard_postmortem(None, {})
+        assert first == {"x": 1}
+        assert second == {"x": 1}
+        assert call_count["n"] == 1   # second call served from cache, not a fresh LLM call

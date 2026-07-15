@@ -22,7 +22,7 @@ Outputs (written to MetaLearningRecord and returned as MetaState dict):
 
 from __future__ import annotations
 
-import sys, os, json
+import sys, os, json, time
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import Optional
@@ -79,6 +79,12 @@ _RAW_DEFAULT_FAMILY_WEIGHTS = {
     "turn_of_month":           0.04,
     "vol_managed_momentum":    0.06,  # Barroso-Santa-Clara / Moreira-Muir vol gate on 6m momentum (2026-07-14c)
     "tstat_trend":             0.05,  # t-stat significance trend filter, Moskowitz-Ooi-Pedersen lineage (2026-07-14c)
+    # Evidence-based additions (2026-07-15c) — see strategy_generator.py docstrings for citations
+    "breakout_volume_confirmed": 0.05,
+    "dual_momentum":             0.05,
+    "fii_flow_momentum":         0.04,
+    "adx_trend_vol_filtered":    0.05,
+    "accumulation_momentum":     0.04,
 }
 # The raw values above sum to 1.18, not 1.0. compute_meta_state() always
 # renormalizes its output to sum to 1.0 (line ~511) — even when NO family
@@ -115,6 +121,33 @@ def _safe_json(s, default=None):
 def _current_regime(db: Session) -> str:
     row = db.query(MarketRegime.regime).order_by(MarketRegime.date.desc()).first()
     return row[0] if row else "BULL"
+
+
+# ── LLM graveyard post-mortem (Phase C touchpoint 2, 2026-07-15c) ─────
+# Hourly cadence, not per-call — compute_meta_state() can be invoked every
+# few minutes by the strategy micro-loop, and the post-mortem is an LLM
+# call, not a free read.
+_POSTMORTEM_INTERVAL_SECONDS = 3600
+_postmortem_cache: dict = {"bumps": {}, "ts": 0.0}
+
+
+def _maybe_run_graveyard_postmortem(db: Session, bad_condition_counts: dict) -> dict:
+    """Runs strategies.llm_strategy_advisor.run_graveyard_postmortem at most
+    once per hour; returns the cached bumps dict between runs. Any failure
+    (kill-switch off, LLM unavailable, validation failure) yields {} and
+    that {} gets cached too — no more spam-retrying within the hour."""
+    now = time.time()
+    if now - _postmortem_cache["ts"] < _POSTMORTEM_INTERVAL_SECONDS:
+        return _postmortem_cache["bumps"]
+    try:
+        from strategies.llm_strategy_advisor import run_graveyard_postmortem
+        bumps = run_graveyard_postmortem(db, bad_condition_counts)
+    except Exception as exc:
+        log.debug("Graveyard post-mortem unavailable: %s", exc)
+        bumps = {}
+    _postmortem_cache["bumps"] = bumps
+    _postmortem_cache["ts"] = now
+    return bumps
 
 
 # Sample-size floor below which a signal is considered too thin to act on at
@@ -555,8 +588,21 @@ def compute_meta_state(db: Session) -> dict:
     # BUG_HUNTING.md for the confirmed root cause.
     bad_cond_raw  = grave["bad_condition_counts"]
     good_cond_raw = alive["good_condition_counts"]
+
+    # LLM graveyard post-mortem (Phase C touchpoint 2, 2026-07-15c): a
+    # small, CAPPED bump on top of the real measured dead_count — never
+    # enough alone to cross the dead_count>=5 threshold below, only to nudge
+    # a condition that measured evidence already has near that line. Hourly-
+    # gated (not per-call) since compute_meta_state can run every few
+    # minutes via the strategy micro-loop. Any LLM/validation failure yields
+    # an empty bump dict — bad_cond_raw (real data) is untouched either way.
+    llm_bumps = _maybe_run_graveyard_postmortem(db, bad_cond_raw)
+    bad_cond_effective = dict(bad_cond_raw)
+    for key, bump in llm_bumps.items():
+        bad_cond_effective[key] = bad_cond_effective.get(key, 0) + bump
+
     bad_conditions = []
-    for key, dead_count in bad_cond_raw.items():
+    for key, dead_count in bad_cond_effective.items():
         good_count = good_cond_raw.get(key, 0)
         if dead_count >= 5 and good_count < dead_count * 0.3:
             bad_conditions.append(key)   # "family|feature|operator|threshold_bucket"
